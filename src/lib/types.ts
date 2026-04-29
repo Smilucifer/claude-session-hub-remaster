@@ -1265,6 +1265,17 @@ export interface PromptFavorite {
   createdAt: string;
 }
 
+// ── Memo ──
+
+export interface MemoItem {
+  id: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MemoScope = { kind: "global" } | { kind: "project"; cwd: string };
+
 // ── Run search (History page) ──
 
 export interface RunSearchFilters {

@@ -37,6 +37,8 @@ import type {
   SshKeyInfo,
   PromptSearchResult,
   PromptFavorite,
+  MemoItem,
+  MemoScope,
   SyncResult,
   DiagnosticsReport,
   AgentDefinitionSummary,
@@ -164,6 +166,33 @@ export async function listPromptFavorites(): Promise<PromptFavorite[]> {
 export async function listPromptTags(): Promise<string[]> {
   dbg("api", "listPromptTags");
   return invoke<string[]>("list_prompt_tags");
+}
+
+// Memos
+
+export async function listMemos(scope: MemoScope): Promise<MemoItem[]> {
+  dbg("api", "listMemos", scope);
+  return invoke<MemoItem[]>("list_memos", { scope });
+}
+
+export async function addMemo(scope: MemoScope, text: string): Promise<MemoItem> {
+  dbg("api", "addMemo", { scope });
+  return invoke<MemoItem>("add_memo", { scope, text });
+}
+
+export async function updateMemo(scope: MemoScope, id: string, text: string): Promise<MemoItem> {
+  dbg("api", "updateMemo", { scope, id });
+  return invoke<MemoItem>("update_memo", { scope, id, text });
+}
+
+export async function deleteMemo(scope: MemoScope, id: string): Promise<void> {
+  dbg("api", "deleteMemo", { scope, id });
+  return invoke<void>("delete_memo", { scope, id });
+}
+
+export async function clearMemos(scope: MemoScope): Promise<void> {
+  dbg("api", "clearMemos", scope);
+  return invoke<void>("clear_memos", { scope });
 }
 
 // Run search (History)

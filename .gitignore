@@ -56,3 +56,11 @@ AGENTS.md
 
 # Unrelated binaries
 forget_ptr
+
+# Local development worktrees
+.worktrees/
+
+# Local planning and review notes
+docs/
+review/
+thinking.md

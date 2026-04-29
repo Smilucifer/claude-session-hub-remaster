@@ -1,243 +1,220 @@
-<p align="center">
-  <img src="static/logo-text.png" width="360" alt="OpenCovibe">
-</p>
+# Claude Session Hub Remaster / Claude Session Hub 重制版
 
-<p align="center">
-  <strong>Local-first desktop app for AI-assisted vibe coding</strong>
-</p>
+> English follows Chinese in each section.  
+> 每个章节均先中文、后英文。
 
-<p align="center">
-  <a href="#why-opencovibe">Why</a> &middot;
-  <a href="#key-capabilities">Capabilities</a> &middot;
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#supported-providers">Providers</a> &middot;
-  <a href="#architecture">Architecture</a> &middot;
-  <a href="#license">License</a>
-</p>
+## 致谢 / Acknowledgements
 
-<p align="center">
-  <b>English</b> | <a href="README.zh-CN.md">简体中文</a>
-</p>
+本项目基于 [AnyiWang/OpenCovibe](https://github.com/AnyiWang/OpenCovibe) 的本地优先桌面架构与 UI 基础继续演进，并吸收了 [TianLin0509/claude-session-hub](https://github.com/TianLin0509/claude-session-hub) 在会议室、备忘录、协作协议和多 CLI 工作流上的产品启发。感谢这两个项目对本 remaster 方向的帮助。
 
----
+This project evolves from the local-first desktop architecture and UI foundation of [AnyiWang/OpenCovibe](https://github.com/AnyiWang/OpenCovibe), while drawing product inspiration from [TianLin0509/claude-session-hub](https://github.com/TianLin0509/claude-session-hub), especially around rooms, memos, collaboration protocols, and multi-CLI workflows. Many thanks to both projects for shaping this remaster.
 
-<p align="center">
-  <img src="static/screenshot.png" width="800" alt="OpenCovibe Screenshot">
-</p>
+## 项目定位 / Project Positioning
 
-## Why OpenCovibe?
+Claude Session Hub Remaster 的目标不是重写 OpenCovibe，也不是直接搬运 Claude Session Hub。它以 OpenCovibe 当前的 Tauri + Svelte + Rust 架构为主体，逐步叠加 Claude Session Hub 中有差异化价值的协作能力。
 
-AI coding CLIs like Claude Code are powerful, but they run inside a terminal. That means no persistent dashboard, no visual diff review, no cross-session history, and no multi-provider switching. OpenCovibe wraps these CLIs with a native desktop UI that adds the layers the terminal can't provide — while keeping all your data **stored locally**. (Remote model APIs require network access; the app itself has no cloud backend.)
+Claude Session Hub Remaster is not a rewrite of OpenCovibe and not a direct port of Claude Session Hub. It keeps OpenCovibe's current Tauri + Svelte + Rust architecture as the foundation, then incrementally adds the collaboration ideas that make Claude Session Hub distinctive.
 
-| Agent | Status |
-|-------|--------|
-| [Claude Code](https://github.com/anthropics/claude-code) | Supported |
-| [Codex](https://github.com/openai/codex) | In progress |
+当前架构原则：
 
-**Platform status**: Currently developed and tested primarily on **macOS**. Windows and Linux builds are functional but have not been thoroughly tested for compatibility — contributions and bug reports are welcome.
+- `Run` 继续作为最小执行单元。
+- `Room` 作为后续协作编排层，建立在 `Run` 之上。
+- Memo、Room、Roundtable、Driver/Copilot、Research、Arena Memory 等能力分阶段落地。
+- 不在早期破坏现有 `/chat` 路径。
 
-**Core principle**: Wrap the CLI, surface the work, keep it local.
+Current architecture principles:
 
-## Key Capabilities
+- `Run` remains the smallest execution unit.
+- `Room` will become an orchestration layer above `Run`.
+- Memo, Room, Roundtable, Driver/Copilot, Research, and Arena Memory will land in phases.
+- The existing `/chat` path should not be disrupted early.
 
-### What the CLI doesn't give you
+## Phase 1 已完成内容 / Phase 1 Completed Work
 
-| Capability | What OpenCovibe adds |
-|------------|---------------------|
-| **Visual Tool Cards** | Every tool call (Read, Edit, Bash, Grep, Write, WebFetch, …) rendered as an inline card with syntax-highlighted diffs, structured output, and one-click copy |
-| **Run History & Replay** | Browse all past sessions, full event replay, resume / fork from any point, soft-delete with recovery |
-| **Multi-Provider Switching** | Use Claude Code with 15+ API providers (DeepSeek, Kimi, Zhipu, Bailian, DouBao, MiniMax, OpenRouter, Ollama, …) — hot-switch without restarting |
-| **Remote Browser Access** | Embedded web server for browser-based access over LAN or HTTP tunnels (ngrok / cloudflared) |
-| **File Explorer** | Browse and edit project files with syntax highlighting, markdown preview, image preview, and git diff view |
-| **Memory Editor** | Create and edit CLAUDE.md, project-scoped and user-scoped memory files with live preview |
-| **Agent Management** | Visual editor to create, edit, and manage custom agent definitions (.md files) with form and source modes |
-| **Permission Rules** | Manage CLI permission allow/deny rules at user and project level with a visual rule editor |
-| **Usage Analytics** | Per-model token breakdown, cost tracking, daily heatmap, stacked model chart, session-level stats |
-| **Team Dashboard** | Read-only view into Claude Code multi-agent teams — task lists, teammate status, message flow |
-| **Activity Monitor** | Real-time hook event stream, tool activity timeline, file tracking panel, subagent tracking with nested tool cards |
-| **Plugin Marketplace** | Browse, install, and manage Claude Code plugins and skills from a visual marketplace |
-| **MCP Management** | Discover MCP servers, view per-server status, reconnect / toggle from a panel |
-| **Inline Permissions** | Rich permission review UI with batch Allow/Deny panel, CLI-suggested "Always Allow" rules, and AskUserQuestion rendering |
-| **CLI Session Import** | Discover and import existing Claude Code CLI sessions into OpenCovibe |
-| **Rewind** | Checkpoint and selectively revert file changes with dry-run preview |
-| **Remote Hosts** | Configure SSH hosts for remote CLI execution with key generation wizard and connectivity testing |
-| **Preview & Element Picker** | Open a localhost preview in a companion window, interactively pick page elements, and insert structured context (DOM path, styles, HTML snippet) into the chat |
-| **Ralph Loop** | Auto-iterate the same prompt until a completion condition is met — hands-free coding with configurable max iterations |
-| **Doctor Diagnostics** | System health checks for CLI, platform, SSH, and proxy configuration |
+Phase 1 聚焦 Memo 与工作台基线，目标是在不触碰 session 编排的情况下先交付可见价值。
 
-### Features
+Phase 1 focuses on Memo and the workbench baseline, delivering visible value without changing session orchestration.
 
-- **Rich Chat UI** — Markdown, syntax highlighting, thinking blocks, image attachments, file diffs, collapsible tool burst groups
-- **Session Control** — Create, resume, fork, rename sessions; plan mode toggle; model hot-switch; context history tracking
-- **Drag & Drop** — Native file drag-drop for images, PDFs, directories, and path references
-- **Project Folders** — Sidebar project selector with per-project scoping for memory, permissions, and sessions
-- **Inline Slash Commands** — `/model`, `/diff`, `/todos`, `/tasks`, `/doctor`, `/copy`, `/stats`, `/preview`, `/ralph`, and more — rendered natively in-app
-- **Keyboard Shortcuts** — Fully customizable keybindings with chord support and conflict detection
-- **Hook Manager** — Configure upstream CLI hooks for event-driven automation
-- **i18n** — English and Chinese (Simplified) with lightweight reactive runtime
-- **System Tray** — Hide to tray; background sessions keep running with native notifications
-- **Dark / Light Theme** — CSS variable-based theming with UI zoom control
-- **Auto Update** — In-app update checker with download links
-- **Setup Wizard** — Guided CLI detection, authentication, and provider configuration on first launch
+### Global / Project Memo
 
-## Quick Start
+已实现：
 
-### Option A: Download Pre-built Binary (macOS)
+- 全局备忘录：`data_dir()/memos/global.json`
+- 项目备忘录：`data_dir()/projects/{project-hash}/memo.json`
+- Tauri commands：`list_memos`、`add_memo`、`update_memo`、`delete_memo`、`clear_memos`
+- 前端 Memo 面板：通过 Command Palette 打开
+- Global / Project scope 切换
+- 添加、编辑、复制、删除、清空
+- 空文本拒绝
+- 损坏 JSON 文件不会让应用崩溃
+- i18n 文案：英文与简体中文
+- 前端 stale response 防护
+- Rust 同 scope 并发写锁，避免 read-modify-write 丢更新
 
-Download the latest `.dmg` from [Releases](https://github.com/AnyiWang/OpenCovibe/releases) — universal binary, supports both Apple Silicon and Intel Macs.
+Implemented:
 
-> **Note**: The app is not code-signed. On first launch, right-click and select "Open" to bypass macOS Gatekeeper.
+- Global memo: `data_dir()/memos/global.json`
+- Project memo: `data_dir()/projects/{project-hash}/memo.json`
+- Tauri commands: `list_memos`, `add_memo`, `update_memo`, `delete_memo`, `clear_memos`
+- Frontend Memo panel opened from the Command Palette
+- Global / Project scope switching
+- Add, edit, copy, delete, and clear actions
+- Empty text rejection
+- Corrupt JSON files do not crash the app
+- i18n copy for English and Simplified Chinese
+- Frontend stale response protection
+- Rust per-scope write locking to avoid read-modify-write data loss
 
-### Option B: Automated Setup (macOS)
+### 文档与决策 / Docs and Decisions
+
+已补充：
+
+- `thinking.md`
+- `docs/ADR-001-room-over-run.md`
+- `docs/migration-decisions.md`
+- `docs/implementation-roadmap.md`
+- `docs/phase-1-memo-implementation-plan.md`
+
+Added:
+
+- `thinking.md`
+- `docs/ADR-001-room-over-run.md`
+- `docs/migration-decisions.md`
+- `docs/implementation-roadmap.md`
+- `docs/phase-1-memo-implementation-plan.md`
+
+## 验证状态 / Verification Status
+
+已通过：
+
+- `npm run lint`
+- `npm run build`
+- `npm run rust:check`
+- `npm run i18n:check`
+- `npm test -- src/lib/stores/memo-store.test.ts`
+- `cargo test --manifest-path src-tauri/Cargo.toml storage::memos::tests:: -- --nocapture`
+- `cargo test --manifest-path src-tauri/Cargo.toml commands::memos::tests:: -- --nocapture`
+
+Passed:
+
+- `npm run lint`
+- `npm run build`
+- `npm run rust:check`
+- `npm run i18n:check`
+- `npm test -- src/lib/stores/memo-store.test.ts`
+- `cargo test --manifest-path src-tauri/Cargo.toml storage::memos::tests:: -- --nocapture`
+- `cargo test --manifest-path src-tauri/Cargo.toml commands::memos::tests:: -- --nocapture`
+
+已知基线问题：
+
+- `npm run check` 在 OpenCovibe `v0.1.55` 干净基线上已有 `105 errors / 74 warnings`。
+- `npm test` 全量测试中，`src/lib/i18n/__tests__/i18n.test.ts` 仍有默认 locale 断言与当前 `zh-CN` 默认行为不一致。
+- 上述问题不是 Phase 1 Memo 引入，但会影响后续把 `npm run verify` 作为强门禁。
+
+Known baseline issues:
+
+- `npm run check` already reports `105 errors / 74 warnings` on a clean OpenCovibe `v0.1.55` baseline.
+- The full `npm test` suite still has default-locale assertion failures in `src/lib/i18n/__tests__/i18n.test.ts`, because the tests expect English while the current default behavior is `zh-CN`.
+- These issues were not introduced by Phase 1 Memo, but they weaken `npm run verify` as a future hard gate.
+
+## 后续计划 / Roadmap
+
+### Phase 1.x: Baseline Cleanup
+
+建议在进入 Room 前先处理：
+
+- 修复 `svelte-check` 基线错误。
+- 修复 i18n 默认 locale 测试。
+- 将 `npm run verify` 恢复为可信门禁。
+- 补 Windows Doctor 对 MSVC 工具链的检测。
+
+Before Room work, the project should clean up the baseline:
+
+- Fix existing `svelte-check` errors.
+- Fix i18n default-locale tests.
+- Restore `npm run verify` as a trustworthy gate.
+- Add Windows Doctor checks for the MSVC toolchain.
+
+### Phase 2: Room Foundation
+
+计划：
+
+- 新增 Room 数据模型。
+- Room 建立在现有 `Run` 之上，不替代 `SessionActor` / `turn_engine`。
+- 增加 room-local memo。
+- 提供最小 Room UI 与事件流。
+
+Plan:
+
+- Add the Room data model.
+- Build Room above existing `Run`, without replacing `SessionActor` or `turn_engine`.
+- Add room-local memo.
+- Provide a minimal Room UI and event stream.
+
+### Phase 3: Collaboration Protocols
+
+计划：
+
+- Roundtable fanout / debate / summary
+- Driver / Copilot
+- Private side conversations
+- Multi-CLI participant abstraction
+
+Plan:
+
+- Roundtable fanout / debate / summary
+- Driver / Copilot
+- Private side conversations
+- Multi-CLI participant abstraction
+
+### Phase 4: Research and Arena Memory
+
+计划：
+
+- Research Room
+- Arena Memory：项目事实、决策、经验沉淀
+- 从 Room / Run 中提取可复用上下文
+
+Plan:
+
+- Research Room
+- Arena Memory for project facts, decisions, and lessons
+- Reusable context extraction from Room / Run artifacts
+
+## 开发 / Development
 
 ```bash
-git clone https://github.com/AnyiWang/OpenCovibe.git
-cd OpenCovibe
-./scripts/setup.sh          # add --yes to skip confirmation prompts
-npm run tauri dev
-```
-
-The setup script detects missing dependencies (Xcode CLI Tools, Homebrew, Node.js, Rust) and installs them automatically.
-
-### Option C: Manual Setup
-
-**Prerequisites:**
-
-- [Node.js](https://nodejs.org/) >= 20
-- [Rust](https://rustup.rs/) >= 1.75
-
-**macOS:**
-```bash
-xcode-select --install
-brew install node
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-**Windows:**
-```powershell
-# Install Rust from https://rustup.rs
-# Install Node.js from https://nodejs.org
-```
-
-**Build & Run:**
-
-```bash
-git clone https://github.com/AnyiWang/OpenCovibe.git
-cd OpenCovibe
 npm install
-npm run tauri dev
+npx svelte-kit sync
+npm run dev
 ```
 
-### Setup Wizard
-
-On first launch, OpenCovibe guides you through:
-
-1. **CLI Detection** — Auto-detects Claude Code CLI, offers installation if missing
-2. **Authentication** — OAuth login or API key for 15+ providers
-3. **Ready** — Start coding
-
-You can re-run the wizard anytime from **Settings > General > Setup Wizard**.
-
-## Supported Providers
-
-### LLM Providers
-
-| Provider | Endpoint | Auth |
-|----------|----------|------|
-| Anthropic | Official API | API Key |
-| DeepSeek | `api.deepseek.com/anthropic` | Bearer |
-| Kimi (Moonshot) | `api.moonshot.cn/anthropic` | Bearer |
-| Kimi For Coding | `api.kimi.com/coding/` | Bearer |
-| Zhipu (智谱) | `open.bigmodel.cn/api/anthropic` | Bearer |
-| Zhipu (智谱 Intl) | `api.z.ai/api/anthropic` | Bearer |
-| Bailian (百炼) | `coding.dashscope.aliyuncs.com/apps/anthropic` | Bearer |
-| DouBao (豆包) | `ark.cn-beijing.volces.com/api/coding` | Bearer |
-| MiniMax | `api.minimax.io/anthropic` | Bearer |
-| MiniMax (China) | `api.minimaxi.com/anthropic` | Bearer |
-| Xiaomi MiMo (小米) | `api.xiaomimimo.com/anthropic` | Bearer |
-
-### API Gateway
-
-| Platform | Endpoint | Auth |
-|----------|----------|------|
-| Vercel AI Gateway | `ai-gateway.vercel.sh` | Bearer |
-| OpenRouter | `openrouter.ai/api` | Bearer |
-| AiHubMix | `aihubmix.com` | Bearer |
-| ZenMux | `zenmux.ai/api/anthropic` | Bearer |
-
-### Local
-
-| Platform | Endpoint |
-|----------|----------|
-| Ollama | `localhost:11434` |
-| [CC Switch](https://github.com/farion1231/cc-switch) | `localhost:15721` |
-| [Claude Code Router](https://github.com/musistudio/claude-code-router) | `localhost:3456` |
-| Custom | Any Anthropic-compatible endpoint |
-
-## Architecture
-
-<p align="center">
-  <img src="static/architecture.svg" width="700" alt="Architecture">
-</p>
-
-**Tech Stack:**
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | [Tauri v2](https://v2.tauri.app/) (Rust backend + WebView) |
-| Frontend | [Svelte 5](https://svelte.dev/) + [SvelteKit](https://svelte.dev/docs/kit/) (adapter-static) |
-| Styling | [Tailwind CSS](https://tailwindcss.com/) v3 + CSS variables |
-| Terminal | [xterm.js](https://xtermjs.org/) |
-| Markdown | [marked](https://marked.js.org/) + [highlight.js](https://highlightjs.org/) + [DOMPurify](https://github.com/cure53/DOMPurify) |
-| i18n | Custom lightweight runtime (en + zh-CN) |
-| Testing | [Vitest](https://vitest.dev/) |
-
-**Agent Communication:**
-
-The app communicates with Claude Code CLI via bidirectional stream-JSON protocol (stdin/stdout). Each session is a long-lived, multi-turn process managed by a per-run session actor. Three communication modes are supported: stream-JSON (primary), PTY (interactive terminal), and pipe (Codex).
-
-**Data Storage:**
-
-All data is stored locally at `~/.opencovibe/` — no cloud, no database.
-
-```
-~/.opencovibe/
-├── settings.json          # User settings
-├── runs/                  # Session history
-│   └── {run-id}/
-│       ├── meta.json      # Run metadata
-│       ├── events.jsonl   # Event log
-│       └── artifacts.json # Summary
-└── keybindings.json       # Custom shortcuts
-```
-
-## Development
+常用验证：
 
 ```bash
-npm install              # Install dependencies
-npm run tauri dev        # Dev mode with hot-reload
-npm test                 # Run tests
-npm run lint:fix         # Lint
-npm run format           # Format
+npm run lint
+npm run build
+npm run rust:check
+npm run i18n:check
+npm test -- src/lib/stores/memo-store.test.ts
+cargo test --manifest-path src-tauri/Cargo.toml storage::memos::tests:: -- --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml commands::memos::tests:: -- --nocapture
 ```
 
-## Contributing
+Common checks:
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding conventions, and PR guidelines.
+```bash
+npm run lint
+npm run build
+npm run rust:check
+npm run i18n:check
+npm test -- src/lib/stores/memo-store.test.ts
+cargo test --manifest-path src-tauri/Cargo.toml storage::memos::tests:: -- --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml commands::memos::tests:: -- --nocapture
+```
 
-## Star History
+## 许可证 / License
 
-[![Star History Chart](https://api.star-history.com/svg?repos=AnyiWang/OpenCovibe&type=Date)](https://star-history.com/#AnyiWang/OpenCovibe&Date)
+本 remaster 仍应遵守上游项目及其依赖的许可证要求。合并上游代码或迁移 Claude Session Hub 设计时，应保留必要的 attribution 与 license 说明。
 
-## License
-
-Licensed under the [Apache License 2.0](LICENSE).
-
-Copyright 2025-2026 OpenCovibe Contributors.
+This remaster should continue to respect the license requirements of upstream projects and dependencies. When integrating upstream code or migrating Claude Session Hub ideas, keep the required attribution and license notes.

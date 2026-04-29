@@ -17,6 +17,7 @@
   import SetupWizard from "$lib/components/SetupWizard.svelte";
   import AboutModal from "$lib/components/AboutModal.svelte";
   import PermissionsModal from "$lib/components/PermissionsModal.svelte";
+  import MemoPanel from "$lib/components/memo/MemoPanel.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import CliSessionBrowser from "$lib/components/CliSessionBrowser.svelte";
   import UpdateBanner from "$lib/components/UpdateBanner.svelte";
@@ -73,6 +74,7 @@
   let showAbout = $state(false);
   let showCliBrowser = $state(false);
   let permissionsModalOpen = $state(false);
+  let memoPanelOpen = $state(false);
 
   // Team store (shared via context with /teams page)
   const teamStore = new TeamStore();
@@ -721,6 +723,11 @@
     }
     window.addEventListener("ocv:open-permissions", onOpenPermissions);
 
+    function onOpenMemo() {
+      memoPanelOpen = true;
+    }
+    window.addEventListener("ocv:open-memo", onOpenMemo);
+
     // ── External link interceptor ──
     // Prevent webview from navigating away to external URLs.
     // Opens them in the system browser instead.
@@ -803,6 +810,7 @@
       window.removeEventListener("ocv:memory-file-selected", onMemoryFileSelected);
       window.removeEventListener("ocv:memory-file-saved", onMemoryFileSaved);
       window.removeEventListener("ocv:open-permissions", onOpenPermissions);
+      window.removeEventListener("ocv:open-memo", onOpenMemo);
       document.removeEventListener("click", handleExternalLink, true);
       window.removeEventListener("ocv:explorer-file-selected", onExplorerFileSelected);
     };
@@ -2284,6 +2292,8 @@
 <AboutModal bind:open={showAbout} />
 
 <PermissionsModal bind:open={permissionsModalOpen} cwd={projectCwd} />
+
+<MemoPanel bind:open={memoPanelOpen} cwd={projectCwd} />
 
 {#if showCliBrowser}
   <CliSessionBrowser

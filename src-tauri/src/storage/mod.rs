@@ -7,6 +7,7 @@ pub mod community_skills;
 pub mod events;
 pub mod favorites;
 pub mod mcp_registry;
+pub mod memos;
 pub mod plugins;
 pub mod prompt_index;
 pub mod run_index;
@@ -16,7 +17,16 @@ pub mod teams;
 
 use std::path::PathBuf;
 
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn data_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("OPENCOVIBE_DATA_DIR") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path);
+        }
+    }
+
     let home = dirs_next().expect("Could not determine home directory");
     home.join(".opencovibe")
 }
@@ -89,4 +99,43 @@ pub fn ensure_dir(path: &std::path::Path) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_dir_uses_opencovibe_data_dir_override() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
+
+        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        assert_eq!(data_dir(), tmp.path());
+
+        match previous {
+            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
+            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+        }
+    }
+
+    #[test]
+    fn data_dir_ignores_empty_opencovibe_data_dir_override() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
+
+        std::env::set_var("OPENCOVIBE_DATA_DIR", "");
+        assert_eq!(
+            data_dir(),
+            dirs_next()
+                .expect("Could not determine home directory")
+                .join(".opencovibe")
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
+            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+        }
+    }
 }

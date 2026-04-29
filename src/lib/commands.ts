@@ -135,6 +135,15 @@ export const commands: CommandDef[] = [
     action: "ipc_command",
     payload: "get_run_artifacts",
   },
+  {
+    id: "memo",
+    name: "Memo",
+    description: "Open global and project memos",
+    category: "tools",
+    agent: "both",
+    action: "open_modal",
+    payload: "memo",
+  },
 
   // Navigation
   {

@@ -14,6 +14,7 @@ pub mod fs;
 pub mod git;
 pub mod history;
 pub mod mcp;
+pub mod memos;
 pub mod onboarding;
 pub mod plugins;
 pub mod preview;
