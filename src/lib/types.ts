@@ -63,6 +63,41 @@ export interface TaskRun {
   conversation_ref?: ConversationRef;
 }
 
+export interface RoomParticipant {
+  id: string;
+  run_id: string;
+  agent: string;
+  label: string;
+  role: string;
+  joined_at: string;
+}
+
+export interface RoomSummary {
+  id: string;
+  name: string;
+  description: string;
+  cwd?: string;
+  participant_count: number;
+  memo_preview?: string;
+  updated_at: string;
+}
+
+export interface RoomParticipantDetail {
+  participant: RoomParticipant;
+  run?: TaskRun;
+}
+
+export interface RoomDetail {
+  id: string;
+  name: string;
+  description: string;
+  cwd?: string;
+  memo: string;
+  participants: RoomParticipantDetail[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ImportWatermark {
   offset: number;
   mtimeNs: number;

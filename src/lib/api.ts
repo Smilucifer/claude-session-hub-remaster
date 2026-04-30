@@ -44,6 +44,8 @@ import type {
   AgentDefinitionSummary,
   RunSearchFilters,
   RunSearchResponse,
+  RoomDetail,
+  RoomSummary,
 } from "./types";
 
 // Runs
@@ -112,6 +114,77 @@ export async function updateRunModel(id: string, model: string): Promise<void> {
 export async function softDeleteRuns(ids: string[]): Promise<number> {
   dbg("api", "softDeleteRuns", { ids });
   return invoke<number>("soft_delete_runs", { ids });
+}
+
+// Rooms
+
+export async function listRooms(): Promise<RoomSummary[]> {
+  dbg("api", "listRooms");
+  return invoke<RoomSummary[]>("list_rooms");
+}
+
+export async function getRoom(id: string): Promise<RoomDetail> {
+  dbg("api", "getRoom", { id });
+  return invoke<RoomDetail>("get_room", { id });
+}
+
+export async function createRoom(
+  name: string,
+  description?: string,
+  cwd?: string,
+): Promise<RoomDetail> {
+  dbg("api", "createRoom", { name, cwd });
+  return invoke<RoomDetail>("create_room", {
+    name,
+    description: description ?? null,
+    cwd: cwd ?? null,
+  });
+}
+
+export async function attachRoomRun(
+  roomId: string,
+  runId: string,
+  label?: string,
+  role?: string,
+): Promise<RoomDetail> {
+  dbg("api", "attachRoomRun", { roomId, runId });
+  return invoke<RoomDetail>("attach_room_run", {
+    roomId,
+    runId,
+    label: label ?? null,
+    role: role ?? null,
+  });
+}
+
+export async function createRoomClaudeParticipant(
+  roomId: string,
+  prompt: string,
+  cwd: string,
+  model?: string,
+  platformId?: string,
+  label?: string,
+  role?: string,
+): Promise<RoomDetail> {
+  dbg("api", "createRoomClaudeParticipant", { roomId, cwd });
+  return invoke<RoomDetail>("create_room_claude_participant", {
+    roomId,
+    prompt,
+    cwd,
+    model: model ?? null,
+    platformId: platformId ?? null,
+    label: label ?? null,
+    role: role ?? null,
+  });
+}
+
+export async function updateRoomMemo(roomId: string, memo: string): Promise<RoomDetail> {
+  dbg("api", "updateRoomMemo", { roomId });
+  return invoke<RoomDetail>("update_room_memo", { roomId, memo });
+}
+
+export async function deleteRoom(id: string): Promise<void> {
+  dbg("api", "deleteRoom", { id });
+  return invoke<void>("delete_room", { id });
 }
 
 // Prompt search & favorites
