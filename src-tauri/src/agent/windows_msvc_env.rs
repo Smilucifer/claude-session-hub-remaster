@@ -1,10 +1,14 @@
 use crate::models::WindowsMsvcEnvMode;
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::Mutex;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 const WINDOWS_PATH_SEPARATOR: char = ';';
 const PATH_LIKE_WARNING_THRESHOLD: usize = 32_000;
@@ -122,6 +126,51 @@ pub enum SpawnPathPolicy {
 static MSVC_ENV_CACHE: Lazy<Mutex<HashMap<MsvcEnvCacheKey, HashMap<String, String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+static MSVC_STATUS_SNAPSHOT: Lazy<Mutex<Option<MsvcEnvStatusSnapshot>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsMsvcEnvStatusState {
+    Disabled,
+    NonWindows,
+    NotNeeded,
+    Pending,
+    Injected,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WindowsMsvcEnvStatus {
+    pub mode: WindowsMsvcEnvMode,
+    pub state: WindowsMsvcEnvStatusState,
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_arch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MsvcEnvStatusSnapshot {
+    cwd: Option<PathBuf>,
+    mode: WindowsMsvcEnvMode,
+    status: WindowsMsvcEnvStatus,
+}
+
+#[cfg(test)]
+impl WindowsMsvcEnvStatus {
+    fn debug_contains_env_key(&self, key: &str) -> bool {
+        format!("{self:?}").contains(key)
+    }
+}
+
 pub trait MsvcEnvResolverIo {
     fn vswhere_path(&self) -> Option<PathBuf>;
     fn run_vswhere(&self, vswhere_path: &Path) -> Result<String, String>;
@@ -172,19 +221,21 @@ impl MsvcEnvResolverIo for DefaultMsvcEnvResolverIo {
         arch: &str,
         host_arch: &str,
     ) -> Result<String, String> {
-        let command = format!(
-            "\"\"{}\" -arch={} -host_arch={} >nul && set\"",
-            vsdevcmd_path.display(),
-            arch,
-            host_arch
-        );
-        let output = Command::new("cmd")
-            .args(["/d", "/s", "/c", &command])
-            .output()
-            .map_err(|e| format!("Failed to run VsDevCmd.bat: {e}"))?;
+        let command = build_vsdevcmd_set_command(vsdevcmd_path, arch, host_arch);
+        let output =
+            run_cmd_capture(&command).map_err(|e| format!("Failed to run VsDevCmd.bat: {e}"))?;
 
         if !output.status.success() {
-            return Err(format!("VsDevCmd.bat exited with status {}", output.status));
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let detail = if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", truncate_for_warning(&stderr, 500))
+            };
+            return Err(format!(
+                "VsDevCmd.bat exited with status {}{}",
+                output.status, detail
+            ));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -308,9 +359,47 @@ fn warn(message: &str, next_action: &str) -> MsvcEnvDecision {
     }
 }
 
+fn build_vsdevcmd_set_command(vsdevcmd_path: &Path, arch: &str, host_arch: &str) -> String {
+    format!(
+        "call \"{}\" -arch={} -host_arch={} >nul && set",
+        vsdevcmd_path.display(),
+        arch,
+        host_arch
+    )
+}
+
+#[cfg(windows)]
+fn run_cmd_capture(command: &str) -> std::io::Result<Output> {
+    let mut cmd = Command::new("cmd");
+    cmd.raw_arg(format!("/d /s /c {command}")).output()
+}
+
+#[cfg(not(windows))]
+fn run_cmd_capture(command: &str) -> std::io::Result<Output> {
+    Command::new("cmd")
+        .args(["/d", "/s", "/c", command])
+        .output()
+}
+
+fn truncate_for_warning(value: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for ch in value.chars().take(max_chars) {
+        out.push(ch);
+    }
+    if value.chars().count() > max_chars {
+        out.push_str("...");
+    }
+    out
+}
+
 #[cfg(test)]
 pub fn clear_msvc_env_cache_for_tests() {
     MSVC_ENV_CACHE.lock().unwrap().clear();
+}
+
+#[cfg(test)]
+pub fn clear_msvc_status_snapshot_for_tests() {
+    *MSVC_STATUS_SNAPSHOT.lock().unwrap() = None;
 }
 
 pub fn parse_set_output(output: &str) -> HashMap<String, String> {
@@ -479,7 +568,203 @@ pub fn resolve_spawn_env_plan(
         }
     };
 
-    build_spawn_env_plan(cwd, is_remote, mode, path_policy, base_path, decision)
+    let plan = build_spawn_env_plan(cwd, is_remote, mode, path_policy, base_path, decision);
+    record_msvc_status_snapshot(cwd, mode, &plan);
+    plan
+}
+
+pub fn record_msvc_status_snapshot(cwd: &Path, mode: WindowsMsvcEnvMode, plan: &SpawnEnvPlan) {
+    let status = status_from_spawn_plan(Some(cwd), mode, plan);
+    if let Ok(mut snapshot) = MSVC_STATUS_SNAPSHOT.lock() {
+        *snapshot = Some(MsvcEnvStatusSnapshot {
+            cwd: Some(cwd.to_path_buf()),
+            mode,
+            status,
+        });
+    }
+}
+
+pub fn get_cached_or_precheck_msvc_status(
+    cwd: Option<&Path>,
+    mode: WindowsMsvcEnvMode,
+) -> WindowsMsvcEnvStatus {
+    if let Some(status) = matching_status_snapshot(cwd, mode) {
+        return status;
+    }
+
+    precheck_msvc_status(cwd, mode)
+}
+
+fn matching_status_snapshot(
+    cwd: Option<&Path>,
+    mode: WindowsMsvcEnvMode,
+) -> Option<WindowsMsvcEnvStatus> {
+    let snapshot = MSVC_STATUS_SNAPSHOT.lock().ok()?.clone()?;
+    if snapshot.mode != mode {
+        return None;
+    }
+
+    let cwd_matches = match (cwd, snapshot.cwd.as_deref()) {
+        (Some(current), Some(snapshot_cwd)) => current == snapshot_cwd,
+        (None, None) => true,
+        _ => false,
+    };
+
+    cwd_matches.then_some(snapshot.status)
+}
+
+fn precheck_msvc_status(cwd: Option<&Path>, mode: WindowsMsvcEnvMode) -> WindowsMsvcEnvStatus {
+    let cwd_text = cwd.map(path_to_status_string);
+
+    if mode == WindowsMsvcEnvMode::Off {
+        return WindowsMsvcEnvStatus {
+            mode,
+            state: WindowsMsvcEnvStatusState::Disabled,
+            cwd: cwd_text,
+            source_path: None,
+            arch: None,
+            host_arch: None,
+            message: Some("MSVC environment injection is disabled.".to_string()),
+            next_action: Some("Set MSVC environment mode to auto or always to enable it for local Windows CLI sessions.".to_string()),
+        };
+    }
+
+    #[cfg(not(windows))]
+    {
+        return WindowsMsvcEnvStatus {
+            mode,
+            state: WindowsMsvcEnvStatusState::NonWindows,
+            cwd: cwd_text,
+            source_path: None,
+            arch: None,
+            host_arch: None,
+            message: Some("MSVC environment injection is only used on Windows.".to_string()),
+            next_action: None,
+        };
+    }
+
+    #[cfg(windows)]
+    {
+        let Some(cwd_path) = cwd else {
+            return WindowsMsvcEnvStatus {
+                mode,
+                state: WindowsMsvcEnvStatusState::Pending,
+                cwd: cwd_text,
+                source_path: None,
+                arch: None,
+                host_arch: None,
+                message: Some("No project folder is selected for MSVC environment detection.".to_string()),
+                next_action: Some("Open a local project or set a working directory, then start a local CLI session.".to_string()),
+            };
+        };
+
+        if mode == WindowsMsvcEnvMode::Auto && !project_needs_msvc(cwd_path) {
+            return WindowsMsvcEnvStatus {
+                mode,
+                state: WindowsMsvcEnvStatusState::NotNeeded,
+                cwd: cwd_text,
+                source_path: None,
+                arch: None,
+                host_arch: None,
+                message: Some("This project does not match the native Windows build-tool signals used by auto mode.".to_string()),
+                next_action: Some("Switch to always if this project still needs Visual Studio C++ build tools.".to_string()),
+            };
+        }
+
+        WindowsMsvcEnvStatus {
+            mode,
+            state: WindowsMsvcEnvStatusState::Pending,
+            cwd: cwd_text,
+            source_path: None,
+            arch: None,
+            host_arch: None,
+            message: Some("MSVC environment will be checked when the next local CLI session starts.".to_string()),
+            next_action: Some("Start a local CLI session; any Visual Studio setup warning will appear here after launch.".to_string()),
+        }
+    }
+}
+
+fn status_from_spawn_plan(
+    cwd: Option<&Path>,
+    mode: WindowsMsvcEnvMode,
+    plan: &SpawnEnvPlan,
+) -> WindowsMsvcEnvStatus {
+    let cwd_text = cwd.map(path_to_status_string);
+
+    match &plan.status {
+        MsvcEnvStatus::Injected(source) => WindowsMsvcEnvStatus {
+            mode,
+            state: WindowsMsvcEnvStatusState::Injected,
+            cwd: cwd_text,
+            source_path: Some(path_to_status_string(&source.installation_path)),
+            arch: Some(source.arch.clone()),
+            host_arch: Some(source.host_arch.clone()),
+            message: None,
+            next_action: None,
+        },
+        MsvcEnvStatus::Warning => {
+            let warning = plan.warnings.first();
+            WindowsMsvcEnvStatus {
+                mode,
+                state: WindowsMsvcEnvStatusState::Warning,
+                cwd: cwd_text,
+                source_path: None,
+                arch: None,
+                host_arch: None,
+                message: warning
+                    .map(|w| w.message.clone())
+                    .or_else(|| Some("MSVC environment is unavailable.".to_string())),
+                next_action: warning
+                    .map(|w| w.next_action.clone())
+                    .or_else(|| Some("Check Visual Studio Build Tools installation.".to_string())),
+            }
+        }
+        MsvcEnvStatus::Skipped(reason) => skipped_status(cwd_text, mode, reason),
+    }
+}
+
+fn skipped_status(
+    cwd: Option<String>,
+    mode: WindowsMsvcEnvMode,
+    reason: &MsvcEnvSkipReason,
+) -> WindowsMsvcEnvStatus {
+    let (state, message, next_action) = match reason {
+        MsvcEnvSkipReason::NonWindows => (
+            WindowsMsvcEnvStatusState::NonWindows,
+            Some("MSVC environment injection is only used on Windows.".to_string()),
+            None,
+        ),
+        MsvcEnvSkipReason::RemoteSession => (
+            WindowsMsvcEnvStatusState::NotNeeded,
+            Some("Remote sessions use the remote host environment and do not receive local MSVC variables.".to_string()),
+            None,
+        ),
+        MsvcEnvSkipReason::DisabledByUser => (
+            WindowsMsvcEnvStatusState::Disabled,
+            Some("MSVC environment injection is disabled.".to_string()),
+            Some("Set MSVC environment mode to auto or always to enable it for local Windows CLI sessions.".to_string()),
+        ),
+        MsvcEnvSkipReason::ProjectDoesNotNeedNativeToolchain => (
+            WindowsMsvcEnvStatusState::NotNeeded,
+            Some("This project does not match the native Windows build-tool signals used by auto mode.".to_string()),
+            Some("Switch to always if this project still needs Visual Studio C++ build tools.".to_string()),
+        ),
+    };
+
+    WindowsMsvcEnvStatus {
+        mode,
+        state,
+        cwd,
+        source_path: None,
+        arch: None,
+        host_arch: None,
+        message,
+        next_action,
+    }
+}
+
+fn path_to_status_string(path: &Path) -> String {
+    path.display().to_string()
 }
 
 fn injected_plan(
@@ -861,6 +1146,22 @@ mod tests {
     }
 
     #[test]
+    fn build_vsdevcmd_set_command_uses_call_for_spaced_paths() {
+        let command = build_vsdevcmd_set_command(
+            Path::new(
+                "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat",
+            ),
+            "x64",
+            "x64",
+        );
+
+        assert_eq!(
+            command,
+            "call \"C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\Common7\\Tools\\VsDevCmd.bat\" -arch=x64 -host_arch=x64 >nul && set"
+        );
+    }
+
+    #[test]
     fn resolve_windows_msvc_env_caches_success_by_installation_and_arch() {
         reset_cache();
         let io = FakeMsvcIo::success();
@@ -1019,5 +1320,242 @@ mod tests {
             plan.msvc_env.get("API_TIMEOUT_MS").map(String::as_str),
             Some("600000")
         );
+    }
+
+    #[test]
+    fn msvc_status_summary_reports_injected_source_without_env_values() {
+        clear_msvc_status_snapshot_for_tests();
+        record_msvc_status_snapshot(
+            Path::new("C:\\native"),
+            WindowsMsvcEnvMode::Always,
+            &SpawnEnvPlan {
+                path_override: Some("C:\\VS\\bin;C:\\App\\bin".to_string()),
+                msvc_env: HashMap::from([
+                    ("INCLUDE".to_string(), "C:\\VS\\include".to_string()),
+                    ("LIB".to_string(), "C:\\VS\\lib".to_string()),
+                ]),
+                warnings: vec![],
+                status: MsvcEnvStatus::Injected(MsvcEnvSource {
+                    installation_path: PathBuf::from("C:\\VS"),
+                    arch: "x64".to_string(),
+                    host_arch: "x64".to_string(),
+                }),
+            },
+        );
+
+        let status = get_cached_or_precheck_msvc_status(
+            Some(Path::new("C:\\native")),
+            WindowsMsvcEnvMode::Always,
+        );
+
+        assert_eq!(status.mode, WindowsMsvcEnvMode::Always);
+        assert_eq!(status.state, WindowsMsvcEnvStatusState::Injected);
+        assert_eq!(status.source_path.as_deref(), Some("C:\\VS"));
+        assert_eq!(status.arch.as_deref(), Some("x64"));
+        assert_eq!(status.host_arch.as_deref(), Some("x64"));
+        assert!(status.message.is_none());
+        assert!(!status.debug_contains_env_key("INCLUDE"));
+        assert!(!status.debug_contains_env_key("LIB"));
+    }
+
+    #[test]
+    fn msvc_status_summary_propagates_warning_action() {
+        clear_msvc_status_snapshot_for_tests();
+        record_msvc_status_snapshot(
+            Path::new("C:\\native"),
+            WindowsMsvcEnvMode::Always,
+            &SpawnEnvPlan {
+                path_override: Some("C:\\App\\bin".to_string()),
+                msvc_env: HashMap::new(),
+                warnings: vec![MsvcEnvWarning {
+                    code: "msvc_env_unavailable".to_string(),
+                    message: "Visual Studio VC tools were not found.".to_string(),
+                    next_action: "Install the Visual Studio Installer workload \"Desktop development with C++\".".to_string(),
+                }],
+                status: MsvcEnvStatus::Warning,
+            },
+        );
+
+        let status = get_cached_or_precheck_msvc_status(
+            Some(Path::new("C:\\native")),
+            WindowsMsvcEnvMode::Always,
+        );
+
+        assert_eq!(status.state, WindowsMsvcEnvStatusState::Warning);
+        assert_eq!(
+            status.message.as_deref(),
+            Some("Visual Studio VC tools were not found.")
+        );
+        assert!(status
+            .next_action
+            .as_deref()
+            .unwrap()
+            .contains("Desktop development with C++"));
+    }
+
+    #[test]
+    fn msvc_status_precheck_does_not_force_resolver_derivation() {
+        clear_msvc_status_snapshot_for_tests();
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src-tauri")).unwrap();
+
+        let status = get_cached_or_precheck_msvc_status(Some(tmp.path()), WindowsMsvcEnvMode::Auto);
+
+        assert_eq!(status.state, WindowsMsvcEnvStatusState::Pending);
+        assert!(status.source_path.is_none());
+        assert!(status.next_action.as_deref().unwrap().contains("local CLI"));
+    }
+
+    #[test]
+    fn msvc_status_precheck_invalidates_when_mode_or_cwd_changes() {
+        clear_msvc_status_snapshot_for_tests();
+        record_msvc_status_snapshot(
+            Path::new("C:\\native"),
+            WindowsMsvcEnvMode::Always,
+            &SpawnEnvPlan {
+                path_override: None,
+                msvc_env: HashMap::new(),
+                warnings: vec![MsvcEnvWarning {
+                    code: "msvc_env_unavailable".to_string(),
+                    message: "Old warning".to_string(),
+                    next_action: "Old action".to_string(),
+                }],
+                status: MsvcEnvStatus::Warning,
+            },
+        );
+
+        let disabled = get_cached_or_precheck_msvc_status(
+            Some(Path::new("C:\\native")),
+            WindowsMsvcEnvMode::Off,
+        );
+        let other_cwd = get_cached_or_precheck_msvc_status(
+            Some(Path::new("C:\\other")),
+            WindowsMsvcEnvMode::Always,
+        );
+
+        assert_eq!(disabled.state, WindowsMsvcEnvStatusState::Disabled);
+        assert_ne!(other_cwd.message.as_deref(), Some("Old warning"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual Windows validation; requires Visual Studio C++ Build Tools"]
+    fn manual_windows_msvc_auto_injects_cl_for_native_project() {
+        clear_msvc_env_cache_for_tests();
+        clear_msvc_status_snapshot_for_tests();
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri should have a repo parent")
+            .to_path_buf();
+        let base_path = std::env::var("PATH").unwrap_or_default();
+
+        let plan = resolve_spawn_env_plan(
+            &repo_root,
+            false,
+            WindowsMsvcEnvMode::Auto,
+            SpawnPathPolicy::InheritUnlessInjected,
+            Some(&base_path),
+        );
+
+        assert!(
+            matches!(plan.status, MsvcEnvStatus::Injected(_)),
+            "expected MSVC env injection for repo root, got {:?}, warnings={:?}",
+            plan.status,
+            plan.warnings
+        );
+        let injected_path = plan
+            .path_override
+            .as_deref()
+            .expect("injected MSVC plan should override PATH");
+        let output = std::process::Command::new("where.exe")
+            .arg("cl")
+            .env("PATH", injected_path)
+            .output()
+            .expect("where.exe should run");
+        assert!(
+            output.status.success(),
+            "where cl should find cl.exe through injected PATH, stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual Windows validation; no Visual Studio dependency"]
+    fn manual_windows_msvc_off_mode_does_not_inject() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri should have a repo parent")
+            .to_path_buf();
+        let base_path = std::env::var("PATH").unwrap_or_default();
+
+        let plan = resolve_spawn_env_plan(
+            &repo_root,
+            false,
+            WindowsMsvcEnvMode::Off,
+            SpawnPathPolicy::InheritUnlessInjected,
+            Some(&base_path),
+        );
+
+        assert!(plan.path_override.is_none());
+        assert!(plan.msvc_env.is_empty());
+        assert!(matches!(
+            plan.status,
+            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::DisabledByUser)
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual Windows validation; no Visual Studio dependency"]
+    fn manual_windows_msvc_auto_skips_plain_non_native_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"svelte":"latest"}}"#,
+        )
+        .unwrap();
+        let base_path = std::env::var("PATH").unwrap_or_default();
+
+        let plan = resolve_spawn_env_plan(
+            tmp.path(),
+            false,
+            WindowsMsvcEnvMode::Auto,
+            SpawnPathPolicy::InheritUnlessInjected,
+            Some(&base_path),
+        );
+
+        assert!(plan.path_override.is_none());
+        assert!(plan.msvc_env.is_empty());
+        assert!(matches!(
+            plan.status,
+            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::ProjectDoesNotNeedNativeToolchain)
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "manual Windows validation; no Visual Studio dependency"]
+    fn manual_windows_msvc_remote_session_does_not_inject() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri should have a repo parent")
+            .to_path_buf();
+        let base_path = std::env::var("PATH").unwrap_or_default();
+
+        let plan = resolve_spawn_env_plan(
+            &repo_root,
+            true,
+            WindowsMsvcEnvMode::Always,
+            SpawnPathPolicy::AlwaysUseAugmentedPath,
+            Some(&base_path),
+        );
+
+        assert!(plan.path_override.is_none());
+        assert!(plan.msvc_env.is_empty());
+        assert!(matches!(
+            plan.status,
+            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::RemoteSession)
+        ));
     }
 }

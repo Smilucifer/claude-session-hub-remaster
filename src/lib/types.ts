@@ -185,7 +185,29 @@ export interface UserSettings {
   web_server_bind?: string;
   web_server_allowed_origins?: string[];
   web_server_tunnel_url?: string;
+  windows_msvc_env_mode?: WindowsMsvcEnvMode;
   updated_at: string;
+}
+
+export type WindowsMsvcEnvMode = "auto" | "always" | "off";
+
+export type WindowsMsvcEnvStatusState =
+  | "disabled"
+  | "non_windows"
+  | "not_needed"
+  | "pending"
+  | "injected"
+  | "warning";
+
+export interface WindowsMsvcEnvStatus {
+  mode: WindowsMsvcEnvMode;
+  state: WindowsMsvcEnvStatusState;
+  cwd?: string;
+  source_path?: string;
+  arch?: string;
+  host_arch?: string;
+  message?: string;
+  next_action?: string;
 }
 
 // ── Remote SSH types ──
