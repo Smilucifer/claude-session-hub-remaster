@@ -186,6 +186,16 @@ pub fn update_room_memo(room_id: String, memo: String) -> Result<RoomDetail, Str
 }
 
 #[tauri::command]
+pub async fn send_room_message(
+    sessions: State<'_, ActorSessionMap>,
+    room_id: String,
+    message: String,
+) -> Result<RoomDetail, String> {
+    crate::room::orchestrator::run_roundtable_turn(&room_id, &message, sessions.inner()).await?;
+    room_detail(&room_id)
+}
+
+#[tauri::command]
 pub fn delete_room(id: String) -> Result<(), String> {
     storage::rooms::delete_room(&id)
 }
