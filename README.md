@@ -87,27 +87,24 @@ Modes:
 - `always`: force injection for local child processes.
 - `off`: disable automatic injection.
 
-当前设置项已经在后端生效，前端设置/status 控件仍在后续计划中。
+你可以在 Settings 中切换模式，并查看当前项目的 MSVC 环境状态。状态提示会说明是否已注入、无需注入、已关闭或需要安装 Visual Studio C++ build tools；不会展示完整环境变量。
 
-The backend setting is active today; frontend settings/status controls are still planned.
+You can switch the mode in Settings and view the MSVC environment status for the current project. The status tells you whether injection is active, unnecessary, disabled, or blocked by missing Visual Studio C++ build tools; it does not expose the full environment values.
 
 ## 当前限制 / Current Limitations
 
 - Rooms 目前是基础聚合能力，还不是完整 Roundtable / Driver / Research 编排。
-- Windows MSVC 模式目前没有完整前端设置页面；需要临时调整时可修改用户 settings JSON。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
 - Rooms currently provide foundational grouping, not full Roundtable / Driver / Research orchestration yet.
-- Windows MSVC mode does not yet have a complete frontend settings page; temporary changes can be made through the user settings JSON.
 - Some upstream baseline checks still need cleanup.
 
 ## 后续计划 / Roadmap
 
 计划：
 
-- MSVC settings/status UI。
 - General Roundtable：fanout、debate、summary、private turns。
 - Driver / Copilot Room。
 - Research Room。
@@ -116,7 +113,6 @@ Current limitations:
 
 Plan:
 
-- MSVC settings/status UI.
 - General Roundtable: fanout, debate, summary, and private turns.
 - Driver / Copilot Room.
 - Research Room.
