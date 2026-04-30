@@ -18,6 +18,7 @@ pub mod memos;
 pub mod onboarding;
 pub mod plugins;
 pub mod preview;
+pub mod rooms;
 pub mod runs;
 pub mod screenshot;
 pub mod session;

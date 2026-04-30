@@ -4,6 +4,7 @@ pub mod hooks;
 pub mod models;
 pub mod pricing;
 pub mod process_ext;
+pub mod room;
 pub mod storage;
 pub mod web_server;
 
@@ -157,6 +158,13 @@ pub fn run() {
             commands::runs::update_prompt_favorite_note,
             commands::runs::list_prompt_favorites,
             commands::runs::list_prompt_tags,
+            commands::rooms::list_rooms,
+            commands::rooms::get_room,
+            commands::rooms::create_room,
+            commands::rooms::attach_room_run,
+            commands::rooms::create_room_claude_participant,
+            commands::rooms::update_room_memo,
+            commands::rooms::delete_room,
             commands::memos::list_memos,
             commands::memos::add_memo,
             commands::memos::update_memo,
