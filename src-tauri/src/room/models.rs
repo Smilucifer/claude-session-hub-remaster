@@ -1,16 +1,11 @@
 use crate::models::TaskRun;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RoomKind {
+    #[default]
     Roundtable,
-}
-
-impl Default for RoomKind {
-    fn default() -> Self {
-        Self::Roundtable
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

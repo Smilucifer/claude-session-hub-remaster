@@ -8,6 +8,7 @@ vi.mock("$lib/api", () => ({
   attachRoomRun: vi.fn(),
   createRoomClaudeParticipant: vi.fn(),
   updateRoomMemo: vi.fn(),
+  sendRoomMessage: vi.fn(),
   deleteRoom: vi.fn(),
 }));
 
@@ -122,6 +123,29 @@ describe("RoomStore", () => {
 
     expect(api.updateRoomMemo).toHaveBeenCalledWith("r1", "remember");
     expect(store.room?.memo).toBe("remember");
+  });
+
+  it("sends a roundtable message and updates the selected room timeline", async () => {
+    const updated = detail("r1", "Room");
+    updated.turns = [
+      {
+        id: "turn-1",
+        idx: 1,
+        mode: "fanout",
+        user_input: "Compare options",
+        target_participant_ids: ["p1"],
+        responses: [],
+        started_at: "2026-04-30T00:00:00Z",
+        completed_at: "2026-04-30T00:00:01Z",
+      },
+    ];
+    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+
+    store.selectedRoomId = "r1";
+    await store.sendMessage("Compare options");
+
+    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "Compare options");
+    expect(store.room?.turns).toHaveLength(1);
   });
 
   it("clears selection after deleting the selected room", async () => {

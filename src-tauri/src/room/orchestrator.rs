@@ -16,7 +16,8 @@ pub async fn run_roundtable_turn(
     message: &str,
     sessions: &ActorSessionMap,
 ) -> Result<RoomTurn, String> {
-    let room = storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
+    let room =
+        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
     let command = parse_roundtable_command(message);
     let public_turns = storage::rooms::list_public_turns(room_id)?;
 
@@ -27,7 +28,13 @@ pub async fn run_roundtable_turn(
         }
         RoundtableCommand::Debate { input } => {
             let targets = active_targets(&room.participants, sessions).await;
-            (RoomTurnMode::Debate, message.trim().to_string(), input, targets, false)
+            (
+                RoomTurnMode::Debate,
+                message.trim().to_string(),
+                input,
+                targets,
+                false,
+            )
         }
         RoundtableCommand::Summary { target } => {
             let participant = find_participant(&room.participants, &target)
@@ -42,7 +49,10 @@ pub async fn run_roundtable_turn(
                 false,
             )
         }
-        RoundtableCommand::Private { target, message: private_message } => {
+        RoundtableCommand::Private {
+            target,
+            message: private_message,
+        } => {
             let participant = find_participant(&room.participants, &target)
                 .ok_or_else(|| format!("Room participant @{target} not found"))?
                 .clone();
@@ -68,7 +78,8 @@ pub async fn run_roundtable_turn(
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
         let cmd_tx = {
             let map = sessions.lock().await;
-            map.get(&participant.run_id).map(|handle| handle.cmd_tx.clone())
+            map.get(&participant.run_id)
+                .map(|handle| handle.cmd_tx.clone())
         };
         let Some(cmd_tx) = cmd_tx else {
             continue;
@@ -85,7 +96,8 @@ pub async fn run_roundtable_turn(
         let response = match adapter.stream_message(&target_prompt).await {
             Ok(()) => match adapter.wait_turn_complete().await {
                 Ok(outcome) => {
-                    let event_seq_end = storage::events::next_seq(&participant.run_id).saturating_sub(1);
+                    let event_seq_end =
+                        storage::events::next_seq(&participant.run_id).saturating_sub(1);
                     RoomResponseRef {
                         participant_id: participant.id.clone(),
                         run_id: participant.run_id.clone(),
@@ -129,7 +141,10 @@ pub async fn run_roundtable_turn(
         idx,
         mode,
         user_input,
-        target_participant_ids: targets.iter().map(|participant| participant.id.clone()).collect(),
+        target_participant_ids: targets
+            .iter()
+            .map(|participant| participant.id.clone())
+            .collect(),
         responses,
         started_at,
         completed_at: Some(now_iso()),
@@ -213,7 +228,10 @@ pub fn build_debate_prompt(
     body
 }
 
-pub fn build_summary_prompt(previous_turns: &[RoomTurn], participants: &[RoomParticipant]) -> String {
+pub fn build_summary_prompt(
+    previous_turns: &[RoomTurn],
+    participants: &[RoomParticipant],
+) -> String {
     let mut body = String::from(
         "Summarize the public room discussion. Capture the main points, disagreements, decisions, and useful next steps.",
     );
@@ -372,7 +390,10 @@ mod tests {
         .unwrap();
     }
 
-    fn actor_handle(run_id: &str, cmd_tx: tokio::sync::mpsc::Sender<ActorCommand>) -> SessionActorHandle {
+    fn actor_handle(
+        run_id: &str,
+        cmd_tx: tokio::sync::mpsc::Sender<ActorCommand>,
+    ) -> SessionActorHandle {
         let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         SessionActorHandle {
             cmd_tx,
@@ -474,20 +495,10 @@ mod tests {
             let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-a",
-                Some("Alice".to_string()),
-                None,
-            )
-            .unwrap();
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-b",
-                Some("Bob".to_string()),
-                None,
-            )
-            .unwrap();
+            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+                .unwrap();
+            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
+                .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
@@ -579,7 +590,8 @@ mod tests {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-p1", "run-p2").await;
+                let (sessions, mut rx_a, mut rx_b) =
+                    sessions_for_two_runs("run-p1", "run-p2").await;
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
@@ -613,7 +625,8 @@ mod tests {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-p1", "run-p2").await;
+                let (sessions, mut rx_a, mut rx_b) =
+                    sessions_for_two_runs("run-p1", "run-p2").await;
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
@@ -645,11 +658,14 @@ mod tests {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-p1", "run-p2").await;
+                let (sessions, mut rx_a, mut rx_b) =
+                    sessions_for_two_runs("run-p1", "run-p2").await;
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "@Alice check privately", &sessions).await }
+                    async move {
+                        run_roundtable_turn(&room_id, "@Alice check privately", &sessions).await
+                    }
                 });
 
                 let private_prompt = receive_text(&mut rx_a).await;
@@ -658,8 +674,15 @@ mod tests {
                 assert_eq!(private_prompt, "check privately");
                 assert!(rx_b.try_recv().is_err());
                 assert_eq!(turn.mode, RoomTurnMode::Private);
-                assert!(crate::storage::rooms::list_public_turns(&room.id).unwrap().is_empty());
-                assert_eq!(crate::storage::rooms::list_private_turns(&room.id).unwrap().len(), 1);
+                assert!(crate::storage::rooms::list_public_turns(&room.id)
+                    .unwrap()
+                    .is_empty());
+                assert_eq!(
+                    crate::storage::rooms::list_private_turns(&room.id)
+                        .unwrap()
+                        .len(),
+                    1
+                );
             });
         });
     }
