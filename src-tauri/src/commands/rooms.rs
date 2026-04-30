@@ -22,11 +22,13 @@ fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
 
     Ok(RoomDetail {
         id: room.id,
+        kind: room.kind,
         name: room.name,
         description: room.description,
         cwd: room.cwd,
         memo: room.memo,
         participants,
+        turns: storage::rooms::list_public_turns(room_id)?,
         created_at: room.created_at,
         updated_at: room.updated_at,
     })
@@ -230,6 +232,7 @@ mod tests {
             let detail = super::room_detail(&room.id).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
+            assert!(detail.turns.is_empty());
             assert_eq!(detail.participants[0].run.as_ref().unwrap().prompt, "hello");
 
             crate::storage::runs::rename_run("run-1", "Renamed").unwrap();

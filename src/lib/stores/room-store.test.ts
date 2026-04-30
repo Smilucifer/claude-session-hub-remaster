@@ -22,6 +22,7 @@ import * as api from "$lib/api";
 function summary(id: string, name: string): RoomSummary {
   return {
     id,
+    kind: "roundtable",
     name,
     description: "",
     cwd: undefined,
@@ -34,11 +35,13 @@ function summary(id: string, name: string): RoomSummary {
 function detail(id: string, name: string): RoomDetail {
   return {
     id,
+    kind: "roundtable",
     name,
     description: "",
     cwd: undefined,
     memo: "",
     participants: [],
+    turns: [],
     created_at: "2026-04-30T00:00:00Z",
     updated_at: "2026-04-30T00:00:00Z",
   };
