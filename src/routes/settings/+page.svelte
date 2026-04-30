@@ -5,6 +5,8 @@
   import { loadCliInfo, KeybindingStore } from "$lib/stores";
   import type {
     UserSettings,
+    WindowsMsvcEnvMode,
+    WindowsMsvcEnvStatus,
     CliConfigSettingDef,
     RemoteHost,
     RemoteTestResult,
@@ -89,6 +91,10 @@
 
   let settings = $state<UserSettings | null>(null);
   let authMode = $state("cli");
+  let msvcEnvMode = $state<WindowsMsvcEnvMode>("auto");
+  let msvcEnvStatus = $state<WindowsMsvcEnvStatus | null>(null);
+  let msvcEnvLoading = $state(false);
+  let msvcEnvSaving = $state(false);
   let anthropicApiKey = $state("");
   let anthropicBaseUrl = $state("");
   let showApiKey = $state(false);
@@ -1099,10 +1105,62 @@
     window.dispatchEvent(new CustomEvent("ocv:show-wizard"));
   }
 
+  async function loadMsvcEnvStatus(cwd?: string) {
+    if (!IS_WINDOWS) return;
+    msvcEnvLoading = true;
+    try {
+      msvcEnvStatus = await api.getWindowsMsvcEnvStatus(cwd);
+    } catch (e) {
+      dbgWarn("settings", "load MSVC env status failed", e);
+      msvcEnvStatus = null;
+    } finally {
+      msvcEnvLoading = false;
+    }
+  }
+
+  async function saveMsvcEnvMode(mode: WindowsMsvcEnvMode) {
+    if (msvcEnvSaving || mode === msvcEnvMode) return;
+    msvcEnvMode = mode;
+    msvcEnvSaving = true;
+    try {
+      settings = await api.updateUserSettings({ windows_msvc_env_mode: mode });
+      await loadMsvcEnvStatus(settings.working_directory);
+      generalSaved = true;
+      setTimeout(() => (generalSaved = false), 1500);
+    } catch (e) {
+      dbgWarn("settings", "save MSVC env mode failed", e);
+      msvcEnvMode = settings?.windows_msvc_env_mode ?? "auto";
+    } finally {
+      msvcEnvSaving = false;
+    }
+  }
+
+  function msvcEnvStateClass(state?: WindowsMsvcEnvStatus["state"]): string {
+    if (state === "injected") return "border-emerald-500/30 bg-emerald-500/5 text-emerald-500";
+    if (state === "warning") return "border-amber-500/30 bg-amber-500/5 text-amber-500";
+    return "border-border bg-muted/30 text-muted-foreground";
+  }
+
+  function msvcEnvModeLabel(mode: WindowsMsvcEnvMode): string {
+    if (mode === "always") return t("settings_msvc_mode_always");
+    if (mode === "off") return t("settings_msvc_mode_off");
+    return t("settings_msvc_mode_auto");
+  }
+
+  function msvcEnvStateLabel(state: WindowsMsvcEnvStatus["state"]): string {
+    if (state === "disabled") return t("settings_msvc_state_disabled");
+    if (state === "non_windows") return t("settings_msvc_state_nonWindows");
+    if (state === "not_needed") return t("settings_msvc_state_notNeeded");
+    if (state === "injected") return t("settings_msvc_state_injected");
+    if (state === "warning") return t("settings_msvc_state_warning");
+    return t("settings_msvc_state_pending");
+  }
+
   onMount(async () => {
     try {
       settings = await api.getUserSettings();
       authMode = settings.auth_mode ?? "cli";
+      msvcEnvMode = settings.windows_msvc_env_mode ?? "auto";
       remoteHosts = settings.remote_hosts ?? [];
       platformCredentials = settings.platform_credentials ?? [];
       // Load display fields from credentials (not global fields)
@@ -1116,6 +1174,7 @@
         anthropicApiKey = settings.anthropic_api_key ?? "";
         anthropicBaseUrl = settings.anthropic_base_url ?? "";
       }
+      void loadMsvcEnvStatus(settings.working_directory);
     } catch (e) {
       dbgWarn("settings", "error", e);
     }
@@ -2578,6 +2637,58 @@
             </div>
           {/if}
         </Card>
+
+        {#if IS_WINDOWS}
+          <Card class="p-6 space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                  {t("settings_msvc_title")}
+                </h2>
+                <p class="mt-1 text-xs text-muted-foreground">{t("settings_msvc_desc")}</p>
+              </div>
+              {#if msvcEnvLoading}
+                <span class="text-xs text-muted-foreground">{t("settings_msvc_checking")}</span>
+              {/if}
+            </div>
+
+            <div class="grid grid-cols-3 gap-2">
+              {#each ["auto", "always", "off"] as WindowsMsvcEnvMode[] as mode}
+                <button
+                  class="rounded-md border px-3 py-2 text-sm transition-colors disabled:opacity-60 {msvcEnvMode ===
+                  mode
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:bg-accent'}"
+                  disabled={msvcEnvSaving}
+                  onclick={() => saveMsvcEnvMode(mode)}
+                >
+                  {msvcEnvModeLabel(mode)}
+                </button>
+              {/each}
+            </div>
+
+            {#if msvcEnvStatus}
+              <div class="rounded-md border px-3 py-2 {msvcEnvStateClass(msvcEnvStatus.state)}">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                  <span class="font-medium">{msvcEnvStateLabel(msvcEnvStatus.state)}</span>
+                  {#if msvcEnvStatus.source_path}
+                    <span class="font-mono text-[11px] opacity-80">{msvcEnvStatus.source_path}</span
+                    >
+                  {/if}
+                  {#if msvcEnvStatus.arch}
+                    <span class="text-[11px] opacity-80">{msvcEnvStatus.arch}</span>
+                  {/if}
+                </div>
+                {#if msvcEnvStatus.message}
+                  <p class="mt-1 text-xs opacity-90">{msvcEnvStatus.message}</p>
+                {/if}
+                {#if msvcEnvStatus.next_action}
+                  <p class="mt-1 text-xs opacity-80">{msvcEnvStatus.next_action}</p>
+                {/if}
+              </div>
+            {/if}
+          </Card>
+        {/if}
 
         <!-- Setup Wizard button -->
         <div class="flex items-center justify-between rounded-lg border border-border p-4">

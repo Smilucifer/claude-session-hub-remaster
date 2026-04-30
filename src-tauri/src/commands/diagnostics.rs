@@ -1,5 +1,6 @@
 use crate::agent::claude_stream::augmented_path;
 use crate::agent::ssh::{expand_local_tilde, shell_escape};
+use crate::agent::windows_msvc_env::{get_cached_or_precheck_msvc_status, WindowsMsvcEnvStatus};
 use crate::models::{
     ApiTestResult, AuthDiagnostics, ClaudeMdInfo, CliCheckResult, CliDiagnostics, CliDistTags,
     ConfigDiagnostics, ConfigIssue, DiagnosticsReport, LocalProxyStatus, ProjectDiagnostics,
@@ -7,6 +8,7 @@ use crate::models::{
 };
 use crate::process_ext::HideConsole;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 #[tauri::command]
@@ -57,6 +59,21 @@ pub async fn check_agent_cli(agent: String) -> Result<CliCheckResult, String> {
         path,
         version,
     })
+}
+
+#[tauri::command]
+pub fn get_windows_msvc_env_status(cwd: Option<String>) -> Result<WindowsMsvcEnvStatus, String> {
+    let settings = crate::storage::settings::get_user_settings();
+    let cwd_path = cwd
+        .or(settings.working_directory)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    Ok(get_cached_or_precheck_msvc_status(
+        cwd_path.as_deref(),
+        settings.windows_msvc_env_mode,
+    ))
 }
 
 // ── Local proxy detection ──

@@ -204,6 +204,7 @@ pub fn run() {
             commands::diagnostics::run_diagnostics,
             commands::diagnostics::detect_local_proxy,
             commands::diagnostics::test_api_connectivity,
+            commands::diagnostics::get_windows_msvc_env_status,
             commands::session::start_session,
             commands::session::send_session_message,
             commands::session::stop_session,

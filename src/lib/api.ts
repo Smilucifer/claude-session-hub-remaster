@@ -488,6 +488,15 @@ export async function runDiagnostics(cwd: string): Promise<DiagnosticsReport> {
   return invoke<DiagnosticsReport>("run_diagnostics", { cwd });
 }
 
+export async function getWindowsMsvcEnvStatus(
+  cwd?: string,
+): Promise<import("./types").WindowsMsvcEnvStatus> {
+  dbg("api", "getWindowsMsvcEnvStatus", { cwd });
+  return invoke<import("./types").WindowsMsvcEnvStatus>("get_windows_msvc_env_status", {
+    cwd: cwd ?? null,
+  });
+}
+
 export async function testRemoteHost(
   host: string,
   user: string,
