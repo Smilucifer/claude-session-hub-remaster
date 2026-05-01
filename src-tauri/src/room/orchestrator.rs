@@ -10,6 +10,8 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 static ROOM_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static RUN_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone)]
 struct RoundtableTarget {
@@ -101,10 +103,13 @@ pub async fn run_roundtable_turn(
         } else {
             prompt.clone()
         };
-        let event_seq_start = storage::events::next_seq(&participant.run_id);
         let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
 
         response_tasks.push(tokio::spawn(async move {
+            let run_lock = run_orchestration_lock(&participant.run_id);
+            let _run_guard = run_lock.lock().await;
+            let event_seq_start = storage::events::next_seq(&participant.run_id);
+
             match adapter.stream_message(&target_prompt).await {
                 Ok(()) => match adapter.wait_turn_complete().await {
                     Ok(outcome) => {
@@ -185,6 +190,16 @@ fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
         .unwrap_or_else(|e| e.into_inner());
     locks
         .entry(room_id.to_string())
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+fn run_orchestration_lock(run_id: &str) -> Arc<AsyncMutex<()>> {
+    let mut locks = RUN_ORCHESTRATION_LOCKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(run_id.to_string())
         .or_insert_with(|| Arc::new(AsyncMutex::new(())))
         .clone()
 }
@@ -732,6 +747,77 @@ mod tests {
                 let mut indexes = turns.iter().map(|turn| turn.idx).collect::<Vec<_>>();
                 indexes.sort_unstable();
                 assert_eq!(indexes, vec![1, 2]);
+            });
+        });
+    }
+
+    #[test]
+    fn shared_run_across_rooms_is_not_sent_concurrently() {
+        with_temp_data_dir(|| {
+            let room_a =
+                crate::storage::rooms::create_room("Room A".into(), "".into(), None).unwrap();
+            let room_b =
+                crate::storage::rooms::create_room("Room B".into(), "".into(), None).unwrap();
+            create_run("run-shared");
+            crate::storage::rooms::attach_run(
+                &room_a.id,
+                "run-shared",
+                Some("Shared".to_string()),
+                None,
+            )
+            .unwrap();
+            crate::storage::rooms::attach_run(
+                &room_b.id,
+                "run-shared",
+                Some("Shared".to_string()),
+                None,
+            )
+            .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+                sessions
+                    .lock()
+                    .await
+                    .insert("run-shared".to_string(), actor_handle("run-shared", tx));
+
+                let first_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room_a.id.clone();
+                    async move { run_roundtable_turn(&room_id, "First", &sessions).await }
+                });
+                let second_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room_b.id.clone();
+                    async move { run_roundtable_turn(&room_id, "Second", &sessions).await }
+                });
+
+                let first = rx.recv().await.unwrap();
+                let second_before_first_completes =
+                    tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+                assert!(
+                    second_before_first_completes.is_err(),
+                    "second room should wait for the shared run turn to finish"
+                );
+
+                match first {
+                    ActorCommand::SendMessage { reply, .. } => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    _ => panic!("expected SendMessage"),
+                }
+
+                match rx.recv().await.unwrap() {
+                    ActorCommand::SendMessage { reply, .. } => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    _ => panic!("expected SendMessage"),
+                }
+
+                first_task.await.unwrap().unwrap();
+                second_task.await.unwrap().unwrap();
             });
         });
     }
