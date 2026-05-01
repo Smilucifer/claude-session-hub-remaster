@@ -1,7 +1,21 @@
 use crate::agent::adapter::ActorSessionMap;
+use crate::agent::session_actor::ActorCommand;
 use crate::room::adapter::{adapter_for_run, AgentAdapter, TurnOutcomeStatus};
 use crate::room::models::{RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode};
 use crate::{models::now_iso, storage};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
+
+static ROOM_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone)]
+struct RoundtableTarget {
+    participant: RoomParticipant,
+    cmd_tx: mpsc::Sender<ActorCommand>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoundtableCommand {
@@ -16,6 +30,9 @@ pub async fn run_roundtable_turn(
     message: &str,
     sessions: &ActorSessionMap,
 ) -> Result<RoomTurn, String> {
+    let room_lock = room_orchestration_lock(room_id);
+    let _room_guard = room_lock.lock().await;
+
     let room =
         storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
     let command = parse_roundtable_command(message);
@@ -40,12 +57,13 @@ pub async fn run_roundtable_turn(
             let participant = find_participant(&room.participants, &target)
                 .ok_or_else(|| format!("Room participant @{target} not found"))?
                 .clone();
+            let target = active_target_for_participant(participant, sessions).await?;
             let prompt = build_summary_prompt(&public_turns, &room.participants);
             (
                 RoomTurnMode::Summary,
                 message.trim().to_string(),
                 prompt,
-                vec![participant],
+                vec![target],
                 false,
             )
         }
@@ -56,11 +74,12 @@ pub async fn run_roundtable_turn(
             let participant = find_participant(&room.participants, &target)
                 .ok_or_else(|| format!("Room participant @{target} not found"))?
                 .clone();
+            let target = active_target_for_participant(participant, sessions).await?;
             (
                 RoomTurnMode::Private,
                 message.trim().to_string(),
                 private_message,
-                vec![participant],
+                vec![target],
                 true,
             )
         }
@@ -71,43 +90,46 @@ pub async fn run_roundtable_turn(
     }
 
     let started_at = now_iso();
-    let mut responses = Vec::with_capacity(targets.len());
+    let mut response_tasks = Vec::with_capacity(targets.len());
 
-    for participant in &targets {
+    for target in &targets {
+        let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let cmd_tx = {
-            let map = sessions.lock().await;
-            map.get(&participant.run_id)
-                .map(|handle| handle.cmd_tx.clone())
-        };
-        let Some(cmd_tx) = cmd_tx else {
-            continue;
-        };
-
         let target_prompt = if mode == RoomTurnMode::Debate {
-            build_debate_prompt(participant, &prompt, &public_turns, &room.participants)
+            build_debate_prompt(&participant, &prompt, &public_turns, &room.participants)
         } else {
             prompt.clone()
         };
         let event_seq_start = storage::events::next_seq(&participant.run_id);
-        let mut adapter = adapter_for_run(&run).with_command_sender(cmd_tx);
+        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
 
-        let response = match adapter.stream_message(&target_prompt).await {
-            Ok(()) => match adapter.wait_turn_complete().await {
-                Ok(outcome) => {
-                    let event_seq_end =
-                        storage::events::next_seq(&participant.run_id).saturating_sub(1);
-                    RoomResponseRef {
+        response_tasks.push(tokio::spawn(async move {
+            match adapter.stream_message(&target_prompt).await {
+                Ok(()) => match adapter.wait_turn_complete().await {
+                    Ok(outcome) => {
+                        let event_seq_end =
+                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
+                        RoomResponseRef {
+                            participant_id: participant.id.clone(),
+                            run_id: participant.run_id.clone(),
+                            event_seq_start,
+                            event_seq_end,
+                            preview: run_preview(&participant.run_id),
+                            status: outcome_status_label(outcome.status).to_string(),
+                            error: outcome.error,
+                        }
+                    }
+                    Err(error) => RoomResponseRef {
                         participant_id: participant.id.clone(),
                         run_id: participant.run_id.clone(),
                         event_seq_start,
-                        event_seq_end,
-                        preview: run_preview(&participant.run_id),
-                        status: outcome_status_label(outcome.status).to_string(),
-                        error: outcome.error,
-                    }
-                }
+                        event_seq_end: event_seq_start.saturating_sub(1),
+                        preview: None,
+                        status: "failed".to_string(),
+                        error: Some(error.message),
+                    },
+                },
                 Err(error) => RoomResponseRef {
                     participant_id: participant.id.clone(),
                     run_id: participant.run_id.clone(),
@@ -117,18 +139,16 @@ pub async fn run_roundtable_turn(
                     status: "failed".to_string(),
                     error: Some(error.message),
                 },
-            },
-            Err(error) => RoomResponseRef {
-                participant_id: participant.id.clone(),
-                run_id: participant.run_id.clone(),
-                event_seq_start,
-                event_seq_end: event_seq_start.saturating_sub(1),
-                preview: None,
-                status: "failed".to_string(),
-                error: Some(error.message),
-            },
-        };
-        responses.push(response);
+            }
+        }));
+    }
+
+    let mut responses = Vec::with_capacity(response_tasks.len());
+    for task in response_tasks {
+        responses.push(
+            task.await
+                .map_err(|e| format!("Room participant task failed: {e}"))?,
+        );
     }
 
     let idx = if is_private {
@@ -143,7 +163,7 @@ pub async fn run_roundtable_turn(
         user_input,
         target_participant_ids: targets
             .iter()
-            .map(|participant| participant.id.clone())
+            .map(|target| target.participant.id.clone())
             .collect(),
         responses,
         started_at,
@@ -157,6 +177,16 @@ pub async fn run_roundtable_turn(
     }
 
     Ok(turn)
+}
+
+fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
+    let mut locks = ROOM_ORCHESTRATION_LOCKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(room_id.to_string())
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
 }
 
 pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
@@ -268,13 +298,38 @@ fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> 
 async fn active_targets(
     participants: &[RoomParticipant],
     sessions: &ActorSessionMap,
-) -> Vec<RoomParticipant> {
+) -> Vec<RoundtableTarget> {
     let map = sessions.lock().await;
     participants
         .iter()
-        .filter(|participant| map.contains_key(&participant.run_id))
-        .cloned()
+        .filter_map(|participant| {
+            map.get(&participant.run_id).map(|handle| RoundtableTarget {
+                participant: participant.clone(),
+                cmd_tx: handle.cmd_tx.clone(),
+            })
+        })
         .collect()
+}
+
+async fn active_target_for_participant(
+    participant: RoomParticipant,
+    sessions: &ActorSessionMap,
+) -> Result<RoundtableTarget, String> {
+    let map = sessions.lock().await;
+    let cmd_tx = map
+        .get(&participant.run_id)
+        .map(|handle| handle.cmd_tx.clone())
+        .ok_or_else(|| {
+            format!(
+                "Room participant {} is not attached to an active session",
+                participant.label
+            )
+        })?;
+
+    Ok(RoundtableTarget {
+        participant,
+        cmd_tx,
+    })
 }
 
 fn find_participant<'a>(
@@ -537,6 +592,146 @@ mod tests {
                 let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
                 assert_eq!(stored.len(), 1);
                 assert_eq!(stored[0].user_input, "Compare options");
+            });
+        });
+    }
+
+    #[test]
+    fn fanout_dispatches_to_all_targets_before_waiting_for_completion() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            create_run("run-a");
+            create_run("run-b");
+            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+                .unwrap();
+            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
+                .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-a", "run-b").await;
+                let send_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move { run_roundtable_turn(&room_id, "Compare options", &sessions).await }
+                });
+
+                let first = rx_a.recv().await.unwrap();
+                let second =
+                    tokio::time::timeout(std::time::Duration::from_millis(100), rx_b.recv())
+                        .await
+                        .expect("second participant should receive before first completes")
+                        .unwrap();
+
+                match first {
+                    ActorCommand::SendMessage { text, reply, .. } => {
+                        assert_eq!(text, "Compare options");
+                        reply.send(Ok(())).unwrap();
+                    }
+                    _ => panic!("expected SendMessage"),
+                }
+                match second {
+                    ActorCommand::SendMessage { text, reply, .. } => {
+                        assert_eq!(text, "Compare options");
+                        reply.send(Ok(())).unwrap();
+                    }
+                    _ => panic!("expected SendMessage"),
+                }
+
+                send_task.await.unwrap().unwrap();
+            });
+        });
+    }
+
+    #[test]
+    fn explicit_target_without_active_actor_returns_error_without_turn() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            create_run("run-p1");
+            crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+                .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let error = run_roundtable_turn(&room.id, "@Alice check privately", &sessions)
+                    .await
+                    .unwrap_err();
+
+                assert!(error.contains("not attached to an active session"));
+                assert!(crate::storage::rooms::list_private_turns(&room.id)
+                    .unwrap()
+                    .is_empty());
+            });
+        });
+    }
+
+    #[test]
+    fn concurrent_room_sends_allocate_unique_turn_indexes() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            create_run("run-a");
+            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+                .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+                sessions
+                    .lock()
+                    .await
+                    .insert("run-a".to_string(), actor_handle("run-a", tx));
+
+                let first_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move { run_roundtable_turn(&room_id, "First", &sessions).await }
+                });
+                let second_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move { run_roundtable_turn(&room_id, "Second", &sessions).await }
+                });
+
+                tokio::task::yield_now().await;
+
+                let first = rx.recv().await.unwrap();
+                let maybe_second =
+                    tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv())
+                        .await
+                        .ok()
+                        .flatten();
+
+                match first {
+                    ActorCommand::SendMessage { reply, .. } => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    _ => panic!("expected SendMessage"),
+                }
+                if let Some(second) = maybe_second {
+                    match second {
+                        ActorCommand::SendMessage { reply, .. } => {
+                            reply.send(Ok(())).unwrap();
+                        }
+                        _ => panic!("expected SendMessage"),
+                    }
+                } else {
+                    match rx.recv().await.unwrap() {
+                        ActorCommand::SendMessage { reply, .. } => {
+                            reply.send(Ok(())).unwrap();
+                        }
+                        _ => panic!("expected SendMessage"),
+                    }
+                }
+
+                first_task.await.unwrap().unwrap();
+                second_task.await.unwrap().unwrap();
+
+                let turns = crate::storage::rooms::list_public_turns(&room.id).unwrap();
+                let mut indexes = turns.iter().map(|turn| turn.idx).collect::<Vec<_>>();
+                indexes.sort_unstable();
+                assert_eq!(indexes, vec![1, 2]);
             });
         });
     }

@@ -211,7 +211,8 @@ pub fn append_private_turn(room_id: &str, turn: &RoomTurn) -> Result<(), String>
     let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut file = read_private_file(room_id)?;
     file.turns.push(turn.clone());
-    write_private_file(room_id, &file)
+    write_private_file(room_id, &file)?;
+    touch_room_updated_at(room_id)
 }
 
 pub fn list_private_turns(room_id: &str) -> Result<Vec<RoomTurn>, String> {
@@ -230,7 +231,14 @@ fn append_turn_jsonl(room_id: &str, path: PathBuf, turn: &RoomTurn) -> Result<()
         .append(true)
         .open(path)
         .map_err(|e| format!("open room timeline: {e}"))?;
-    writeln!(file, "{}", line).map_err(|e| format!("write room timeline: {e}"))
+    writeln!(file, "{}", line).map_err(|e| format!("write room timeline: {e}"))?;
+    touch_room_updated_at(room_id)
+}
+
+fn touch_room_updated_at(room_id: &str) -> Result<(), String> {
+    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    room.updated_at = now_iso();
+    save_room(&room)
 }
 
 fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<RoomTurn>, String> {
@@ -474,7 +482,9 @@ mod tests {
     fn room_defaults_to_roundtable_kind_and_lists_timeline() {
         with_temp_data_dir(|| {
             let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let original_updated_at = room.updated_at.clone();
             assert_eq!(room.kind, crate::room::models::RoomKind::Roundtable);
+            std::thread::sleep(std::time::Duration::from_millis(2));
 
             let turn = crate::room::models::RoomTurn {
                 id: "turn-1".to_string(),
@@ -499,6 +509,7 @@ mod tests {
             let turns = list_public_turns(&room.id).unwrap();
 
             assert_eq!(turns, vec![turn]);
+            assert_ne!(get_room(&room.id).unwrap().updated_at, original_updated_at);
         });
     }
 

@@ -102,9 +102,16 @@
   }
 
   function statusClass(status?: string): string {
-    if (status === "running" || status === "idle") return "bg-emerald-500/15 text-emerald-500";
+    if (
+      status === "running" ||
+      status === "idle" ||
+      status === "complete" ||
+      status === "completed"
+    )
+      return "bg-emerald-500/15 text-emerald-500";
     if (status === "failed") return "bg-red-500/15 text-red-500";
     if (status === "pending") return "bg-amber-500/15 text-amber-500";
+    if (status === "stopped") return "bg-muted text-muted-foreground";
     return "bg-muted text-muted-foreground";
   }
 

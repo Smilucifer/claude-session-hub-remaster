@@ -148,6 +148,34 @@ describe("RoomStore", () => {
     expect(store.room?.turns).toHaveLength(1);
   });
 
+  it("ignores stale roundtable send responses after switching rooms", async () => {
+    const updated = detail("r1", "Room 1");
+    updated.turns = [
+      {
+        id: "turn-1",
+        idx: 1,
+        mode: "fanout",
+        user_input: "Compare options",
+        target_participant_ids: ["p1"],
+        responses: [],
+        started_at: "2026-04-30T00:00:00Z",
+        completed_at: "2026-04-30T00:00:01Z",
+      },
+    ];
+    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+
+    store.selectedRoomId = "r1";
+    const send = store.sendMessage("Compare options");
+    store.selectedRoomId = "r2";
+    store.room = detail("r2", "Room 2");
+
+    await send;
+
+    expect(store.selectedRoomId).toBe("r2");
+    expect(store.room?.id).toBe("r2");
+    expect(store.room?.turns).toHaveLength(0);
+  });
+
   it("clears selection after deleting the selected room", async () => {
     vi.mocked(api.deleteRoom).mockResolvedValue(undefined);
     store.selectedRoomId = "r1";
