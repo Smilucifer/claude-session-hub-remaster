@@ -51,23 +51,29 @@ Supported:
 - Keep memo content after restart.
 - Open the Memo panel from the Command Palette.
 
-### Rooms
+### Rooms and Roundtable
 
-Rooms 是后续多智能体协作的入口。当前版本已经提供基础 Room 页面，可以创建 Room、添加 Claude participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。
+Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。
 
-Rooms are the entry point for future multi-agent collaboration. The current version provides the basic Rooms screen: create a Room, add a Claude participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run.
+Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run.
 
 当前适合用来：
 
 - 把相关 Run 聚合到一个 Room 中查看。
 - 为 Room 保存局部 memo。
-- 为后续 Roundtable / Driver / Research 工作流打基础。
+- 在 Roundtable 时间线里向多个活跃 participant 分发同一个问题。
+- 使用 `@debate` 让 participant 基于上一轮公开回复互相比较观点。
+- 使用 `@summary @name` 指定一个 participant 总结公开 Room 历史。
+- 使用 `@name message` 发送私有回合，私有内容不会出现在公开时间线中。
 
 Currently useful for:
 
 - Grouping related Runs in a Room.
 - Keeping Room-local memos.
-- Preparing for future Roundtable / Driver / Research workflows.
+- Sending one prompt to multiple active participants in a Roundtable timeline.
+- Using `@debate` to ask participants to compare positions based on previous public replies.
+- Using `@summary @name` to ask one participant to summarize the public Room history.
+- Using `@name message` for private turns that do not appear in the public timeline.
 
 ### Windows Native Toolchain Support
 
@@ -93,19 +99,20 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 ## 当前限制 / Current Limitations
 
-- Rooms 目前是基础聚合能力，还不是完整 Roundtable / Driver / Research 编排。
+- Roundtable 当前依赖活跃的本地 Claude participant；更完整的 Codex / Gemini / 多 CLI 能力矩阵仍在后续阶段。
+- Driver / Copilot 和 Research Room 尚未完成。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
-- Rooms currently provide foundational grouping, not full Roundtable / Driver / Research orchestration yet.
+- Roundtable currently depends on active local Claude participants; the fuller Codex / Gemini / multi-CLI capability matrix is still planned for a later phase.
+- Driver / Copilot and Research Room are not implemented yet.
 - Some upstream baseline checks still need cleanup.
 
 ## 后续计划 / Roadmap
 
 计划：
 
-- General Roundtable：fanout、debate、summary、private turns。
 - Driver / Copilot Room。
 - Research Room。
 - Arena Memory：项目事实、决策、经验沉淀。
@@ -113,7 +120,6 @@ Current limitations:
 
 Plan:
 
-- General Roundtable: fanout, debate, summary, and private turns.
 - Driver / Copilot Room.
 - Research Room.
 - Arena Memory for project facts, decisions, and lessons.
