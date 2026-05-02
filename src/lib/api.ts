@@ -45,6 +45,7 @@ import type {
   RunSearchFilters,
   RunSearchResponse,
   RoomDetail,
+  RoomKind,
   RoomSummary,
 } from "./types";
 
@@ -132,12 +133,14 @@ export async function createRoom(
   name: string,
   description?: string,
   cwd?: string,
+  kind?: RoomKind,
 ): Promise<RoomDetail> {
-  dbg("api", "createRoom", { name, cwd });
+  dbg("api", "createRoom", { name, cwd, kind });
   return invoke<RoomDetail>("create_room", {
     name,
     description: description ?? null,
     cwd: cwd ?? null,
+    kind: kind ?? null,
   });
 }
 

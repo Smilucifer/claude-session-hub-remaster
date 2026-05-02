@@ -69,6 +69,15 @@ fn save_room(room: &Room) -> Result<(), String> {
 }
 
 pub fn create_room(name: String, description: String, cwd: Option<String>) -> Result<Room, String> {
+    create_room_with_kind(name, description, cwd, RoomKind::Roundtable)
+}
+
+pub fn create_room_with_kind(
+    name: String,
+    description: String,
+    cwd: Option<String>,
+    kind: RoomKind,
+) -> Result<Room, String> {
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
         return Err("Room name is required".to_string());
@@ -77,7 +86,7 @@ pub fn create_room(name: String, description: String, cwd: Option<String>) -> Re
     let now = now_iso();
     let room = Room {
         id: uuid::Uuid::new_v4().to_string(),
-        kind: RoomKind::Roundtable,
+        kind,
         name: trimmed_name.to_string(),
         description: description.trim().to_string(),
         cwd: cwd.filter(|s| !s.trim().is_empty()),
@@ -149,7 +158,19 @@ pub fn attach_run(
     let label = label
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let role = role.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let existing = room.participants.iter().any(|p| p.run_id == run_id);
+    let role = if existing && role.is_none() {
+        None
+    } else {
+        Some(normalize_participant_role(&room, role))
+    };
+    if role.as_deref() == Some("driver") {
+        for participant in &mut room.participants {
+            if participant.run_id != run_id && participant.role == "driver" {
+                participant.role = "copilot".to_string();
+            }
+        }
+    }
 
     if let Some(participant) = room.participants.iter_mut().find(|p| p.run_id == run_id) {
         let mut changed = false;
@@ -186,6 +207,23 @@ pub fn attach_run(
     Ok(room)
 }
 
+fn normalize_participant_role(room: &Room, role: Option<String>) -> String {
+    let requested = role
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
+
+    match room.kind {
+        RoomKind::Driver => {
+            if requested.as_deref() == Some("driver") || room.participants.is_empty() {
+                "driver".to_string()
+            } else {
+                "copilot".to_string()
+            }
+        }
+        RoomKind::Roundtable => requested.unwrap_or_else(|| "participant".to_string()),
+    }
+}
+
 pub fn update_memo(room_id: &str, memo: String) -> Result<Room, String> {
     validate_room_id(room_id)?;
     let room_lock = room_lock(room_id);
@@ -217,6 +255,81 @@ pub fn append_private_turn(room_id: &str, turn: &RoomTurn) -> Result<(), String>
 
 pub fn list_private_turns(room_id: &str) -> Result<Vec<RoomTurn>, String> {
     Ok(read_private_file(room_id)?.turns)
+}
+
+pub fn write_driver_arena_files(
+    room: &Room,
+    public_turns: &[RoomTurn],
+    request: &str,
+    prompt: &str,
+) -> Result<PathBuf, String> {
+    validate_room_id(&room.id)?;
+    let arena = room_dir(&room.id).join(".arena");
+    super::ensure_dir(&arena).map_err(|e| e.to_string())?;
+
+    let mut context = format!(
+        "# Room Context\n\n- Room: {}\n- Room ID: {}\n- Kind: {:?}\n",
+        room.name, room.id, room.kind
+    );
+    if let Some(cwd) = &room.cwd {
+        context.push_str("- CWD: ");
+        context.push_str(cwd);
+        context.push('\n');
+    }
+    context.push_str("\n## Participants\n\n");
+    for participant in &room.participants {
+        context.push_str("- ");
+        context.push_str(&participant.label);
+        context.push_str(" (");
+        context.push_str(&participant.role);
+        context.push_str(") run_id=");
+        context.push_str(&participant.run_id);
+        context.push_str(" participant_id=");
+        context.push_str(&participant.id);
+        context.push('\n');
+    }
+    context.push_str("\n## Review Request\n\n");
+    context.push_str(request.trim());
+    context.push('\n');
+
+    let mut state = String::from("# Room State\n\n## Recent Public Turns\n");
+    for turn in public_turns.iter().rev().take(8).rev() {
+        state.push_str("\n- #");
+        state.push_str(&turn.idx.to_string());
+        state.push(' ');
+        state.push_str(&format!("{:?}", turn.mode));
+        state.push_str(": ");
+        state.push_str(&turn.user_input);
+        state.push('\n');
+        for response in &turn.responses {
+            state.push_str("  - participant_id=");
+            state.push_str(&response.participant_id);
+            state.push_str(" run_id=");
+            state.push_str(&response.run_id);
+            state.push_str(" status=");
+            state.push_str(&response.status);
+            if let Some(preview) = &response.preview {
+                state.push_str(" preview=");
+                state.push_str(preview);
+            }
+            state.push('\n');
+        }
+    }
+    state.push_str("\n## Current Prompt\n\n");
+    state.push_str(prompt.trim());
+    state.push('\n');
+
+    let memory = if room.memo.trim().is_empty() {
+        "# Room Memory\n\n(empty)\n".to_string()
+    } else {
+        format!("# Room Memory\n\n{}\n", room.memo.trim())
+    };
+
+    fs::write(arena.join("context.md"), context)
+        .map_err(|e| format!("write arena context: {e}"))?;
+    fs::write(arena.join("state.md"), state).map_err(|e| format!("write arena state: {e}"))?;
+    fs::write(arena.join("memory"), memory).map_err(|e| format!("write arena memory: {e}"))?;
+    Ok(arena)
 }
 
 fn append_turn_jsonl(room_id: &str, path: PathBuf, turn: &RoomTurn) -> Result<(), String> {
@@ -559,6 +672,118 @@ mod tests {
             let room = get_room(id).unwrap();
 
             assert_eq!(room.kind, crate::room::models::RoomKind::Roundtable);
+        });
+    }
+
+    #[test]
+    fn driver_room_enforces_single_driver_role() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Driver Room".to_string(),
+                "".to_string(),
+                None,
+                RoomKind::Driver,
+            )
+            .unwrap();
+            crate::storage::runs::create_run(
+                "run-driver",
+                "drive",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            crate::storage::runs::create_run(
+                "run-reviewer",
+                "review",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            attach_run(
+                &room.id,
+                "run-driver",
+                Some("Driver".to_string()),
+                Some("driver".to_string()),
+            )
+            .unwrap();
+            let updated = attach_run(
+                &room.id,
+                "run-reviewer",
+                Some("Reviewer".to_string()),
+                Some("driver".to_string()),
+            )
+            .unwrap();
+
+            assert_eq!(
+                updated
+                    .participants
+                    .iter()
+                    .filter(|participant| participant.role == "driver")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                updated
+                    .participants
+                    .iter()
+                    .find(|participant| participant.run_id == "run-driver")
+                    .unwrap()
+                    .role,
+                "copilot"
+            );
+            assert_eq!(
+                updated
+                    .participants
+                    .iter()
+                    .find(|participant| participant.run_id == "run-reviewer")
+                    .unwrap()
+                    .role,
+                "driver"
+            );
+        });
+    }
+
+    #[test]
+    fn writes_driver_arena_files_under_room() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Driver Room".to_string(),
+                "Review implementation".to_string(),
+                Some("D:/work/app".to_string()),
+                RoomKind::Driver,
+            )
+            .unwrap();
+
+            write_driver_arena_files(
+                &room,
+                &[],
+                "Check the patch",
+                "Review request: Check the patch",
+            )
+            .unwrap();
+
+            let arena = room_dir(&room.id).join(".arena");
+            assert!(arena.join("context.md").exists());
+            assert!(arena.join("state.md").exists());
+            assert!(arena.join("memory").exists());
+            assert!(fs::read_to_string(arena.join("context.md"))
+                .unwrap()
+                .contains("Driver Room"));
         });
     }
 }

@@ -51,7 +51,7 @@ Supported:
 - Keep memo content after restart.
 - Open the Memo panel from the Command Palette.
 
-### Rooms and Roundtable
+### Rooms, Roundtable, and Driver/Copilot
 
 Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。
 
@@ -65,6 +65,9 @@ Rooms are the entry point for multi-agent collaboration. You can create a Room, 
 - 使用 `@debate` 让 participant 基于上一轮公开回复互相比较观点。
 - 使用 `@summary @name` 指定一个 participant 总结公开 Room 历史。
 - 使用 `@name message` 发送私有回合，私有内容不会出现在公开时间线中。
+- 创建 Driver Room，让一个 Driver 通过 `/review` 向一个或多个 Copilot 请求只读审查。
+- Driver review 会生成 room-local `.arena/context.md`、`.arena/state.md` 和 `.arena/memory`，用于稳定引用 room / run 上下文。
+- `.arena` 文件是本地运行上下文镜像，可能包含 run references、memo 和最近的公开 preview；不要把它当成对外分享材料。
 
 Currently useful for:
 
@@ -74,6 +77,9 @@ Currently useful for:
 - Using `@debate` to ask participants to compare positions based on previous public replies.
 - Using `@summary @name` to ask one participant to summarize the public Room history.
 - Using `@name message` for private turns that do not appear in the public timeline.
+- Creating a Driver Room where one Driver asks one or more Copilots for read-only review with `/review`.
+- Driver review generates room-local `.arena/context.md`, `.arena/state.md`, and `.arena/memory` files for stable room / run context references.
+- `.arena` files are local runtime context mirrors and may include run references, memo text, and recent public previews; do not treat them as shareable artifacts.
 
 ### Windows Native Toolchain Support
 
@@ -99,28 +105,28 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 ## 当前限制 / Current Limitations
 
-- Roundtable 当前依赖活跃的本地 Claude participant；更完整的 Codex / Gemini / 多 CLI 能力矩阵仍在后续阶段。
-- Driver / Copilot 和 Research Room 尚未完成。
+- Roundtable 和 Driver/Copilot 当前依赖活跃的本地 Claude participant；更完整的 Codex / Gemini / 多 CLI 能力矩阵仍在后续阶段。
+- Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
+- Research Room 尚未完成。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
-- Roundtable currently depends on active local Claude participants; the fuller Codex / Gemini / multi-CLI capability matrix is still planned for a later phase.
-- Driver / Copilot and Research Room are not implemented yet.
+- Roundtable and Driver/Copilot currently depend on active local Claude participants; the fuller Codex / Gemini / multi-CLI capability matrix is still planned for a later phase.
+- Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
+- Research Room is not implemented yet.
 - Some upstream baseline checks still need cleanup.
 
 ## 后续计划 / Roadmap
 
 计划：
 
-- Driver / Copilot Room。
 - Research Room。
 - Arena Memory：项目事实、决策、经验沉淀。
 - Multi-CLI capability matrix。
 
 Plan:
 
-- Driver / Copilot Room.
 - Research Room.
 - Arena Memory for project facts, decisions, and lessons.
 - Multi-CLI capability matrix.

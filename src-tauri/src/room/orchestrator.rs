@@ -1,7 +1,7 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::session_actor::ActorCommand;
 use crate::room::adapter::{adapter_for_run, AgentAdapter, TurnOutcomeStatus};
-use crate::room::models::{RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode};
+use crate::room::models::{RoomKind, RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode};
 use crate::{models::now_iso, storage};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -25,6 +25,11 @@ pub enum RoundtableCommand {
     Debate { input: String },
     Summary { target: String },
     Private { target: String, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverCommand {
+    Review { targets: Vec<String>, input: String },
 }
 
 pub async fn run_roundtable_turn(
@@ -184,6 +189,146 @@ pub async fn run_roundtable_turn(
     Ok(turn)
 }
 
+pub async fn run_driver_turn(
+    room_id: &str,
+    message: &str,
+    sessions: &ActorSessionMap,
+) -> Result<RoomTurn, String> {
+    let room_lock = room_orchestration_lock(room_id);
+    let _room_guard = room_lock.lock().await;
+
+    let room =
+        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
+    if room.kind != RoomKind::Driver {
+        return Err(format!("Room {room_id} is not a Driver room"));
+    }
+
+    let DriverCommand::Review {
+        targets: requested_targets,
+        input,
+    } = parse_driver_command(message)?;
+    if input.trim().is_empty() {
+        return Err("Review request is required".to_string());
+    }
+
+    let public_turns = storage::rooms::list_public_turns(room_id)?;
+    let targets = if requested_targets.is_empty() {
+        active_copilot_targets(&room.participants, sessions).await
+    } else {
+        let mut resolved = Vec::with_capacity(requested_targets.len());
+        for target in requested_targets {
+            let participant = find_participant(&room.participants, &target)
+                .ok_or_else(|| format!("Room participant @{target} not found"))?
+                .clone();
+            if participant.role != "copilot" {
+                return Err(format!(
+                    "Room participant {} is not a copilot reviewer",
+                    participant.label
+                ));
+            }
+            resolved.push(active_target_for_participant(participant, sessions).await?);
+        }
+        resolved
+    };
+
+    if targets.is_empty() {
+        return Err("No active copilot participants are available".to_string());
+    }
+
+    let arena_dir = storage::data_dir()
+        .join("rooms")
+        .join(room_id)
+        .join(".arena");
+    let cwd = room.cwd.as_deref().unwrap_or("(no room cwd)");
+    let prompt = build_driver_review_prompt(
+        &input,
+        &public_turns,
+        &room.participants,
+        &room.memo,
+        cwd,
+        &arena_dir.to_string_lossy(),
+    );
+    storage::rooms::write_driver_arena_files(&room, &public_turns, &input, &prompt)?;
+
+    let started_at = now_iso();
+    let mut response_tasks = Vec::with_capacity(targets.len());
+
+    for target in &targets {
+        let participant = target.participant.clone();
+        let run = storage::runs::get_run(&participant.run_id)
+            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
+        let target_prompt = prompt.clone();
+        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
+
+        response_tasks.push(tokio::spawn(async move {
+            let run_lock = run_orchestration_lock(&participant.run_id);
+            let _run_guard = run_lock.lock().await;
+            let event_seq_start = storage::events::next_seq(&participant.run_id);
+
+            match adapter.stream_message(&target_prompt).await {
+                Ok(()) => match adapter.wait_turn_complete().await {
+                    Ok(outcome) => {
+                        let event_seq_end =
+                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
+                        RoomResponseRef {
+                            participant_id: participant.id.clone(),
+                            run_id: participant.run_id.clone(),
+                            event_seq_start,
+                            event_seq_end,
+                            preview: run_preview(&participant.run_id),
+                            status: outcome_status_label(outcome.status).to_string(),
+                            error: outcome.error,
+                        }
+                    }
+                    Err(error) => RoomResponseRef {
+                        participant_id: participant.id.clone(),
+                        run_id: participant.run_id.clone(),
+                        event_seq_start,
+                        event_seq_end: event_seq_start.saturating_sub(1),
+                        preview: None,
+                        status: "failed".to_string(),
+                        error: Some(error.message),
+                    },
+                },
+                Err(error) => RoomResponseRef {
+                    participant_id: participant.id.clone(),
+                    run_id: participant.run_id.clone(),
+                    event_seq_start,
+                    event_seq_end: event_seq_start.saturating_sub(1),
+                    preview: None,
+                    status: "failed".to_string(),
+                    error: Some(error.message),
+                },
+            }
+        }));
+    }
+
+    let mut responses = Vec::with_capacity(response_tasks.len());
+    for task in response_tasks {
+        responses.push(
+            task.await
+                .map_err(|e| format!("Room participant task failed: {e}"))?,
+        );
+    }
+
+    let turn = RoomTurn {
+        id: uuid::Uuid::new_v4().to_string(),
+        idx: public_turns.len() as u64 + 1,
+        mode: RoomTurnMode::Review,
+        user_input: message.trim().to_string(),
+        target_participant_ids: targets
+            .iter()
+            .map(|target| target.participant.id.clone())
+            .collect(),
+        responses,
+        started_at,
+        completed_at: Some(now_iso()),
+    };
+    storage::rooms::append_public_turn(room_id, &turn)?;
+
+    Ok(turn)
+}
+
 fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
     let mut locks = ROOM_ORCHESTRATION_LOCKS
         .lock()
@@ -206,13 +351,13 @@ fn run_orchestration_lock(run_id: &str) -> Arc<AsyncMutex<()>> {
 
 pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
     let trimmed = input.trim();
-    if let Some(rest) = trimmed.strip_prefix("@debate") {
+    if let Some(rest) = strip_command_word(trimmed, "@debate") {
         return RoundtableCommand::Debate {
             input: rest.trim().to_string(),
         };
     }
 
-    if let Some(rest) = trimmed.strip_prefix("@summary") {
+    if let Some(rest) = strip_command_word(trimmed, "@summary") {
         let target = rest
             .split_whitespace()
             .next()
@@ -233,6 +378,36 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
 
     RoundtableCommand::Fanout {
         input: trimmed.to_string(),
+    }
+}
+
+pub fn parse_driver_command(input: &str) -> Result<DriverCommand, String> {
+    let trimmed = input.trim();
+    let mut rest = strip_command_word(trimmed, "/review")
+        .map(str::trim)
+        .ok_or_else(|| "Driver rooms require an explicit /review request".to_string())?;
+    let mut targets = Vec::new();
+
+    while let Some(after_at) = rest.strip_prefix('@') {
+        let end = after_at.find(char::is_whitespace).unwrap_or(after_at.len());
+        if end == 0 {
+            break;
+        }
+        targets.push(after_at[..end].to_string());
+        rest = after_at[end..].trim_start();
+    }
+
+    let input = rest.trim().to_string();
+
+    Ok(DriverCommand::Review { targets, input })
+}
+
+fn strip_command_word<'a>(input: &'a str, command: &str) -> Option<&'a str> {
+    let rest = input.strip_prefix(command)?;
+    if rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace) {
+        Some(rest)
+    } else {
+        None
     }
 }
 
@@ -302,6 +477,67 @@ pub fn build_summary_prompt(
     body
 }
 
+pub fn build_driver_review_prompt(
+    request: &str,
+    previous_turns: &[RoomTurn],
+    participants: &[RoomParticipant],
+    room_memo: &str,
+    cwd: &str,
+    arena_dir: &str,
+) -> String {
+    let mut body = String::from(
+        "You are a copilot reviewer in a Driver room. Work in read-only review mode: inspect the request, reason from the provided context, and do not edit files, run commands, or change project state.",
+    );
+    body.push_str("\n\nReview request:\n");
+    body.push_str(request.trim());
+    body.push_str("\n\nStable room/run references:\n");
+    body.push_str("- CWD: ");
+    body.push_str(cwd);
+    body.push('\n');
+    body.push_str("- Arena files: ");
+    body.push_str(arena_dir);
+    body.push('\n');
+    for participant in participants {
+        body.push_str("- ");
+        body.push_str(&participant.label);
+        body.push_str(" (");
+        body.push_str(&participant.role);
+        body.push_str("): participant_id=");
+        body.push_str(&participant.id);
+        body.push_str(" run_id=");
+        body.push_str(&participant.run_id);
+        body.push('\n');
+    }
+
+    if !room_memo.trim().is_empty() {
+        body.push_str("\nRoom memo:\n");
+        body.push_str(room_memo.trim());
+        body.push('\n');
+    }
+
+    body.push_str("\nRecent public room context:\n");
+    for turn in previous_turns.iter().rev().take(8).rev() {
+        body.push_str("\nUser: ");
+        body.push_str(&turn.user_input);
+        body.push('\n');
+        for response in &turn.responses {
+            let label = participant_label(participants, &response.participant_id);
+            body.push_str("- ");
+            body.push_str(&label);
+            body.push_str(" [run_id=");
+            body.push_str(&response.run_id);
+            body.push_str("]: ");
+            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
+            body.push('\n');
+        }
+    }
+
+    body.push_str(
+        "\nReturn review findings, risks, and concrete suggestions. Do not claim you changed files.",
+    );
+    body
+}
+
 fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> String {
     participants
         .iter()
@@ -317,6 +553,23 @@ async fn active_targets(
     let map = sessions.lock().await;
     participants
         .iter()
+        .filter_map(|participant| {
+            map.get(&participant.run_id).map(|handle| RoundtableTarget {
+                participant: participant.clone(),
+                cmd_tx: handle.cmd_tx.clone(),
+            })
+        })
+        .collect()
+}
+
+async fn active_copilot_targets(
+    participants: &[RoomParticipant],
+    sessions: &ActorSessionMap,
+) -> Vec<RoundtableTarget> {
+    let map = sessions.lock().await;
+    participants
+        .iter()
+        .filter(|participant| participant.role == "copilot")
         .filter_map(|participant| {
             map.get(&participant.run_id).map(|handle| RoundtableTarget {
                 participant: participant.clone(),
@@ -536,6 +789,47 @@ mod tests {
     }
 
     #[test]
+    fn command_words_do_not_capture_similarly_named_private_targets() {
+        assert_eq!(
+            parse_roundtable_command("@debateAlice check this privately"),
+            RoundtableCommand::Private {
+                target: "debateAlice".to_string(),
+                message: "check this privately".to_string()
+            }
+        );
+        assert_eq!(
+            parse_roundtable_command("@summaryBot check this privately"),
+            RoundtableCommand::Private {
+                target: "summaryBot".to_string(),
+                message: "check this privately".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_driver_review_commands() {
+        assert_eq!(
+            parse_driver_command("/review @Alice @Bob check the patch").unwrap(),
+            DriverCommand::Review {
+                targets: vec!["Alice".to_string(), "Bob".to_string()],
+                input: "check the patch".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_driver_command("/review check the patch").unwrap(),
+            DriverCommand::Review {
+                targets: vec![],
+                input: "check the patch".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn driver_requires_explicit_review_command() {
+        assert!(parse_driver_command("check the patch").is_err());
+    }
+
+    #[test]
     fn debate_prompt_excludes_target_previous_response() {
         let prompt = build_debate_prompt(
             &participant("p1", "Alice"),
@@ -557,6 +851,30 @@ mod tests {
         assert!(prompt.contains("Which API should we use?"));
         assert!(prompt.contains("Alice"));
         assert!(prompt.contains("Alice answer"));
+    }
+
+    #[test]
+    fn driver_review_prompt_includes_readonly_context_and_run_refs() {
+        let mut driver = participant("driver", "Driver");
+        driver.role = "driver".to_string();
+        let mut reviewer = participant("reviewer", "Reviewer");
+        reviewer.role = "copilot".to_string();
+        let prompt = build_driver_review_prompt(
+            "Check the patch",
+            &[public_turn()],
+            &[driver, reviewer],
+            "Room memo",
+            "D:/work/app",
+            "D:/data/rooms/room-1/.arena",
+        );
+
+        assert!(prompt.contains("read-only"));
+        assert!(prompt.contains("Check the patch"));
+        assert!(prompt.contains("Room memo"));
+        assert!(prompt.contains("run-driver"));
+        assert!(prompt.contains("run-reviewer"));
+        assert!(prompt.contains(".arena"));
+        assert!(prompt.contains("Which API should we use?"));
     }
 
     #[test]
@@ -964,6 +1282,93 @@ mod tests {
                         .len(),
                     1
                 );
+            });
+        });
+    }
+
+    #[test]
+    fn driver_review_routes_to_copilots_and_records_review_turn() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room_with_kind(
+                "Driver Room".into(),
+                "Review implementation".into(),
+                Some("D:/work/app".to_string()),
+                crate::room::models::RoomKind::Driver,
+            )
+            .unwrap();
+            create_run("run-driver");
+            create_run("run-a");
+            create_run("run-b");
+            crate::storage::rooms::attach_run(
+                &room.id,
+                "run-driver",
+                Some("Lead".to_string()),
+                Some("driver".to_string()),
+            )
+            .unwrap();
+            crate::storage::rooms::attach_run(
+                &room.id,
+                "run-a",
+                Some("Alice".to_string()),
+                Some("copilot".to_string()),
+            )
+            .unwrap();
+            crate::storage::rooms::attach_run(
+                &room.id,
+                "run-b",
+                Some("Bob".to_string()),
+                Some("copilot".to_string()),
+            )
+            .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (tx_driver, mut rx_driver) = tokio::sync::mpsc::channel(1);
+                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
+                let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(1);
+                sessions.lock().await.insert(
+                    "run-driver".to_string(),
+                    actor_handle("run-driver", tx_driver),
+                );
+                sessions
+                    .lock()
+                    .await
+                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
+                sessions
+                    .lock()
+                    .await
+                    .insert("run-b".to_string(), actor_handle("run-b", tx_b));
+
+                let send_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move {
+                        run_driver_turn(&room_id, "/review @Alice patch risk", &sessions).await
+                    }
+                });
+
+                let alice_prompt = receive_text(&mut rx_a).await;
+                let turn = send_task.await.unwrap().unwrap();
+
+                assert!(alice_prompt.contains("read-only"));
+                assert!(alice_prompt.contains("patch risk"));
+                assert!(rx_driver.try_recv().is_err());
+                assert!(rx_b.try_recv().is_err());
+                assert_eq!(turn.mode, RoomTurnMode::Review);
+                assert_eq!(turn.target_participant_ids.len(), 1);
+
+                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
+                assert_eq!(stored.len(), 1);
+                assert_eq!(stored[0].mode, RoomTurnMode::Review);
+
+                let arena = crate::storage::data_dir()
+                    .join("rooms")
+                    .join(&room.id)
+                    .join(".arena");
+                assert!(arena.join("context.md").exists());
+                assert!(arena.join("state.md").exists());
+                assert!(arena.join("memory").exists());
             });
         });
     }

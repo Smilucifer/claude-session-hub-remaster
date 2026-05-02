@@ -1,5 +1,5 @@
 import * as api from "$lib/api";
-import type { RoomDetail, RoomSummary } from "$lib/types";
+import type { RoomDetail, RoomKind, RoomSummary } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 
 export class RoomStore {
@@ -55,11 +55,11 @@ export class RoomStore {
     }
   }
 
-  async createRoom(name: string, description = "", cwd?: string): Promise<void> {
+  async createRoom(name: string, description = "", cwd?: string, kind?: RoomKind): Promise<void> {
     this.saving = true;
     this.error = null;
     try {
-      const room = await api.createRoom(name, description, cwd);
+      const room = await api.createRoom(name, description, cwd, kind);
       this.selectedRoomId = room.id;
       this.room = room;
       await this.loadRooms();

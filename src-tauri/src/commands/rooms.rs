@@ -1,7 +1,7 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::spawn_locks::SpawnLocks;
 use crate::models::{ExecutionPath, RunStatus};
-use crate::room::models::{RoomDetail, RoomParticipantDetail, RoomSummary};
+use crate::room::models::{RoomDetail, RoomKind, RoomParticipantDetail, RoomSummary};
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
 use std::sync::Arc;
@@ -49,9 +49,25 @@ pub fn create_room(
     name: String,
     description: Option<String>,
     cwd: Option<String>,
+    kind: Option<String>,
 ) -> Result<RoomDetail, String> {
-    let room = storage::rooms::create_room(name, description.unwrap_or_default(), cwd)?;
+    let kind = parse_room_kind(kind.as_deref())?;
+    let room =
+        storage::rooms::create_room_with_kind(name, description.unwrap_or_default(), cwd, kind)?;
     room_detail(&room.id)
+}
+
+fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
+    match kind
+        .unwrap_or("roundtable")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "" | "roundtable" => Ok(RoomKind::Roundtable),
+        "driver" => Ok(RoomKind::Driver),
+        other => Err(format!("Unsupported room kind: {other}")),
+    }
 }
 
 #[tauri::command]
@@ -191,7 +207,18 @@ pub async fn send_room_message(
     room_id: String,
     message: String,
 ) -> Result<RoomDetail, String> {
-    crate::room::orchestrator::run_roundtable_turn(&room_id, &message, sessions.inner()).await?;
+    let room =
+        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    match room.kind {
+        RoomKind::Roundtable => {
+            crate::room::orchestrator::run_roundtable_turn(&room_id, &message, sessions.inner())
+                .await?;
+        }
+        RoomKind::Driver => {
+            crate::room::orchestrator::run_driver_turn(&room_id, &message, sessions.inner())
+                .await?;
+        }
+    }
     room_detail(&room_id)
 }
 
@@ -277,6 +304,19 @@ mod tests {
                 Some(crate::models::ExecutionPath::SessionActor)
             );
         });
+    }
+
+    #[test]
+    fn parses_room_kind_for_create_room() {
+        assert_eq!(
+            super::parse_room_kind(None).unwrap(),
+            crate::room::models::RoomKind::Roundtable
+        );
+        assert_eq!(
+            super::parse_room_kind(Some("driver")).unwrap(),
+            crate::room::models::RoomKind::Driver
+        );
+        assert!(super::parse_room_kind(Some("research")).is_err());
     }
 
     #[test]

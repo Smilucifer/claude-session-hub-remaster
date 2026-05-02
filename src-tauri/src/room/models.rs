@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum RoomKind {
     #[default]
     Roundtable,
+    Driver,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,6 +40,7 @@ pub enum RoomTurnMode {
     Debate,
     Summary,
     Private,
+    Review,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

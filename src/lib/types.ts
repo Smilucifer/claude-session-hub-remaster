@@ -72,9 +72,9 @@ export interface RoomParticipant {
   joined_at: string;
 }
 
-export type RoomKind = "roundtable";
+export type RoomKind = "roundtable" | "driver";
 
-export type RoomTurnMode = "fanout" | "debate" | "summary" | "private";
+export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "review";
 
 export interface RoomResponseRef {
   participant_id: string;

@@ -4,7 +4,7 @@
   import { listRuns } from "$lib/api";
   import { t } from "$lib/i18n/index.svelte";
   import { RoomStore } from "$lib/stores/room-store.svelte";
-  import type { TaskRun } from "$lib/types";
+  import type { RoomKind, TaskRun } from "$lib/types";
   import { relativeTime, truncate } from "$lib/utils/format";
 
   const store = new RoomStore();
@@ -13,6 +13,7 @@
   let createName = $state("");
   let createDescription = $state("");
   let createCwd = $state("");
+  let createKind = $state<RoomKind>("roundtable");
   let attachRunId = $state("");
   let participantPrompt = $state("");
   let participantCwd = $state("");
@@ -54,10 +55,16 @@
   async function handleCreateRoom() {
     const name = createName.trim();
     if (!name) return;
-    await store.createRoom(name, createDescription.trim(), createCwd.trim() || undefined);
+    await store.createRoom(
+      name,
+      createDescription.trim(),
+      createCwd.trim() || undefined,
+      createKind,
+    );
     createName = "";
     createDescription = "";
     createCwd = "";
+    createKind = "roundtable";
     memoDraft = store.room?.memo ?? "";
     participantCwd = store.room?.cwd ?? "";
   }
@@ -116,10 +123,16 @@
   }
 
   function turnModeLabel(mode: string): string {
+    if (mode === "review") return t("room_turnReview");
     if (mode === "debate") return t("room_turnDebate");
     if (mode === "summary") return t("room_turnSummary");
     if (mode === "private") return t("room_turnPrivate");
     return t("room_turnFanout");
+  }
+
+  function roomKindLabel(kind: string): string {
+    if (kind === "driver") return t("room_kindDriver");
+    return t("room_kindRoundtable");
   }
 
   function participantLabel(participantId: string): string {
@@ -158,6 +171,13 @@
           placeholder={t("room_projectPathPlaceholder")}
           bind:value={createCwd}
         />
+        <select
+          class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          bind:value={createKind}
+        >
+          <option value="roundtable">{t("room_kindRoundtable")}</option>
+          <option value="driver">{t("room_kindDriver")}</option>
+        </select>
         <button
           class="w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
           disabled={!createName.trim() || store.saving}
@@ -191,6 +211,9 @@
               <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
                 >{room.participant_count}</span
               >
+              <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                >{roomKindLabel(room.kind)}</span
+              >
             </div>
             {#if room.description}
               <p class="truncate text-xs text-muted-foreground">{room.description}</p>
@@ -219,6 +242,7 @@
           <div class="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
             {#if store.room.description}<span>{store.room.description}</span>{/if}
             {#if store.room.cwd}<span>{store.room.cwd}</span>{/if}
+            <span>{roomKindLabel(store.room.kind)}</span>
             <span
               >{t("room_participantsCount", {
                 count: String(store.room.participants.length),
@@ -366,7 +390,9 @@
             <div class="flex gap-2">
               <textarea
                 class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                placeholder={t("room_roundtablePlaceholder")}
+                placeholder={store.room.kind === "driver"
+                  ? t("room_driverPlaceholder")
+                  : t("room_roundtablePlaceholder")}
                 bind:value={roundtableMessage}
                 onkeydown={(event) => {
                   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {

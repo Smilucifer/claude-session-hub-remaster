@@ -20,10 +20,10 @@ vi.mock("$lib/utils/debug", () => ({
 import { RoomStore } from "./room-store.svelte";
 import * as api from "$lib/api";
 
-function summary(id: string, name: string): RoomSummary {
+function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtable"): RoomSummary {
   return {
     id,
-    kind: "roundtable",
+    kind,
     name,
     description: "",
     cwd: undefined,
@@ -33,10 +33,10 @@ function summary(id: string, name: string): RoomSummary {
   };
 }
 
-function detail(id: string, name: string): RoomDetail {
+function detail(id: string, name: string, kind: RoomDetail["kind"] = "roundtable"): RoomDetail {
   return {
     id,
-    kind: "roundtable",
+    kind,
     name,
     description: "",
     cwd: undefined,
@@ -83,10 +83,21 @@ describe("RoomStore", () => {
 
     await store.createRoom("New Room", "", "D:/work");
 
-    expect(api.createRoom).toHaveBeenCalledWith("New Room", "", "D:/work");
+    expect(api.createRoom).toHaveBeenCalledWith("New Room", "", "D:/work", undefined);
     expect(store.selectedRoomId).toBe("r1");
     expect(store.room?.name).toBe("New Room");
     expect(store.rooms).toEqual([summary("r1", "New Room")]);
+  });
+
+  it("creates a driver room and selects it", async () => {
+    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Driver Room", "driver"));
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Driver Room", "driver")]);
+
+    await store.createRoom("Driver Room", "", "D:/work", "driver");
+
+    expect(api.createRoom).toHaveBeenCalledWith("Driver Room", "", "D:/work", "driver");
+    expect(store.selectedRoomId).toBe("r1");
+    expect(store.room?.kind).toBe("driver");
   });
 
   it("updates selected room after attaching a run", async () => {
@@ -131,7 +142,7 @@ describe("RoomStore", () => {
       {
         id: "turn-1",
         idx: 1,
-        mode: "fanout",
+        mode: "review",
         user_input: "Compare options",
         target_participant_ids: ["p1"],
         responses: [],
