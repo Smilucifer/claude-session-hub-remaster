@@ -39,13 +39,22 @@
     normalizeCwd,
     type ConversationGroup,
   } from "$lib/utils/sidebar-groups";
+  import {
+    buildResumeLastActiveCommand,
+    markConversationSeen,
+    type SeenMessageCounts,
+  } from "$lib/utils/workbench-polish";
   import { loadRemovedCwds } from "$lib/utils/removed-cwds";
   import { page } from "$app/stores";
   import { goto, afterNavigate } from "$app/navigation";
   import { onMount, setContext, untrack } from "svelte";
   import { dbg, dbgWarn } from "$lib/utils/debug";
   import { PLATFORM_PRESETS } from "$lib/utils/platform-presets";
-  import { loadAgentSettingsCache } from "$lib/stores/agent-settings-cache.svelte";
+  import {
+    loadAgentSettingsCache,
+    getNoSessionPersistence,
+  } from "$lib/stores/agent-settings-cache.svelte";
+  import { canResumeNow } from "$lib/stores";
   import type { PlatformCredential } from "$lib/types";
   import { TeamStore } from "$lib/stores/team-store.svelte";
   import { KeybindingStore } from "$lib/stores/keybindings.svelte";
@@ -118,6 +127,9 @@
   let effectiveDark = $derived(themeMode === "system" ? systemDark : themeMode === "dark");
   let pinnedCwds = $state<string[]>([]);
   let removedCwds = $state<string[]>([]);
+  let pinnedConversationKeys = $state<Set<string>>(new Set());
+  let seenMessageCounts = $state<SeenMessageCounts>({});
+  let seenMessageCountsLoaded = $state(false);
 
   let panelTab = $state<"chats" | "teams">("chats");
   let runSearchQuery = $state("");
@@ -330,6 +342,22 @@
     } finally {
       if (seq === memoryCandidateSeq) memoryLoading = false;
     }
+  }
+
+  function persistPinnedConversationKeys() {
+    localStorage.setItem("ocv:pinned-conversations", JSON.stringify([...pinnedConversationKeys]));
+  }
+
+  function persistSeenMessageCounts() {
+    localStorage.setItem("ocv:seen-message-counts", JSON.stringify(seenMessageCounts));
+  }
+
+  function togglePinnedConversation(groupKey: string) {
+    const next = new Set(pinnedConversationKeys);
+    if (next.has(groupKey)) next.delete(groupKey);
+    else next.add(groupKey);
+    pinnedConversationKeys = next;
+    persistPinnedConversationKeys();
   }
 
   function selectMemoryFile(file: MemoryFileCandidate) {
@@ -576,6 +604,35 @@
     try {
       const pinned = localStorage.getItem("ocv:pinned-cwds");
       if (pinned) pinnedCwds = JSON.parse(pinned);
+    } catch {
+      /* ignore parse errors */
+    }
+    try {
+      const pinnedConversations = localStorage.getItem("ocv:pinned-conversations");
+      if (pinnedConversations) {
+        const parsed = JSON.parse(pinnedConversations);
+        if (Array.isArray(parsed) && parsed.every((v: unknown) => typeof v === "string")) {
+          pinnedConversationKeys = new Set(parsed);
+        }
+      }
+    } catch {
+      /* ignore parse errors */
+    }
+    try {
+      const seenCounts = localStorage.getItem("ocv:seen-message-counts");
+      if (seenCounts) {
+        const parsed = JSON.parse(seenCounts);
+        if (parsed && typeof parsed === "object") {
+          const next: SeenMessageCounts = {};
+          for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+              next[key] = value;
+            }
+          }
+          seenMessageCounts = next;
+          seenMessageCountsLoaded = true;
+        }
+      }
     } catch {
       /* ignore parse errors */
     }
@@ -951,11 +1008,22 @@
 
   // Build project folder tree for chats tab
   let projectFolders = $derived.by(() =>
-    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds),
+    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds, pinnedConversationKeys),
   );
 
   // Selectable folders: real project folders (exclude Uncategorized)
   const selectableFolders = $derived(projectFolders.filter((f) => !f.isUncategorized));
+
+  let lastActiveRun = $derived.by(() => {
+    const sortedRuns = [...runs].sort((a, b) =>
+      (b.last_activity_at ?? b.started_at).localeCompare(a.last_activity_at ?? a.started_at),
+    );
+    return sortedRuns.find((run) =>
+      canResumeNow(run, run.status as any, getNoSessionPersistence(run.agent)),
+    );
+  });
+
+  let lastActiveResumeCommand = $derived(buildResumeLastActiveCommand(lastActiveRun));
 
   // Removed cwd set for O(1) lookup in search filtering
   let removedCwdSet = $derived(new Set(removedCwds.map(normalizeCwd)));
@@ -993,6 +1061,41 @@
     if (!validCwds.has(projectCwd)) {
       dbg("layout", "projectCwd not in selectable folders, resetting", { projectCwd });
       projectCwd = "";
+    }
+  });
+
+  let selectedConversation = $derived.by(() => {
+    if (!selectedRunId) return null;
+    for (const folder of projectFolders) {
+      const found = folder.conversations.find((conv) =>
+        conv.runs.some((run) => run.id === selectedRunId),
+      );
+      if (found) return found;
+    }
+    return null;
+  });
+
+  $effect(() => {
+    if (!runsLoadSucceededOnce || seenMessageCountsLoaded) return;
+    if (runs.length === 0) return;
+    const seed: SeenMessageCounts = {};
+    for (const run of runs) {
+      seed[run.id] = run.message_count ?? 0;
+    }
+    seenMessageCounts = seed;
+    seenMessageCountsLoaded = true;
+    persistSeenMessageCounts();
+  });
+
+  $effect(() => {
+    if (!selectedConversation) return;
+    const next = markConversationSeen(seenMessageCounts, selectedConversation);
+    const same =
+      Object.keys(next).length === Object.keys(seenMessageCounts).length &&
+      Object.entries(next).every(([key, value]) => seenMessageCounts[key] === value);
+    if (!same) {
+      seenMessageCounts = next;
+      persistSeenMessageCounts();
     }
   });
 
@@ -2164,6 +2267,9 @@
                     onSelectConversation={(runId) => goto(`/chat?run=${runId}`)}
                     onResume={(runId, mode) => goto(`/chat?run=${runId}&resume=${mode}`)}
                     onDelete={requestDeleteConversation}
+                    onTogglePin={togglePinnedConversation}
+                    {pinnedConversationKeys}
+                    {seenMessageCounts}
                     onRemove={folder.isUncategorized
                       ? undefined
                       : () => requestRemoveProject(folder.cwd)}
@@ -2301,6 +2407,7 @@
   bind:open={commandPaletteOpen}
   cwd={projectCwd || "/"}
   onOpenFolderBrowser={pickFolder}
+  extraCommands={lastActiveResumeCommand ? [lastActiveResumeCommand] : []}
 />
 
 {#if showSetupWizard}

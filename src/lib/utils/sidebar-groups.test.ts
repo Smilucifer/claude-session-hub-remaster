@@ -177,6 +177,62 @@ describe("buildProjectFolders", () => {
     expect(folders[0].conversations[1].groupKey).toBe("s:s1");
   });
 
+  it("pinned_conversations_sort_before_recent_unpinned_conversations", () => {
+    const runs = [
+      makeRun({
+        id: "r1",
+        session_id: "older",
+        started_at: "2024-01-01T00:00:00Z",
+        last_activity_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r2",
+        session_id: "newer",
+        started_at: "2024-02-01T00:00:00Z",
+        last_activity_at: "2024-02-01T00:00:00Z",
+      }),
+    ];
+
+    const folders = buildProjectFolders(runs, NO_FAVS, NO_PINS, [], new Set(["s:older"]));
+
+    expect(folders[0].conversations.map((c) => c.groupKey)).toEqual(["s:older", "s:newer"]);
+  });
+
+  it("pinned_conversations_do_not_make_project_folder_sort_as_old", () => {
+    const runs = [
+      makeRun({
+        id: "a-old",
+        cwd: "/projA",
+        session_id: "old-pinned",
+        started_at: "2024-01-01T00:00:00Z",
+        last_activity_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "a-new",
+        cwd: "/projA",
+        session_id: "new-unpinned",
+        started_at: "2024-05-01T00:00:00Z",
+        last_activity_at: "2024-05-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "b-mid",
+        cwd: "/projB",
+        session_id: "middle",
+        started_at: "2024-04-01T00:00:00Z",
+        last_activity_at: "2024-04-01T00:00:00Z",
+      }),
+    ];
+
+    const folders = buildProjectFolders(runs, NO_FAVS, NO_PINS, [], new Set(["s:old-pinned"]));
+
+    expect(folders.map((f) => f.cwd)).toEqual(["/projA", "/projB"]);
+    expect(folders[0].latestActivityAt).toBe("2024-05-01T00:00:00Z");
+    expect(folders[0].conversations.map((c) => c.groupKey)).toEqual([
+      "s:old-pinned",
+      "s:new-unpinned",
+    ]);
+  });
+
   it("title_prefers_latest_name", () => {
     const runs = [
       makeRun({

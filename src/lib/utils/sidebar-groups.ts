@@ -60,6 +60,7 @@ export function buildProjectFolders(
   favoriteRunIds: Set<string>,
   pinnedCwds: string[],
   removedCwds: string[] = [],
+  pinnedConversationKeys: Set<string> = new Set(),
 ): ProjectFolder[] {
   // 1. Build removed set (empty string excluded — Uncategorized never removed)
   const removedSet = new Set(removedCwds.map(normalizeCwd));
@@ -152,10 +153,18 @@ export function buildProjectFolders(
       });
     }
 
-    // Sort conversations by latest activity desc
-    conversations.sort((a, b) => sortKey(b.latestRun).localeCompare(sortKey(a.latestRun)));
+    const latestActivityAt = conversations.reduce((latest, conversation) => {
+      const activityAt = sortKey(conversation.latestRun);
+      return activityAt > latest ? activityAt : latest;
+    }, "");
 
-    const latestActivityAt = conversations.length > 0 ? sortKey(conversations[0].latestRun) : "";
+    // Sort pinned conversations first, then by latest activity desc.
+    conversations.sort((a, b) => {
+      const aPinned = pinnedConversationKeys.has(a.groupKey);
+      const bPinned = pinnedConversationKeys.has(b.groupKey);
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      return sortKey(b.latestRun).localeCompare(sortKey(a.latestRun));
+    });
 
     folders.push({
       cwd,

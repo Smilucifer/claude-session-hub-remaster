@@ -1,6 +1,11 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { ProjectFolder, ConversationGroup } from "$lib/utils/sidebar-groups";
+  import {
+    conversationUnreadCount,
+    previewForConversation,
+    type SeenMessageCounts,
+  } from "$lib/utils/workbench-polish";
   import ConversationItem from "./ConversationItem.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { dbgWarn } from "$lib/utils/debug";
@@ -14,6 +19,9 @@
     onToggle: () => void;
     showCount?: boolean;
     onRemove?: () => void;
+    pinnedConversationKeys?: Set<string>;
+    seenMessageCounts?: SeenMessageCounts;
+    onTogglePin?: (groupKey: string) => void;
   };
 
   type ChatProps = BaseProps & {
@@ -46,6 +54,9 @@
     onResume,
     onDelete,
     onNewChat,
+    pinnedConversationKeys = new Set<string>(),
+    seenMessageCounts = {},
+    onTogglePin,
   }: ChatProps | CustomProps = $props();
 
   let visibleCount = $state(PAGE_SIZE);
@@ -236,6 +247,10 @@
             onclick={() => onSelectConversation?.(conv.latestRun.id)}
             onresume={onResume}
             ondelete={onDelete}
+            {onTogglePin}
+            pinned={pinnedConversationKeys.has(conv.groupKey)}
+            unreadCount={conversationUnreadCount(conv, seenMessageCounts)}
+            preview={previewForConversation(conv)}
           />
         {/each}
         {#if hasMore}

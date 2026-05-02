@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import {
+    commands,
     filterCommands,
     groupByCategory,
     categoryLabels,
@@ -20,6 +21,7 @@
     onTogglePlanMode,
     onOpenModelSelector,
     onOpenFolderBrowser,
+    extraCommands = [],
   }: {
     open: boolean;
     agent?: string;
@@ -29,13 +31,15 @@
     onTogglePlanMode?: () => void;
     onOpenModelSelector?: () => void;
     onOpenFolderBrowser?: () => void;
+    extraCommands?: CommandDef[];
   } = $props();
 
   let query = $state("");
   let selectedIndex = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
 
-  let filtered = $derived(filterCommands(query, agent));
+  let availableCommands = $derived([...extraCommands, ...commands]);
+  let filtered = $derived(filterCommands(query, agent, availableCommands));
   let grouped = $derived(groupByCategory(filtered));
   let flatList = $derived(filtered);
 
@@ -351,6 +355,7 @@
         <button
           class="rounded-md p-1 hover:bg-accent transition-colors"
           onclick={() => (resultModalOpen = false)}
+          aria-label={t("common_close")}
         >
           <svg
             class="h-4 w-4"

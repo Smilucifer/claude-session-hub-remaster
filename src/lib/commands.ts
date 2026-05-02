@@ -261,9 +261,13 @@ export const commands: CommandDef[] = [
   },
 ];
 
-export function filterCommands(query: string, agent?: string): CommandDef[] {
+export function filterCommands(
+  query: string,
+  agent?: string,
+  commandList: CommandDef[] = commands,
+): CommandDef[] {
   const q = query.toLowerCase();
-  return commands.filter((cmd) => {
+  return commandList.filter((cmd) => {
     if (agent && cmd.agent !== "both" && cmd.agent !== agent) return false;
     if (!q) return true;
     return (

@@ -140,6 +140,9 @@
       {:else}
         <span
           class="truncate"
+          role="button"
+          tabindex="0"
+          aria-label={t("statusbar_sessionTitle")}
           ondblclick={(e) => {
             e.stopPropagation();
             startRename();

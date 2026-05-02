@@ -19,12 +19,20 @@
     onclick,
     onresume,
     ondelete,
+    onTogglePin,
+    pinned = false,
+    unreadCount = 0,
+    preview = "",
   }: {
     conversation: ConversationGroup;
     selected?: boolean;
     onclick?: () => void;
     onresume?: (runId: string, mode: "resume") => void;
     ondelete?: (conversation: ConversationGroup) => void;
+    onTogglePin?: (groupKey: string) => void;
+    pinned?: boolean;
+    unreadCount?: number;
+    preview?: string;
   } = $props();
 
   const run = $derived(conversation.latestRun);
@@ -44,6 +52,9 @@
   let editing = $state(false);
   let editValue = $state("");
   let editInputEl: HTMLInputElement | undefined = $state();
+  let contextMenuOpen = $state(false);
+  let contextMenuX = $state(0);
+  let contextMenuY = $state(0);
 
   function startRename() {
     editValue = conversation.title;
@@ -85,8 +96,23 @@
   }
 
   function handleClick() {
+    contextMenuOpen = false;
     if (editing) return;
     onclick?.();
+  }
+
+  function openContextMenu(e: MouseEvent) {
+    if (!onTogglePin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    contextMenuX = e.clientX;
+    contextMenuY = e.clientY;
+    contextMenuOpen = true;
+  }
+
+  function togglePinFromMenu() {
+    contextMenuOpen = false;
+    onTogglePin?.(conversation.groupKey);
   }
 </script>
 
@@ -99,9 +125,26 @@
   tabindex="0"
   onclick={handleClick}
   onkeydown={handleKeydown}
+  oncontextmenu={openContextMenu}
 >
   <div class="flex items-center justify-between gap-2">
     <div class="flex items-center gap-1.5 min-w-0">
+      {#if pinned}
+        <svg
+          class="h-3 w-3 shrink-0 text-primary"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-label={t("sidebar_pinned")}
+        >
+          <path d="M12 17v5" /><path
+            d="M5 17h14l-1.5-7.5A5 5 0 0 0 12.6 5h-1.2a5 5 0 0 0-4.9 4.5L5 17Z"
+          /><path d="M9 5V2h6v3" />
+        </svg>
+      {/if}
       {#if conversation.isFavorite}
         <svg
           class="h-3 w-3 shrink-0 text-yellow-500"
@@ -139,6 +182,9 @@
       {:else}
         <span
           class="truncate"
+          role="button"
+          tabindex="0"
+          aria-label={t("statusbar_sessionTitle")}
           ondblclick={(e) => {
             e.stopPropagation();
             startRename();
@@ -147,6 +193,14 @@
       {/if}
     </div>
     <div class="flex items-center gap-1 shrink-0">
+      {#if unreadCount > 0 && !selected}
+        <span
+          class="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground"
+          title={t("sidebar_unreadCount", { count: String(unreadCount) })}
+          aria-label={t("sidebar_unreadCount", { count: String(unreadCount) })}
+          >{unreadCount > 99 ? "99+" : unreadCount}</span
+        >
+      {/if}
       {#if runCount > 1}
         <span
           class="inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium text-muted-foreground"
@@ -202,6 +256,11 @@
       <StatusBadge status={run.status} attention={needsAttention} class="shrink-0" />
     </div>
   </div>
+  {#if preview}
+    <p class="mt-0.5 truncate text-[11px] leading-4 text-sidebar-foreground/80">
+      {preview}
+    </p>
+  {/if}
   <div class="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
     <div class="flex items-center gap-1.5 min-w-0">
       <span class="shrink-0">{run.agent}</span>
@@ -228,3 +287,15 @@
     <span class="ml-auto shrink-0">{time}</span>
   </div>
 </div>
+
+{#if contextMenuOpen}
+  <button
+    type="button"
+    class="fixed z-50 min-w-36 rounded-md border border-border bg-popover px-3 py-2 text-left text-xs text-popover-foreground shadow-lg hover:bg-accent"
+    style="left: {contextMenuX}px; top: {contextMenuY}px;"
+    onclick={togglePinFromMenu}
+    onmouseleave={() => (contextMenuOpen = false)}
+  >
+    {pinned ? t("sidebar_unpinConversation") : t("sidebar_pinConversation")}
+  </button>
+{/if}
