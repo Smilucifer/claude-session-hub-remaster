@@ -1,7 +1,10 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::session_actor::ActorCommand;
 use crate::room::adapter::{adapter_for_run, AgentAdapter, TurnOutcomeStatus};
-use crate::room::models::{RoomKind, RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode};
+use crate::room::models::{
+    ResearchArtifact, ResearchResult, RoomKind, RoomParticipant, RoomResponseRef, RoomTurn,
+    RoomTurnMode,
+};
 use crate::{models::now_iso, storage};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -329,6 +332,119 @@ pub async fn run_driver_turn(
     Ok(turn)
 }
 
+pub async fn run_research_turn(
+    room_id: &str,
+    message: &str,
+    sessions: &ActorSessionMap,
+) -> Result<RoomTurn, String> {
+    let room_lock = room_orchestration_lock(room_id);
+    let _room_guard = room_lock.lock().await;
+
+    let room =
+        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
+    if room.kind != RoomKind::Research {
+        return Err(format!("Room {room_id} is not a Research room"));
+    }
+
+    let topic = message.trim();
+    if topic.is_empty() {
+        return Err("Research topic is required".to_string());
+    }
+
+    let public_turns = storage::rooms::list_public_turns(room_id)?;
+    let targets = active_targets(&room.participants, sessions).await;
+    if targets.is_empty() {
+        return Err("No active room participants are available".to_string());
+    }
+
+    let started_at = now_iso();
+    let mut response_tasks = Vec::with_capacity(targets.len());
+
+    for target in &targets {
+        let participant = target.participant.clone();
+        let run = storage::runs::get_run(&participant.run_id)
+            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
+        let target_prompt = build_research_prompt(
+            &participant,
+            topic,
+            &public_turns,
+            &room.participants,
+            &room.memo,
+        );
+        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
+
+        response_tasks.push(tokio::spawn(async move {
+            let run_lock = run_orchestration_lock(&participant.run_id);
+            let _run_guard = run_lock.lock().await;
+            let event_seq_start = storage::events::next_seq(&participant.run_id);
+
+            match adapter.stream_message(&target_prompt).await {
+                Ok(()) => match adapter.wait_turn_complete().await {
+                    Ok(outcome) => {
+                        let event_seq_end =
+                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
+                        RoomResponseRef {
+                            participant_id: participant.id.clone(),
+                            run_id: participant.run_id.clone(),
+                            event_seq_start,
+                            event_seq_end,
+                            preview: run_preview(&participant.run_id),
+                            status: outcome_status_label(outcome.status).to_string(),
+                            error: outcome.error,
+                        }
+                    }
+                    Err(error) => RoomResponseRef {
+                        participant_id: participant.id.clone(),
+                        run_id: participant.run_id.clone(),
+                        event_seq_start,
+                        event_seq_end: event_seq_start.saturating_sub(1),
+                        preview: None,
+                        status: "failed".to_string(),
+                        error: Some(error.message),
+                    },
+                },
+                Err(error) => RoomResponseRef {
+                    participant_id: participant.id.clone(),
+                    run_id: participant.run_id.clone(),
+                    event_seq_start,
+                    event_seq_end: event_seq_start.saturating_sub(1),
+                    preview: None,
+                    status: "failed".to_string(),
+                    error: Some(error.message),
+                },
+            }
+        }));
+    }
+
+    let mut responses = Vec::with_capacity(response_tasks.len());
+    for task in response_tasks {
+        responses.push(
+            task.await
+                .map_err(|e| format!("Room participant task failed: {e}"))?,
+        );
+    }
+
+    let completed_at = now_iso();
+    let turn = RoomTurn {
+        id: uuid::Uuid::new_v4().to_string(),
+        idx: public_turns.len() as u64 + 1,
+        mode: RoomTurnMode::Research,
+        user_input: topic.to_string(),
+        target_participant_ids: targets
+            .iter()
+            .map(|target| target.participant.id.clone())
+            .collect(),
+        responses,
+        started_at,
+        completed_at: Some(completed_at.clone()),
+    };
+    let artifact = build_research_artifact(&room, &turn, topic, &completed_at);
+    storage::rooms::write_research_artifact(room_id, &artifact)?;
+    storage::rooms::append_public_turn(room_id, &turn)?;
+
+    Ok(turn)
+}
+
 fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
     let mut locks = ROOM_ORCHESTRATION_LOCKS
         .lock()
@@ -536,6 +652,99 @@ pub fn build_driver_review_prompt(
         "\nReturn review findings, risks, and concrete suggestions. Do not claim you changed files.",
     );
     body
+}
+
+pub fn build_research_prompt(
+    target: &RoomParticipant,
+    topic: &str,
+    previous_turns: &[RoomTurn],
+    participants: &[RoomParticipant],
+    room_memo: &str,
+) -> String {
+    let mut body = String::from(
+        "You are a researcher in a Research room. Split the shared topic with the other participants and return a structured research result.",
+    );
+    body.push_str("\n\nResearch topic:\n");
+    body.push_str(topic.trim());
+    body.push_str("\n\nYour scoped subtask:\n");
+    body.push_str("- Participant: ");
+    body.push_str(&target.label);
+    body.push_str(" (");
+    body.push_str(&target.role);
+    body.push_str(")\n");
+    body.push_str(
+        "- Investigate the topic from your own angle. Include concrete findings, evidence, risks, open questions, and recommended next steps.",
+    );
+
+    let peer_labels = participants
+        .iter()
+        .filter(|participant| participant.id != target.id)
+        .map(|participant| participant.label.as_str())
+        .collect::<Vec<_>>();
+    if !peer_labels.is_empty() {
+        body.push_str("\n- Avoid duplicating these peers when possible: ");
+        body.push_str(&peer_labels.join(", "));
+    }
+
+    if !room_memo.trim().is_empty() {
+        body.push_str("\n\nRoom memo:\n");
+        body.push_str(room_memo.trim());
+    }
+
+    body.push_str("\n\nRecent public room context:\n");
+    for turn in previous_turns
+        .iter()
+        .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        body.push_str("\nUser: ");
+        body.push_str(&turn.user_input);
+        body.push('\n');
+        for response in &turn.responses {
+            let label = participant_label(participants, &response.participant_id);
+            body.push_str("- ");
+            body.push_str(&label);
+            body.push_str(": ");
+            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
+            body.push('\n');
+        }
+    }
+
+    body.push_str(
+        "\nReturn markdown with sections: Findings, Evidence, Risks, Open Questions, Next Steps.",
+    );
+    body
+}
+
+fn build_research_artifact(
+    room: &crate::room::models::Room,
+    turn: &RoomTurn,
+    topic: &str,
+    generated_at: &str,
+) -> ResearchArtifact {
+    ResearchArtifact {
+        schema_version: 1,
+        room_id: room.id.clone(),
+        topic: topic.to_string(),
+        turn_id: turn.id.clone(),
+        generated_at: generated_at.to_string(),
+        results: turn
+            .responses
+            .iter()
+            .map(|response| ResearchResult {
+                participant_id: response.participant_id.clone(),
+                run_id: response.run_id.clone(),
+                label: participant_label(&room.participants, &response.participant_id),
+                status: response.status.clone(),
+                preview: response.preview.clone(),
+                error: response.error.clone(),
+            })
+            .collect(),
+    }
 }
 
 fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> String {
@@ -1369,6 +1578,139 @@ mod tests {
                 assert!(arena.join("context.md").exists());
                 assert!(arena.join("state.md").exists());
                 assert!(arena.join("memory").exists());
+            });
+        });
+    }
+
+    #[test]
+    fn research_prompt_frames_participant_scoped_subtask() {
+        let mut alice = participant("p1", "Alice");
+        alice.role = "researcher".to_string();
+        let prompt = build_research_prompt(
+            &alice,
+            "Compare local vector database options",
+            &[public_turn()],
+            &[alice.clone(), participant("p2", "Bob")],
+            "Prefer local-first tools.",
+        );
+
+        assert!(prompt.contains("Research topic"));
+        assert!(prompt.contains("Compare local vector database options"));
+        assert!(prompt.contains("Alice"));
+        assert!(prompt.contains("researcher"));
+        assert!(prompt.contains("structured research result"));
+        assert!(prompt.contains("Prefer local-first tools."));
+        assert!(prompt.contains("Which API should we use?"));
+    }
+
+    #[test]
+    fn research_turn_fans_out_and_writes_structured_artifact() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room_with_kind(
+                "Research Room".into(),
+                "Compare approaches".into(),
+                Some("D:/work/app".to_string()),
+                crate::room::models::RoomKind::Research,
+            )
+            .unwrap();
+            crate::storage::rooms::update_memo(&room.id, "Prefer local-first tools.".to_string())
+                .unwrap();
+            create_run("run-a");
+            create_run("run-b");
+            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+                .unwrap();
+            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
+                .unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-a", "run-b").await;
+                let send_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move {
+                        run_research_turn(
+                            &room_id,
+                            "Compare local vector database options",
+                            &sessions,
+                        )
+                        .await
+                    }
+                });
+
+                let alice_prompt = receive_text(&mut rx_a).await;
+                let bob_prompt = receive_text(&mut rx_b).await;
+                let turn = send_task.await.unwrap().unwrap();
+
+                assert!(alice_prompt.contains("Compare local vector database options"));
+                assert!(alice_prompt.contains("Alice"));
+                assert!(bob_prompt.contains("Compare local vector database options"));
+                assert!(bob_prompt.contains("Bob"));
+                assert_ne!(alice_prompt, bob_prompt);
+                assert_eq!(turn.mode, RoomTurnMode::Research);
+                assert_eq!(turn.target_participant_ids.len(), 2);
+
+                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
+                assert_eq!(stored.len(), 1);
+                assert_eq!(stored[0].mode, RoomTurnMode::Research);
+
+                let artifact = crate::storage::rooms::read_research_artifact(&room.id)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(artifact.topic, "Compare local vector database options");
+                assert_eq!(artifact.turn_id, turn.id);
+                assert_eq!(artifact.results.len(), 2);
+                assert_eq!(artifact.results[0].label, "Alice");
+                assert_eq!(artifact.results[1].label, "Bob");
+            });
+        });
+    }
+
+    #[test]
+    fn research_turn_does_not_persist_public_turn_when_artifact_write_fails() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room_with_kind(
+                "Research Room".into(),
+                "Compare approaches".into(),
+                Some("D:/work/app".to_string()),
+                crate::room::models::RoomKind::Research,
+            )
+            .unwrap();
+            create_run("run-a");
+            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+                .unwrap();
+
+            let research_path = crate::storage::data_dir()
+                .join("rooms")
+                .join(&room.id)
+                .join("research");
+            std::fs::write(&research_path, "block writes").unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
+                sessions
+                    .lock()
+                    .await
+                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
+
+                let send_task = tokio::spawn({
+                    let sessions = sessions.clone();
+                    let room_id = room.id.clone();
+                    async move {
+                        run_research_turn(&room_id, "Compare local storage options", &sessions)
+                            .await
+                    }
+                });
+
+                let _prompt = receive_text(&mut rx_a).await;
+                let error = send_task.await.unwrap().unwrap_err();
+
+                assert!(error.contains("research"));
+                assert!(crate::storage::rooms::list_public_turns(&room.id)
+                    .unwrap()
+                    .is_empty());
             });
         });
     }

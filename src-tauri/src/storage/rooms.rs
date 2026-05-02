@@ -1,5 +1,7 @@
 use crate::models::now_iso;
-use crate::room::models::{Room, RoomKind, RoomParticipant, RoomSummary, RoomTurn};
+use crate::room::models::{
+    ResearchArtifact, Room, RoomKind, RoomParticipant, RoomSummary, RoomTurn,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -38,6 +40,10 @@ fn public_timeline_file(id: &str) -> PathBuf {
 
 fn private_file(id: &str) -> PathBuf {
     room_dir(id).join("private.json")
+}
+
+fn research_artifact_file(id: &str) -> PathBuf {
+    room_dir(id).join("research").join("artifact.json")
 }
 
 fn validate_room_id(id: &str) -> Result<(), String> {
@@ -220,6 +226,10 @@ fn normalize_participant_role(room: &Room, role: Option<String>) -> String {
                 "copilot".to_string()
             }
         }
+        RoomKind::Research => match requested.as_deref() {
+            Some("participant") | None => "researcher".to_string(),
+            Some(role) => role.to_string(),
+        },
         RoomKind::Roundtable => requested.unwrap_or_else(|| "participant".to_string()),
     }
 }
@@ -255,6 +265,43 @@ pub fn append_private_turn(room_id: &str, turn: &RoomTurn) -> Result<(), String>
 
 pub fn list_private_turns(room_id: &str) -> Result<Vec<RoomTurn>, String> {
     Ok(read_private_file(room_id)?.turns)
+}
+
+pub fn write_research_artifact(
+    room_id: &str,
+    artifact: &ResearchArtifact,
+) -> Result<PathBuf, String> {
+    validate_room_id(room_id)?;
+    let dir = room_dir(room_id).join("research");
+    super::ensure_dir(&dir).map_err(|e| e.to_string())?;
+    let path = research_artifact_file(room_id);
+    let tmp = dir.join(format!(
+        "artifact.json.{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let json = serde_json::to_string_pretty(artifact).map_err(|e| e.to_string())?;
+    fs::write(&tmp, json).map_err(|e| format!("write research artifact tmp: {e}"))?;
+    fs::rename(&tmp, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("rename research artifact: {e}")
+    })?;
+    Ok(path)
+}
+
+pub fn read_research_artifact(room_id: &str) -> Result<Option<ResearchArtifact>, String> {
+    validate_room_id(room_id)?;
+    let path = research_artifact_file(room_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path).map_err(|e| format!("read research artifact: {e}"))?;
+    serde_json::from_str(&content)
+        .map(Some)
+        .map_err(|e| format!("parse research artifact: {e}"))
 }
 
 pub fn write_driver_arena_files(
@@ -755,6 +802,147 @@ mod tests {
                     .role,
                 "driver"
             );
+        });
+    }
+
+    #[test]
+    fn research_room_defaults_participants_to_researcher_role() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Research Room".to_string(),
+                "Investigate options".to_string(),
+                None,
+                RoomKind::Research,
+            )
+            .unwrap();
+            crate::storage::runs::create_run(
+                "run-researcher",
+                "research",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let updated =
+                attach_run(&room.id, "run-researcher", Some("Alice".to_string()), None).unwrap();
+
+            assert_eq!(updated.kind, RoomKind::Research);
+            assert_eq!(updated.participants[0].role, "researcher");
+        });
+    }
+
+    #[test]
+    fn research_room_maps_generic_participant_role_to_researcher() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Research Room".to_string(),
+                "Investigate options".to_string(),
+                None,
+                RoomKind::Research,
+            )
+            .unwrap();
+            crate::storage::runs::create_run(
+                "run-researcher",
+                "research",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let updated = attach_run(
+                &room.id,
+                "run-researcher",
+                Some("Alice".to_string()),
+                Some("participant".to_string()),
+            )
+            .unwrap();
+
+            assert_eq!(updated.participants[0].role, "researcher");
+        });
+    }
+
+    #[test]
+    fn writes_research_artifact_under_room() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Research Room".to_string(),
+                "Compare approaches".to_string(),
+                Some("D:/work/app".to_string()),
+                RoomKind::Research,
+            )
+            .unwrap();
+            let artifact = crate::room::models::ResearchArtifact {
+                schema_version: 1,
+                room_id: room.id.clone(),
+                topic: "Compare approaches".to_string(),
+                turn_id: "turn-1".to_string(),
+                generated_at: "2026-05-02T00:00:00Z".to_string(),
+                results: vec![crate::room::models::ResearchResult {
+                    participant_id: "p1".to_string(),
+                    run_id: "run-a".to_string(),
+                    label: "Alice".to_string(),
+                    status: "complete".to_string(),
+                    preview: Some("Use approach A".to_string()),
+                    error: None,
+                }],
+            };
+
+            write_research_artifact(&room.id, &artifact).unwrap();
+
+            let research_dir = room_dir(&room.id).join("research");
+            assert!(research_dir.join("artifact.json").exists());
+            let stored = read_research_artifact(&room.id).unwrap().unwrap();
+            assert_eq!(stored, artifact);
+        });
+    }
+
+    #[test]
+    fn research_artifact_is_latest_snapshot() {
+        with_temp_data_dir(|| {
+            let room = create_room_with_kind(
+                "Research Room".to_string(),
+                "Compare approaches".to_string(),
+                None,
+                RoomKind::Research,
+            )
+            .unwrap();
+            let first = crate::room::models::ResearchArtifact {
+                schema_version: 1,
+                room_id: room.id.clone(),
+                topic: "First topic".to_string(),
+                turn_id: "turn-1".to_string(),
+                generated_at: "2026-05-02T00:00:00Z".to_string(),
+                results: vec![],
+            };
+            let second = crate::room::models::ResearchArtifact {
+                schema_version: 1,
+                room_id: room.id.clone(),
+                topic: "Second topic".to_string(),
+                turn_id: "turn-2".to_string(),
+                generated_at: "2026-05-02T00:00:01Z".to_string(),
+                results: vec![],
+            };
+
+            write_research_artifact(&room.id, &first).unwrap();
+            write_research_artifact(&room.id, &second).unwrap();
+
+            let stored = read_research_artifact(&room.id).unwrap().unwrap();
+            assert_eq!(stored.topic, "Second topic");
+            assert_eq!(stored.turn_id, "turn-2");
         });
     }
 

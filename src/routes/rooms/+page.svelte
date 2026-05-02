@@ -79,7 +79,7 @@
     const prompt = participantPrompt.trim();
     const cwd = participantCwd.trim() || store.room?.cwd || "/";
     if (!prompt) return;
-    await store.createClaudeParticipant(prompt, cwd, undefined, undefined, "Claude", "participant");
+    await store.createClaudeParticipant(prompt, cwd, undefined, undefined, "Claude");
     participantPrompt = "";
     await loadRuns();
   }
@@ -123,6 +123,7 @@
   }
 
   function turnModeLabel(mode: string): string {
+    if (mode === "research") return t("room_turnResearch");
     if (mode === "review") return t("room_turnReview");
     if (mode === "debate") return t("room_turnDebate");
     if (mode === "summary") return t("room_turnSummary");
@@ -131,6 +132,7 @@
   }
 
   function roomKindLabel(kind: string): string {
+    if (kind === "research") return t("room_kindResearch");
     if (kind === "driver") return t("room_kindDriver");
     return t("room_kindRoundtable");
   }
@@ -177,6 +179,7 @@
         >
           <option value="roundtable">{t("room_kindRoundtable")}</option>
           <option value="driver">{t("room_kindDriver")}</option>
+          <option value="research">{t("room_kindResearch")}</option>
         </select>
         <button
           class="w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
@@ -392,6 +395,8 @@
                 class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                 placeholder={store.room.kind === "driver"
                   ? t("room_driverPlaceholder")
+                  : store.room.kind === "research"
+                    ? t("room_researchPlaceholder")
                   : t("room_roundtablePlaceholder")}
                 bind:value={roundtableMessage}
                 onkeydown={(event) => {

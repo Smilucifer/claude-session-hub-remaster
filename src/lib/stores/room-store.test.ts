@@ -100,6 +100,17 @@ describe("RoomStore", () => {
     expect(store.room?.kind).toBe("driver");
   });
 
+  it("creates a research room and selects it", async () => {
+    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Research Room", "research"));
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Research Room", "research")]);
+
+    await store.createRoom("Research Room", "", "D:/work", "research");
+
+    expect(api.createRoom).toHaveBeenCalledWith("Research Room", "", "D:/work", "research");
+    expect(store.selectedRoomId).toBe("r1");
+    expect(store.room?.kind).toBe("research");
+  });
+
   it("updates selected room after attaching a run", async () => {
     const updated = detail("r1", "Room");
     updated.participants = [
@@ -142,7 +153,7 @@ describe("RoomStore", () => {
       {
         id: "turn-1",
         idx: 1,
-        mode: "review",
+        mode: "research",
         user_input: "Compare options",
         target_participant_ids: ["p1"],
         responses: [],

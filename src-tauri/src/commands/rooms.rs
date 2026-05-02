@@ -66,6 +66,7 @@ fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
     {
         "" | "roundtable" => Ok(RoomKind::Roundtable),
         "driver" => Ok(RoomKind::Driver),
+        "research" => Ok(RoomKind::Research),
         other => Err(format!("Unsupported room kind: {other}")),
     }
 }
@@ -218,6 +219,10 @@ pub async fn send_room_message(
             crate::room::orchestrator::run_driver_turn(&room_id, &message, sessions.inner())
                 .await?;
         }
+        RoomKind::Research => {
+            crate::room::orchestrator::run_research_turn(&room_id, &message, sessions.inner())
+                .await?;
+        }
     }
     room_detail(&room_id)
 }
@@ -316,7 +321,10 @@ mod tests {
             super::parse_room_kind(Some("driver")).unwrap(),
             crate::room::models::RoomKind::Driver
         );
-        assert!(super::parse_room_kind(Some("research")).is_err());
+        assert_eq!(
+            super::parse_room_kind(Some("research")).unwrap(),
+            crate::room::models::RoomKind::Research
+        );
     }
 
     #[test]

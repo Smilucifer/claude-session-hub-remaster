@@ -7,6 +7,7 @@ pub enum RoomKind {
     #[default]
     Roundtable,
     Driver,
+    Research,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -41,6 +42,7 @@ pub enum RoomTurnMode {
     Summary,
     Private,
     Review,
+    Research,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,6 +66,26 @@ pub struct RoomTurn {
     pub responses: Vec<RoomResponseRef>,
     pub started_at: String,
     pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResearchResult {
+    pub participant_id: String,
+    pub run_id: String,
+    pub label: String,
+    pub status: String,
+    pub preview: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResearchArtifact {
+    pub schema_version: u32,
+    pub room_id: String,
+    pub topic: String,
+    pub turn_id: String,
+    pub generated_at: String,
+    pub results: Vec<ResearchResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
