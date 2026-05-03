@@ -1,26 +1,34 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::models::{ExecutionPath, PromptFavorite, PromptSearchResult, RunStatus, TaskRun};
+use crate::room::adapter::AgentCapabilities;
 use crate::storage;
 use std::collections::{HashMap, HashSet};
 
 /// Validate that agent supports the requested execution path.
 fn validate_agent_path(agent: &str, path: &ExecutionPath) -> Result<(), String> {
-    match agent {
-        "claude" => Ok(()), // Claude supports both session_actor and pipe_exec
-        "codex" => {
-            if *path == ExecutionPath::PipeExec {
-                Ok(())
-            } else {
-                Err(format!(
-                    "agent 'codex' does not support execution_path {:?}",
-                    path
-                ))
-            }
-        }
-        _ => Err(format!(
-            "unknown agent '{}': supported agents are 'claude' and 'codex'",
-            agent
-        )),
+    let capabilities = AgentCapabilities::for_agent(agent);
+    let supported = match path {
+        ExecutionPath::SessionActor => capabilities.stream_session,
+        ExecutionPath::PipeExec => capabilities.pipe_exec,
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(format!(
+            "agent '{}' does not support execution_path {:?}",
+            agent, path
+        ))
+    }
+}
+
+fn default_execution_path_for_agent(agent: &str) -> Result<ExecutionPath, String> {
+    let capabilities = AgentCapabilities::for_agent(agent);
+    if capabilities.stream_session {
+        Ok(ExecutionPath::SessionActor)
+    } else if capabilities.pipe_exec {
+        Ok(ExecutionPath::PipeExec)
+    } else {
+        Err(format!("agent '{}' is not supported", agent))
     }
 }
 
@@ -93,13 +101,7 @@ pub fn start_run(
                 s
             )
         })?,
-        None => {
-            if agent == "claude" {
-                ExecutionPath::SessionActor
-            } else {
-                ExecutionPath::PipeExec
-            }
-        }
+        None => default_execution_path_for_agent(&agent)?,
     };
 
     // Validate agent/path combination
@@ -291,4 +293,31 @@ pub fn list_prompt_favorites() -> Result<Vec<PromptFavorite>, String> {
 #[tauri::command]
 pub fn list_prompt_tags() -> Result<Vec<String>, String> {
     Ok(storage::favorites::list_all_tags())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_execution_paths_with_capability_matrix() {
+        assert!(validate_agent_path("claude", &ExecutionPath::SessionActor).is_ok());
+        assert!(validate_agent_path("claude", &ExecutionPath::PipeExec).is_ok());
+        assert!(validate_agent_path("codex", &ExecutionPath::PipeExec).is_ok());
+        assert!(validate_agent_path("codex", &ExecutionPath::SessionActor).is_err());
+        assert!(validate_agent_path("gemini", &ExecutionPath::PipeExec).is_err());
+    }
+
+    #[test]
+    fn defaults_execution_path_from_capabilities() {
+        assert_eq!(
+            default_execution_path_for_agent("claude").unwrap(),
+            ExecutionPath::SessionActor
+        );
+        assert_eq!(
+            default_execution_path_for_agent("codex").unwrap(),
+            ExecutionPath::PipeExec
+        );
+        assert!(default_execution_path_for_agent("gemini").is_err());
+    }
 }

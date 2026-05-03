@@ -5,6 +5,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import { RoomStore } from "$lib/stores/room-store.svelte";
   import type { RoomKind, TaskRun } from "$lib/types";
+  import { canUseRoomActorRun } from "$lib/utils/agent-capabilities";
   import { relativeTime, truncate } from "$lib/utils/format";
 
   const store = new RoomStore();
@@ -21,11 +22,12 @@
   let roundtableMessage = $state("");
   let deletingRoomId = $state("");
 
-  let claudeRuns = $derived(runs.filter((run) => run.agent === "claude"));
   let selectedRunIds = $derived(
     new Set(store.room?.participants.map((p) => p.participant.run_id) ?? []),
   );
-  let attachableRuns = $derived(claudeRuns.filter((run) => !selectedRunIds.has(run.id)));
+  let attachableRuns = $derived(
+    runs.filter((run) => canUseRoomActorRun(run) && !selectedRunIds.has(run.id)),
+  );
 
   onMount(async () => {
     await Promise.all([store.loadRooms(), loadRuns()]);

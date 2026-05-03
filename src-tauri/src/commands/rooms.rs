@@ -1,6 +1,7 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::spawn_locks::SpawnLocks;
 use crate::models::{ExecutionPath, RunStatus};
+use crate::room::adapter::{can_use_room_actor_run, AgentCapabilities};
 use crate::room::models::{RoomDetail, RoomKind, RoomParticipantDetail, RoomSummary};
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
@@ -17,6 +18,7 @@ fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
         .map(|participant| RoomParticipantDetail {
             participant: participant.clone(),
             run: crate::commands::runs::get_run(participant.run_id.clone()).ok(),
+            capabilities: AgentCapabilities::for_agent(&participant.agent),
         })
         .collect();
 
@@ -80,8 +82,19 @@ pub fn attach_room_run(
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
-    if run.agent != "claude" {
-        return Err("Phase 2 rooms only support Claude participants".to_string());
+    let capabilities = AgentCapabilities::for_agent(&run.agent);
+    if !capabilities.can_use_room_actor() {
+        return Err(format!(
+            "Agent '{}' does not support Room stream sessions yet",
+            run.agent
+        ));
+    }
+    if !can_use_room_actor_run(&run) {
+        return Err(format!(
+            "Run {} uses {:?} and is not a Room stream session",
+            run.id,
+            run.resolved_execution_path()
+        ));
     }
     storage::rooms::attach_run(&room_id, &run_id, label, role)?;
     room_detail(&room_id)
@@ -235,7 +248,7 @@ pub fn delete_room(id: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::RunStatus;
+    use crate::models::{ExecutionPath, RunStatus};
 
     fn with_temp_data_dir<T>(f: impl FnOnce() -> T) -> T {
         let _guard = crate::storage::TEST_ENV_LOCK
@@ -275,6 +288,7 @@ mod tests {
             let detail = super::room_detail(&room.id).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
+            assert!(detail.participants[0].capabilities.stream_session);
             assert!(detail.turns.is_empty());
             assert_eq!(detail.participants[0].run.as_ref().unwrap().prompt, "hello");
 
@@ -283,6 +297,125 @@ mod tests {
             assert_eq!(
                 detail.participants[0].run.as_ref().unwrap().name.as_deref(),
                 Some("Renamed")
+            );
+        });
+    }
+
+    #[test]
+    fn room_detail_includes_participant_capabilities() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            crate::storage::runs::create_run(
+                "run-codex",
+                "hello",
+                "D:/work/app",
+                "codex",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            crate::storage::rooms::attach_run(&room.id, "run-codex", Some("Codex".into()), None)
+                .unwrap();
+
+            let detail = super::room_detail(&room.id).unwrap();
+
+            assert_eq!(detail.participants.len(), 1);
+            assert_eq!(
+                detail.participants[0].capabilities.kind,
+                crate::room::adapter::AgentKind::Codex
+            );
+            assert!(!detail.participants[0].capabilities.stream_session);
+            assert!(detail.participants[0].capabilities.pipe_exec);
+        });
+    }
+
+    #[test]
+    fn attach_room_run_rejects_agents_without_room_stream_capability() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            crate::storage::runs::create_run(
+                "run-codex",
+                "hello",
+                "D:/work/app",
+                "codex",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let error =
+                super::attach_room_run(room.id, "run-codex".into(), None, None).unwrap_err();
+
+            assert!(error.contains("does not support Room stream sessions yet"));
+        });
+    }
+
+    #[test]
+    fn attach_room_run_rejects_claude_pipe_exec_runs() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let mut run = crate::storage::runs::create_run(
+                "run-claude-pipe",
+                "hello",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            run.execution_path = Some(ExecutionPath::PipeExec);
+            crate::storage::runs::save_meta(&run).unwrap();
+
+            let error =
+                super::attach_room_run(room.id, "run-claude-pipe".into(), None, None).unwrap_err();
+
+            assert!(error.contains("is not a Room stream session"));
+        });
+    }
+
+    #[test]
+    fn attach_room_run_accepts_claude_session_actor_runs() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let mut run = crate::storage::runs::create_run(
+                "run-claude-session",
+                "hello",
+                "D:/work/app",
+                "claude",
+                RunStatus::Idle,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            run.execution_path = Some(ExecutionPath::SessionActor);
+            crate::storage::runs::save_meta(&run).unwrap();
+
+            let detail =
+                super::attach_room_run(room.id, "run-claude-session".into(), None, None).unwrap();
+
+            assert_eq!(detail.participants.len(), 1);
+            assert_eq!(
+                detail.participants[0].participant.run_id,
+                "run-claude-session"
             );
         });
     }

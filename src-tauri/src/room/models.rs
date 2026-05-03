@@ -1,4 +1,5 @@
 use crate::models::TaskRun;
+use crate::room::adapter::AgentCapabilities;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -125,6 +126,7 @@ pub struct RoomSummary {
 pub struct RoomParticipantDetail {
     pub participant: RoomParticipant,
     pub run: Option<TaskRun>,
+    pub capabilities: AgentCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

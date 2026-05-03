@@ -76,6 +76,22 @@ export type RoomKind = "roundtable" | "driver" | "research";
 
 export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "review" | "research";
 
+export type AgentKind = "claude" | "codex" | "gemini" | "unknown";
+export type ResumeCapability = "session_id" | "latest" | "none";
+export type PromptInjection = "system_prompt" | "append_file" | "instruction_file" | "env";
+
+export interface AgentCapabilities {
+  kind: AgentKind;
+  stream_session: boolean;
+  pipe_exec: boolean;
+  interactive_pty: boolean;
+  resume: ResumeCapability;
+  prompt_injection?: PromptInjection | null;
+  mcp_config: boolean;
+  context_usage: boolean;
+  permission_protocol: boolean;
+}
+
 export type ArenaMemoryKind = "fact" | "decision" | "lesson";
 
 export interface ArenaMemoryCandidate {
@@ -142,6 +158,7 @@ export interface RoomSummary {
 export interface RoomParticipantDetail {
   participant: RoomParticipant;
   run?: TaskRun;
+  capabilities: AgentCapabilities;
 }
 
 export interface RoomDetail {

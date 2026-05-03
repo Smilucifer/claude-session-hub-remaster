@@ -1,6 +1,8 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::session_actor::ActorCommand;
-use crate::room::adapter::{adapter_for_run, AgentAdapter, TurnOutcomeStatus};
+use crate::room::adapter::{
+    adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
+};
 use crate::room::models::{
     ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult, RoomKind,
     RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode,
@@ -864,6 +866,10 @@ async fn active_targets(
     participants
         .iter()
         .filter_map(|participant| {
+            let run = storage::runs::get_run(&participant.run_id)?;
+            if !can_use_room_actor_run(&run) {
+                return None;
+            }
             map.get(&participant.run_id).map(|handle| RoundtableTarget {
                 participant: participant.clone(),
                 cmd_tx: handle.cmd_tx.clone(),
@@ -881,6 +887,10 @@ async fn active_copilot_targets(
         .iter()
         .filter(|participant| participant.role == "copilot")
         .filter_map(|participant| {
+            let run = storage::runs::get_run(&participant.run_id)?;
+            if !can_use_room_actor_run(&run) {
+                return None;
+            }
             map.get(&participant.run_id).map(|handle| RoundtableTarget {
                 participant: participant.clone(),
                 cmd_tx: handle.cmd_tx.clone(),
@@ -893,6 +903,21 @@ async fn active_target_for_participant(
     participant: RoomParticipant,
     sessions: &ActorSessionMap,
 ) -> Result<RoundtableTarget, String> {
+    if !AgentCapabilities::for_agent(&participant.agent).can_use_room_actor() {
+        return Err(format!(
+            "Room participant {} uses agent '{}' which does not support Room stream sessions yet",
+            participant.label, participant.agent
+        ));
+    }
+    let run = storage::runs::get_run(&participant.run_id)
+        .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
+    if !can_use_room_actor_run(&run) {
+        return Err(format!(
+            "Room participant {} is not backed by a Room stream session",
+            participant.label
+        ));
+    }
+
     let map = sessions.lock().await;
     let cmd_tx = map
         .get(&participant.run_id)
@@ -1007,7 +1032,28 @@ mod tests {
     }
 
     fn create_run(id: &str) {
+        create_run_for_agent(id, "claude");
+    }
+
+    fn create_run_for_agent(id: &str, agent: &str) {
         crate::storage::runs::create_run(
+            id,
+            "hello",
+            "D:/work/app",
+            agent,
+            RunStatus::Idle,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    }
+
+    fn create_run_with_execution_path(id: &str, execution_path: crate::models::ExecutionPath) {
+        let mut run = crate::storage::runs::create_run(
             id,
             "hello",
             "D:/work/app",
@@ -1021,6 +1067,8 @@ mod tests {
             None,
         )
         .unwrap();
+        run.execution_path = Some(execution_path);
+        crate::storage::runs::save_meta(&run).unwrap();
     }
 
     fn actor_handle(
@@ -1067,6 +1115,72 @@ mod tests {
             }
             _ => panic!("expected SendMessage"),
         }
+    }
+
+    #[test]
+    fn active_targets_require_stream_session_capability() {
+        with_temp_data_dir(|| {
+            create_run("run-claude");
+            create_run_for_agent("run-codex", "codex");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let claude = participant("claude", "Claude");
+                let mut codex = participant("codex", "Codex");
+                codex.agent = "codex".to_string();
+
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (claude_tx, _claude_rx) = tokio::sync::mpsc::channel(1);
+                let (codex_tx, _codex_rx) = tokio::sync::mpsc::channel(1);
+                sessions.lock().await.insert(
+                    claude.run_id.clone(),
+                    actor_handle(&claude.run_id, claude_tx),
+                );
+                sessions
+                    .lock()
+                    .await
+                    .insert(codex.run_id.clone(), actor_handle(&codex.run_id, codex_tx));
+
+                let targets = active_targets(&[claude, codex], &sessions).await;
+
+                assert_eq!(targets.len(), 1);
+                assert_eq!(targets[0].participant.agent, "claude");
+            });
+        });
+    }
+
+    #[test]
+    fn active_targets_require_session_actor_execution_path() {
+        with_temp_data_dir(|| {
+            create_run_with_execution_path(
+                "run-session",
+                crate::models::ExecutionPath::SessionActor,
+            );
+            create_run_with_execution_path("run-pipe", crate::models::ExecutionPath::PipeExec);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let mut session = participant("session", "Session");
+                session.run_id = "run-session".to_string();
+                let mut pipe = participant("pipe", "Pipe");
+                pipe.run_id = "run-pipe".to_string();
+
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let (session_tx, _session_rx) = tokio::sync::mpsc::channel(1);
+                let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel(1);
+                sessions.lock().await.insert(
+                    session.run_id.clone(),
+                    actor_handle(&session.run_id, session_tx),
+                );
+                sessions
+                    .lock()
+                    .await
+                    .insert(pipe.run_id.clone(), actor_handle(&pipe.run_id, pipe_tx));
+
+                let targets = active_targets(&[session, pipe], &sessions).await;
+
+                assert_eq!(targets.len(), 1);
+                assert_eq!(targets[0].participant.run_id, "run-session");
+            });
+        });
     }
 
     #[test]

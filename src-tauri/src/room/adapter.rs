@@ -1,6 +1,7 @@
 use crate::agent::session_actor::{ActorCommand, AttachmentData};
-use crate::models::{RunMeta, RunStatus, TaskRun};
+use crate::models::{ExecutionPath, RunMeta, RunStatus, TaskRun};
 use crate::storage;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -30,7 +31,8 @@ impl std::fmt::Display for AgentAdapterError {
 
 impl std::error::Error for AgentAdapterError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentKind {
     Claude,
     Codex,
@@ -49,6 +51,23 @@ impl AgentKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeCapability {
+    SessionId,
+    Latest,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptInjection {
+    SystemPrompt,
+    AppendFile,
+    InstructionFile,
+    Env,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptScope {
     Room,
@@ -56,31 +75,78 @@ pub enum PromptScope {
     Turn,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentCapabilities {
     pub kind: AgentKind,
-    pub can_stream_message: bool,
-    pub can_inject_prompt: bool,
-    pub can_wait_turn_complete: bool,
+    pub stream_session: bool,
+    pub pipe_exec: bool,
+    pub interactive_pty: bool,
+    pub resume: ResumeCapability,
+    pub prompt_injection: Option<PromptInjection>,
+    pub mcp_config: bool,
+    pub context_usage: bool,
+    pub permission_protocol: bool,
 }
 
 impl AgentCapabilities {
+    pub fn for_agent(agent: &str) -> Self {
+        Self::for_kind(AgentKind::from_agent(agent))
+    }
+
     pub fn for_kind(kind: AgentKind) -> Self {
         match kind {
             AgentKind::Claude => Self {
                 kind,
-                can_stream_message: false,
-                can_inject_prompt: false,
-                can_wait_turn_complete: true,
+                stream_session: true,
+                pipe_exec: true,
+                interactive_pty: false,
+                resume: ResumeCapability::SessionId,
+                prompt_injection: Some(PromptInjection::SystemPrompt),
+                mcp_config: true,
+                context_usage: true,
+                permission_protocol: true,
             },
-            AgentKind::Codex | AgentKind::Gemini | AgentKind::Unknown => Self {
+            AgentKind::Codex => Self {
                 kind,
-                can_stream_message: false,
-                can_inject_prompt: false,
-                can_wait_turn_complete: false,
+                stream_session: false,
+                pipe_exec: true,
+                interactive_pty: false,
+                resume: ResumeCapability::Latest,
+                prompt_injection: None,
+                mcp_config: false,
+                context_usage: false,
+                permission_protocol: false,
+            },
+            AgentKind::Gemini | AgentKind::Unknown => Self {
+                kind,
+                stream_session: false,
+                pipe_exec: false,
+                interactive_pty: false,
+                resume: ResumeCapability::None,
+                prompt_injection: None,
+                mcp_config: false,
+                context_usage: false,
+                permission_protocol: false,
             },
         }
     }
+
+    pub fn can_stream_message(&self) -> bool {
+        self.stream_session
+    }
+
+    pub fn can_use_room_actor(&self) -> bool {
+        self.stream_session
+    }
+
+    pub fn can_wait_turn_complete(&self) -> bool {
+        self.stream_session || self.pipe_exec
+    }
+}
+
+pub fn can_use_room_actor_run(run: &RunMeta) -> bool {
+    AgentCapabilities::for_agent(&run.agent).can_use_room_actor()
+        && matches!(run.resolved_execution_path(), ExecutionPath::SessionActor)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,9 +262,7 @@ impl AgentAdapter for RunBackedAgentAdapter {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        let mut capabilities = AgentCapabilities::for_kind(self.kind);
-        capabilities.can_stream_message = self.cmd_tx.is_some();
-        capabilities
+        AgentCapabilities::for_kind(self.kind)
     }
 }
 
@@ -254,14 +318,30 @@ mod tests {
     #[test]
     fn maps_known_agent_capabilities() {
         let claude = AgentCapabilities::for_kind(AgentKind::Claude);
-        assert!(!claude.can_stream_message);
-        assert!(!claude.can_inject_prompt);
-        assert!(claude.can_wait_turn_complete);
+        assert!(claude.stream_session);
+        assert!(claude.pipe_exec);
+        assert!(!claude.interactive_pty);
+        assert_eq!(claude.resume, ResumeCapability::SessionId);
+        assert_eq!(claude.prompt_injection, Some(PromptInjection::SystemPrompt));
+        assert!(claude.mcp_config);
+        assert!(claude.context_usage);
+        assert!(claude.permission_protocol);
 
         let codex = AgentCapabilities::for_kind(AgentKind::Codex);
-        assert!(!codex.can_stream_message);
-        assert!(!codex.can_inject_prompt);
-        assert!(!codex.can_wait_turn_complete);
+        assert!(!codex.stream_session);
+        assert!(codex.pipe_exec);
+        assert!(!codex.interactive_pty);
+        assert_eq!(codex.resume, ResumeCapability::Latest);
+        assert_eq!(codex.prompt_injection, None);
+        assert!(!codex.mcp_config);
+        assert!(!codex.context_usage);
+        assert!(!codex.permission_protocol);
+
+        let gemini = AgentCapabilities::for_kind(AgentKind::Gemini);
+        assert!(!gemini.stream_session);
+        assert!(!gemini.pipe_exec);
+        assert_eq!(gemini.resume, ResumeCapability::None);
+        assert_eq!(gemini.prompt_injection, None);
     }
 
     #[test]
@@ -315,7 +395,7 @@ mod tests {
                 tokio::sync::mpsc::channel::<crate::agent::session_actor::ActorCommand>(1);
             let mut adapter = adapter_for_run(&run).with_command_sender(tx);
 
-            assert!(adapter.capabilities().can_stream_message);
+            assert!(adapter.capabilities().can_stream_message());
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {

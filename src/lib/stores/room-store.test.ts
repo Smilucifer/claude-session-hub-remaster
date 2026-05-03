@@ -19,6 +19,7 @@ vi.mock("$lib/utils/debug", () => ({
 
 import { RoomStore } from "./room-store.svelte";
 import * as api from "$lib/api";
+import { capabilitiesForAgent } from "$lib/utils/agent-capabilities";
 
 function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtable"): RoomSummary {
   return {
@@ -125,6 +126,7 @@ describe("RoomStore", () => {
           joined_at: "2026-04-30T00:00:00Z",
         },
         run: undefined,
+        capabilities: capabilitiesForAgent("claude"),
       },
     ];
     vi.mocked(api.attachRoomRun).mockResolvedValue(updated);
