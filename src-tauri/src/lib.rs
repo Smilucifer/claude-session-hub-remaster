@@ -162,6 +162,7 @@ pub fn run() {
             commands::rooms::get_room,
             commands::rooms::create_room,
             commands::rooms::attach_room_run,
+            commands::rooms::create_room_participant,
             commands::rooms::create_room_claude_participant,
             commands::rooms::update_room_memo,
             commands::rooms::send_room_message,

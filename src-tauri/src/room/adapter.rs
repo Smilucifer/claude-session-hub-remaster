@@ -120,7 +120,7 @@ impl AgentCapabilities {
             AgentKind::Gemini | AgentKind::Unknown => Self {
                 kind,
                 stream_session: false,
-                pipe_exec: false,
+                pipe_exec: matches!(kind, AgentKind::Gemini),
                 interactive_pty: false,
                 resume: ResumeCapability::None,
                 prompt_injection: None,
@@ -339,7 +339,7 @@ mod tests {
 
         let gemini = AgentCapabilities::for_kind(AgentKind::Gemini);
         assert!(!gemini.stream_session);
-        assert!(!gemini.pipe_exec);
+        assert!(gemini.pipe_exec);
         assert_eq!(gemini.resume, ResumeCapability::None);
         assert_eq!(gemini.prompt_injection, None);
     }

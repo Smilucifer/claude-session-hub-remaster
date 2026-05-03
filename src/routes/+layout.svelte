@@ -1471,6 +1471,25 @@
               <span class="sr-only">{item.label()}</span>
             </a>
           {/each}
+          <button
+            type="button"
+            class="relative flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground transition-colors duration-150 hover:bg-sidebar-accent/50"
+            title={t("memo_title")}
+            onclick={() => (memoPanelOpen = true)}
+          >
+            <svg
+              class="h-[18px] w-[18px]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
+                d="M15 3v5h5"
+              /><path d="M8 13h8" /><path d="M8 17h5" /></svg
+            >
+          </button>
         </nav>
 
         <!-- Rail version + locale + dark mode toggle -->

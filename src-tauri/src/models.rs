@@ -224,6 +224,34 @@ fn default_windows_msvc_env_mode() -> WindowsMsvcEnvMode {
     WindowsMsvcEnvMode::Auto
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CcAgentProfile {
+    pub id: String,
+    pub label: String,
+    #[serde(default = "default_cc_agent")]
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_cc_agent() -> String {
+    "claude".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserSettings {
     pub default_agent: String,
@@ -255,6 +283,8 @@ pub struct UserSettings {
     pub remote_hosts: Vec<RemoteHost>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub platform_credentials: Vec<PlatformCredential>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cc_agent_profiles: Vec<CcAgentProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_platform_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -354,6 +384,7 @@ impl Default for UserSettings {
             keybinding_overrides: vec![],
             remote_hosts: vec![],
             platform_credentials: vec![],
+            cc_agent_profiles: vec![],
             active_platform_id: None,
             ui_zoom: None,
             onboarding_completed: false,
@@ -452,6 +483,7 @@ impl Default for AllSettings {
         let mut agents = std::collections::HashMap::new();
         agents.insert("claude".to_string(), AgentSettings::default_for("claude"));
         agents.insert("codex".to_string(), AgentSettings::default_for("codex"));
+        agents.insert("gemini".to_string(), AgentSettings::default_for("gemini"));
         Self {
             user: UserSettings::default(),
             agents,

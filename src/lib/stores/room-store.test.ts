@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({
   createRoom: vi.fn(),
   attachRoomRun: vi.fn(),
   createRoomClaudeParticipant: vi.fn(),
+  createRoomParticipant: vi.fn(),
   updateRoomMemo: vi.fn(),
   sendRoomMessage: vi.fn(),
   deleteRoom: vi.fn(),
@@ -55,7 +56,7 @@ describe("RoomStore", () => {
 
   beforeEach(() => {
     store = new RoomStore();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it("loads room summaries", async () => {
@@ -100,6 +101,146 @@ describe("RoomStore", () => {
     expect(api.createRoom).toHaveBeenCalledWith("Driver Room", "", "D:/work", "driver");
     expect(store.selectedRoomId).toBe("r1");
     expect(store.room?.kind).toBe("driver");
+  });
+
+  it("creates a fixed three-seat roundtable and starts all participants", async () => {
+    const created = detail("r1", "Roundtable");
+    created.cwd = "D:/work";
+    const withClaude = detail("r1", "Roundtable");
+    withClaude.participants = [
+      {
+        participant: {
+          id: "p1",
+          run_id: "run-claude",
+          agent: "claude",
+          label: "Claude",
+          role: "participant",
+          joined_at: "2026-04-30T00:00:00Z",
+        },
+        run: undefined,
+        capabilities: capabilitiesForAgent("claude"),
+      },
+    ];
+    const withCodex = detail("r1", "Roundtable");
+    withCodex.participants = [
+      ...withClaude.participants,
+      {
+        participant: {
+          id: "p2",
+          run_id: "run-codex",
+          agent: "codex",
+          label: "Codex",
+          role: "participant",
+          joined_at: "2026-04-30T00:00:00Z",
+        },
+        run: undefined,
+        capabilities: capabilitiesForAgent("codex"),
+      },
+    ];
+    const withGemini = detail("r1", "Roundtable");
+    withGemini.participants = [
+      ...withCodex.participants,
+      {
+        participant: {
+          id: "p3",
+          run_id: "run-gemini",
+          agent: "gemini",
+          label: "Gemini",
+          role: "participant",
+          joined_at: "2026-04-30T00:00:00Z",
+        },
+        run: undefined,
+        capabilities: capabilitiesForAgent("gemini"),
+      },
+    ];
+    vi.mocked(api.createRoom).mockResolvedValue(created);
+    vi.mocked(api.createRoomParticipant)
+      .mockResolvedValueOnce(withClaude)
+      .mockResolvedValueOnce(withCodex)
+      .mockResolvedValueOnce(withGemini);
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Roundtable")]);
+
+    await store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+      {
+        agent: "claude",
+        prompt: "You are Claude.",
+        model: "sonnet",
+        platformId: "anthropic",
+        label: "Claude",
+        role: "participant",
+      },
+      {
+        agent: "codex",
+        prompt: "You are Codex.",
+        model: "gpt-5.5",
+        label: "Codex",
+        role: "participant",
+      },
+      {
+        agent: "gemini",
+        prompt: "You are Gemini.",
+        model: "gemini-2.5-pro",
+        label: "Gemini",
+        role: "participant",
+      },
+    ]);
+
+    expect(api.createRoom).toHaveBeenCalledWith("Roundtable", "", "D:/work", "roundtable");
+    expect(api.createRoomParticipant).toHaveBeenCalledTimes(3);
+    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+      1,
+      "r1",
+      "claude",
+      "You are Claude.",
+      "D:/work",
+      "sonnet",
+      "anthropic",
+      "Claude",
+      "participant",
+    );
+    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+      2,
+      "r1",
+      "codex",
+      "You are Codex.",
+      "D:/work",
+      "gpt-5.5",
+      undefined,
+      "Codex",
+      "participant",
+    );
+    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+      3,
+      "r1",
+      "gemini",
+      "You are Gemini.",
+      "D:/work",
+      "gemini-2.5-pro",
+      undefined,
+      "Gemini",
+      "participant",
+    );
+    expect(store.selectedRoomId).toBe("r1");
+    expect(store.room?.participants).toHaveLength(3);
+    expect(store.room?.participants.map((item) => item.participant.agent)).toEqual([
+      "claude",
+      "codex",
+      "gemini",
+    ]);
+    expect(store.saving).toBe(false);
+  });
+
+  it("rejects roundtable creation unless exactly three seats are provided", async () => {
+    await expect(
+      store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+        { agent: "claude", prompt: "One", label: "One" },
+        { agent: "codex", prompt: "Two", label: "Two" },
+      ]),
+    ).rejects.toThrow("Roundtable requires exactly three participants");
+
+    expect(api.createRoom).not.toHaveBeenCalled();
+    expect(api.createRoomParticipant).not.toHaveBeenCalled();
+    expect(store.saving).toBe(false);
   });
 
   it("creates a research room and selects it", async () => {
@@ -148,6 +289,41 @@ describe("RoomStore", () => {
 
     expect(api.updateRoomMemo).toHaveBeenCalledWith("r1", "remember");
     expect(store.room?.memo).toBe("remember");
+  });
+
+  it("creates native CLI participants", async () => {
+    const updated = detail("r1", "Room");
+    updated.participants = [
+      {
+        participant: {
+          id: "p1",
+          run_id: "run-codex",
+          agent: "codex",
+          label: "Codex",
+          role: "participant",
+          joined_at: "2026-04-30T00:00:00Z",
+        },
+        run: undefined,
+        capabilities: capabilitiesForAgent("codex"),
+      },
+    ];
+    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+
+    store.selectedRoomId = "r1";
+    await store.createParticipant("codex", "Review this", "D:/work", "gpt-5.5");
+
+    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+      "r1",
+      "codex",
+      "Review this",
+      "D:/work",
+      "gpt-5.5",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(store.room?.participants[0].participant.agent).toBe("codex");
   });
 
   it("sends a roundtable message and updates the selected room timeline", async () => {

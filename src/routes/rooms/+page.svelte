@@ -1,89 +1,124 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
-  import { listRuns } from "$lib/api";
+  import { getUserSettings } from "$lib/api";
   import { t } from "$lib/i18n/index.svelte";
-  import { RoomStore } from "$lib/stores/room-store.svelte";
-  import type { RoomKind, TaskRun } from "$lib/types";
-  import { canUseRoomActorRun } from "$lib/utils/agent-capabilities";
-  import { relativeTime, truncate } from "$lib/utils/format";
+  import { RoomStore, type RoundtableSeatDraft } from "$lib/stores/room-store.svelte";
+  import type {
+    CcAgentProfile,
+    RoomParticipantDetail,
+    RoomResponseRef,
+    RoomTurn,
+    UserSettings,
+  } from "$lib/types";
+  import { truncate } from "$lib/utils/format";
+
+  type SeatAgent = RoundtableSeatDraft["agent"];
+
+  interface SeatForm {
+    agent: SeatAgent;
+    profileId: string;
+    label: string;
+    model: string;
+    platformId: string;
+    prompt: string;
+    role: string;
+  }
+
+  interface SeatPanel {
+    index: number;
+    participant?: RoomParticipantDetail;
+  }
+
+  interface LatestParticipantResponse {
+    turn: RoomTurn;
+    response: RoomResponseRef;
+  }
 
   const store = new RoomStore();
 
-  let runs = $state<TaskRun[]>([]);
-  let createName = $state("");
+  let createName = $state("Roundtable");
   let createDescription = $state("");
   let createCwd = $state("");
-  let createKind = $state<RoomKind>("roundtable");
-  let attachRunId = $state("");
-  let participantPrompt = $state("");
-  let participantCwd = $state("");
+  let showCreateDialog = $state(false);
+  let settings = $state<UserSettings | null>(null);
+  let seatForms = $state<SeatForm[]>(defaultSeatForms());
   let memoDraft = $state("");
   let roundtableMessage = $state("");
   let deletingRoomId = $state("");
 
-  let selectedRunIds = $derived(
-    new Set(store.room?.participants.map((p) => p.participant.run_id) ?? []),
-  );
-  let attachableRuns = $derived(
-    runs.filter((run) => canUseRoomActorRun(run) && !selectedRunIds.has(run.id)),
-  );
+  let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
+  let seatPanels = $derived(fixedSeatPanels(store.room?.participants ?? []));
+  let hasThreeParticipants = $derived((store.room?.participants.length ?? 0) >= 3);
 
   onMount(async () => {
-    await Promise.all([store.loadRooms(), loadRuns()]);
+    await Promise.all([store.loadRooms(), loadSettings()]);
     if (store.rooms.length > 0 && !store.selectedRoomId) {
       await selectRoom(store.rooms[0].id);
+    } else if (store.rooms.length === 0) {
+      showCreateDialog = true;
     }
   });
 
-  async function loadRuns() {
-    runs = await listRuns();
-  }
-
-  async function refreshParticipants() {
-    await Promise.all([
-      loadRuns(),
-      store.selectedRoomId ? store.selectRoom(store.selectedRoomId) : Promise.resolve(),
-    ]);
+  async function loadSettings() {
+    const loaded = await getUserSettings();
+    settings = loaded;
+    const profiles = (loaded.cc_agent_profiles ?? []).filter((profile) => profile.enabled !== false);
+    if (!createCwd.trim() && loaded.working_directory) createCwd = loaded.working_directory;
+    seatForms = defaultSeatForms().map((seat, index) => {
+      const profile = profiles[index];
+      return profile ? seatFromProfile(seat, profile, index) : seat;
+    });
   }
 
   async function selectRoom(id: string) {
     await store.selectRoom(id);
     memoDraft = store.room?.memo ?? "";
-    participantCwd = store.room?.cwd ?? "";
-    attachRunId = "";
+    roundtableMessage = "";
+    deletingRoomId = "";
   }
 
-  async function handleCreateRoom() {
-    const name = createName.trim();
-    if (!name) return;
-    await store.createRoom(
-      name,
-      createDescription.trim(),
-      createCwd.trim() || undefined,
-      createKind,
+  function openCreateDialog() {
+    if (!createName.trim()) createName = "Roundtable";
+    showCreateDialog = true;
+  }
+
+  async function pickCreateCwd() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, title: t("room_selectProjectFolder") });
+      if (typeof selected === "string" && selected.trim()) {
+        createCwd = selected;
+      }
+    } catch {
+      const fallback = window.prompt(t("room_projectPathPlaceholder"), createCwd);
+      if (fallback !== null) createCwd = fallback.trim();
+    }
+  }
+
+  async function handleCreateRoundtable() {
+    const cwd = createCwd.trim();
+    if (!cwd) return;
+    const seats = seatForms.map((seat, index) => {
+      const agent = seat.agent;
+      return {
+        agent,
+        prompt: cleanText(seat.prompt) || defaultSeatPrompt(index, agent),
+        model: cleanText(seat.model) || undefined,
+        platformId: cleanText(seat.platformId) || undefined,
+        label: cleanText(seat.label) || defaultSeatLabel(index, agent),
+        role: cleanText(seat.role) || "participant",
+      };
+    });
+    await store.createRoundtableWithParticipants(
+      cleanText(createName) || "Roundtable",
+      cleanText(createDescription),
+      cwd,
+      seats,
     );
-    createName = "";
+    showCreateDialog = false;
+    createName = "Roundtable";
     createDescription = "";
-    createCwd = "";
-    createKind = "roundtable";
     memoDraft = store.room?.memo ?? "";
-    participantCwd = store.room?.cwd ?? "";
-  }
-
-  async function handleAttachRun() {
-    if (!attachRunId) return;
-    await store.attachRun(attachRunId);
-    attachRunId = "";
-  }
-
-  async function handleCreateParticipant() {
-    const prompt = participantPrompt.trim();
-    const cwd = participantCwd.trim() || store.room?.cwd || "/";
-    if (!prompt) return;
-    await store.createClaudeParticipant(prompt, cwd, undefined, undefined, "Claude");
-    participantPrompt = "";
-    await loadRuns();
   }
 
   async function handleSaveMemo() {
@@ -92,7 +127,7 @@
 
   async function handleSendRoundtableMessage() {
     const message = roundtableMessage.trim();
-    if (!message) return;
+    if (!message || !hasThreeParticipants) return;
     await store.sendMessage(message);
     roundtableMessage = "";
   }
@@ -102,12 +137,124 @@
     deletingRoomId = "";
     if (store.rooms.length > 0) {
       await selectRoom(store.rooms[0].id);
+    } else {
+      showCreateDialog = true;
     }
   }
 
-  function runLabel(run?: TaskRun): string {
-    if (!run) return t("room_missingRun");
-    return run.name || run.last_message_preview || run.prompt || run.id;
+  function handleProfileChange(index: number, profileId: string) {
+    const profile = ccProfiles.find((item) => item.id === profileId);
+    seatForms = seatForms.map((seat, seatIndex) => {
+      if (seatIndex !== index) return seat;
+      if (!profile) return { ...seat, profileId: "" };
+      return seatFromProfile(seat, profile, index);
+    });
+  }
+
+  function updateSeat<K extends keyof SeatForm>(index: number, key: K, value: SeatForm[K]) {
+    seatForms = seatForms.map((seat, seatIndex) =>
+      seatIndex === index ? { ...seat, [key]: value } : seat,
+    );
+  }
+
+  function defaultSeatForms(): SeatForm[] {
+    return [
+      {
+        agent: "claude",
+        profileId: "",
+        label: "Claude",
+        model: "",
+        platformId: "",
+        prompt: defaultSeatPrompt(0, "claude"),
+        role: "participant",
+      },
+      {
+        agent: "codex",
+        profileId: "",
+        label: "Codex",
+        model: "",
+        platformId: "",
+        prompt: defaultSeatPrompt(1, "codex"),
+        role: "participant",
+      },
+      {
+        agent: "gemini",
+        profileId: "",
+        label: "Gemini",
+        model: "",
+        platformId: "",
+        prompt: defaultSeatPrompt(2, "gemini"),
+        role: "participant",
+      },
+    ];
+  }
+
+  function seatFromProfile(seat: SeatForm, profile: CcAgentProfile, index: number): SeatForm {
+    const agent = profileAgent(profile);
+    return {
+      ...seat,
+      profileId: profile.id,
+      agent,
+      label: cleanText(profile.label) || displayAgentLabel(agent),
+      model: cleanText(profile.model),
+      platformId: cleanText(profile.platform_id),
+      prompt: cleanText(profile.prompt) || defaultSeatPrompt(index, agent),
+      role: cleanText(profile.role) || "participant",
+    };
+  }
+
+  function fixedSeatPanels(participants: RoomParticipantDetail[]): SeatPanel[] {
+    return [0, 1, 2].map((index) => ({ index, participant: participants[index] }));
+  }
+
+  function latestResponse(participantId?: string): LatestParticipantResponse | null {
+    if (!participantId || !store.room) return null;
+    for (let turnIndex = store.room.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+      const turn = store.room.turns[turnIndex];
+      const response = [...turn.responses]
+        .reverse()
+        .find((item) => item.participant_id === participantId);
+      if (response) return { turn, response };
+    }
+    return null;
+  }
+
+  function participantStatus(panel: SeatPanel): string {
+    const participant = panel.participant;
+    const latest = latestResponse(participant?.participant.id);
+    return latest?.response.status ?? participant?.run?.status ?? "waiting";
+  }
+
+  function cleanText(value?: string): string {
+    return value?.trim() ?? "";
+  }
+
+  function profileAgent(profile?: CcAgentProfile | null): SeatAgent {
+    if (profile?.agent === "codex" || profile?.agent === "gemini") return profile.agent;
+    return "claude";
+  }
+
+  function profileLabel(profile: CcAgentProfile): string {
+    const agent = profileAgent(profile);
+    const model = cleanText(profile.model);
+    const platform = cleanText(profile.platform_id);
+    if (model && platform) return `${profile.label} · ${agent} · ${platform} · ${model}`;
+    if (model || platform) return `${profile.label} · ${agent} · ${model || platform}`;
+    return `${profile.label} · ${agent}`;
+  }
+
+  function displayAgentLabel(agent: SeatAgent): string {
+    if (agent === "codex") return "Codex";
+    if (agent === "gemini") return "Gemini";
+    return "Claude";
+  }
+
+  function defaultSeatLabel(index: number, agent: SeatAgent): string {
+    return `${displayAgentLabel(agent)} ${index + 1}`;
+  }
+
+  function defaultSeatPrompt(index: number, agent: SeatAgent): string {
+    return `You are ${defaultSeatLabel(index, agent)} in a three-seat roundtable. Answer independently, be concrete, and keep your reasoning concise.`;
   }
 
   function statusClass(status?: string): string {
@@ -120,36 +267,15 @@
       return "bg-emerald-500/15 text-emerald-500";
     if (status === "failed") return "bg-red-500/15 text-red-500";
     if (status === "pending") return "bg-amber-500/15 text-amber-500";
+    if (status === "waiting") return "bg-muted text-muted-foreground";
     if (status === "stopped") return "bg-muted text-muted-foreground";
     return "bg-muted text-muted-foreground";
-  }
-
-  function turnModeLabel(mode: string): string {
-    if (mode === "research") return t("room_turnResearch");
-    if (mode === "review") return t("room_turnReview");
-    if (mode === "debate") return t("room_turnDebate");
-    if (mode === "summary") return t("room_turnSummary");
-    if (mode === "private") return t("room_turnPrivate");
-    return t("room_turnFanout");
   }
 
   function roomKindLabel(kind: string): string {
     if (kind === "research") return t("room_kindResearch");
     if (kind === "driver") return t("room_kindDriver");
     return t("room_kindRoundtable");
-  }
-
-  function participantLabel(participantId: string): string {
-    const participant = store.room?.participants.find(
-      (item) => item.participant.id === participantId,
-    );
-    return participant?.participant.label ?? participantId;
-  }
-
-  function memoryKindLabel(kind: string): string {
-    if (kind === "decision") return t("room_memoryDecision");
-    if (kind === "lesson") return t("room_memoryLesson");
-    return t("room_memoryFact");
   }
 </script>
 
@@ -165,41 +291,16 @@
           {t("room_refresh")}
         </button>
       </div>
-      <div class="mt-3 space-y-2">
-        <input
-          class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          placeholder={t("room_namePlaceholder")}
-          bind:value={createName}
-        />
-        <input
-          class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          placeholder={t("room_descriptionPlaceholder")}
-          bind:value={createDescription}
-        />
-        <input
-          class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          placeholder={t("room_projectPathPlaceholder")}
-          bind:value={createCwd}
-        />
-        <select
-          class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          bind:value={createKind}
-        >
-          <option value="roundtable">{t("room_kindRoundtable")}</option>
-          <option value="driver">{t("room_kindDriver")}</option>
-          <option value="research">{t("room_kindResearch")}</option>
-        </select>
-        <button
-          class="w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-          disabled={!createName.trim() || store.saving}
-          onclick={handleCreateRoom}
-        >
-          {t("room_create")}
-        </button>
-      </div>
+      <button
+        class="mt-3 w-full rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
+        disabled={store.saving}
+        onclick={openCreateDialog}
+      >
+        {t("room_newRoundtable")}
+      </button>
     </div>
 
-    <div class="h-[calc(100%-184px)] overflow-y-auto p-2">
+    <div class="h-[calc(100%-90px)] overflow-y-auto p-2">
       {#if store.loading && store.rooms.length === 0}
         <div class="flex justify-center py-8">
           <div
@@ -211,16 +312,15 @@
       {:else}
         {#each store.rooms as room}
           <button
-            class="mb-1 flex w-full flex-col gap-1 rounded-md px-2.5 py-2 text-left transition-colors
-              {store.selectedRoomId === room.id
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-accent/50'}"
+            class={store.selectedRoomId === room.id
+              ? "mb-1 flex w-full flex-col gap-1 rounded-md bg-accent px-2.5 py-2 text-left text-accent-foreground transition-colors"
+              : "mb-1 flex w-full flex-col gap-1 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent/50"}
             onclick={() => selectRoom(room.id)}
           >
             <div class="flex items-center gap-2">
               <span class="min-w-0 flex-1 truncate text-sm font-medium">{room.name}</span>
               <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >{room.participant_count}</span
+                >{room.participant_count}/3</span
               >
               <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
                 >{roomKindLabel(room.kind)}</span
@@ -246,6 +346,7 @@
         {store.error}
       </div>
     {/if}
+
     {#if store.room}
       <div class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div class="min-w-0">
@@ -287,242 +388,309 @@
         </div>
       </div>
 
-      <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] overflow-hidden">
-        <div class="flex min-w-0 flex-col overflow-hidden">
-          <div class="min-h-0 flex-1 overflow-y-auto p-5">
-            <section class="mb-6">
-              <h3 class="mb-3 text-sm font-semibold">{t("room_timeline")}</h3>
-              <div class="space-y-2">
-                {#if store.room.turns.length === 0}
-                  <p
-                    class="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground"
-                  >
-                    {t("room_noTurns")}
-                  </p>
-                {:else}
-                  {#each store.room.turns as turn}
-                    <div class="rounded-md border border-border bg-card p-3">
-                      <div class="flex flex-wrap items-center gap-2">
+      <div class="min-h-0 flex-1 overflow-y-auto p-5">
+        <section>
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold">{t("room_threeSeatBoard")}</h3>
+            {#if !hasThreeParticipants}
+              <span class="text-xs text-amber-600">{t("room_needThreeParticipants")}</span>
+            {/if}
+          </div>
+          <div class="grid min-h-[360px] grid-cols-1 gap-3 xl:grid-cols-3">
+            {#each seatPanels as panel}
+              {@const participant = panel.participant}
+              {@const latest = latestResponse(participant?.participant.id)}
+              <article class="flex min-h-[320px] flex-col rounded-md border border-border bg-card">
+                <header class="border-b border-border px-4 py-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2">
                         <span
-                          class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                          >{turnModeLabel(turn.mode)}</span
+                          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold"
+                          >{panel.index + 1}</span
                         >
-                        <span class="text-xs text-muted-foreground">#{turn.idx}</span>
-                      </div>
-                      <p class="mt-2 text-sm text-foreground">{turn.user_input}</p>
-                      {#if turn.responses.length > 0}
-                        <div class="mt-3 space-y-1.5">
-                          {#each turn.responses as response}
-                            <div class="rounded border border-border/70 px-2 py-1.5">
-                              <div class="flex flex-wrap items-center gap-2 text-xs">
-                                <span class="font-medium"
-                                  >{participantLabel(response.participant_id)}</span
-                                >
-                                <span class="rounded px-1.5 py-0.5 {statusClass(response.status)}"
-                                  >{response.status}</span
-                                >
-                              </div>
-                              {#if response.preview}
-                                <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                                  {response.preview}
-                                </p>
-                              {/if}
-                              {#if response.error}
-                                <p class="mt-1 text-xs text-destructive">{response.error}</p>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                {/if}
-              </div>
-            </section>
-
-            <section>
-              <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-sm font-semibold">{t("room_participants")}</h3>
-                <button
-                  class="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
-                  onclick={refreshParticipants}
-                >
-                  {t("room_refreshRuns")}
-                </button>
-              </div>
-
-              <div class="space-y-2">
-                {#if store.room.participants.length === 0}
-                  <p
-                    class="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground"
-                  >
-                    {t("room_noParticipants")}
-                  </p>
-                {:else}
-                  {#each store.room.participants as item}
-                    <div class="rounded-md border border-border bg-card p-3">
-                      <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          <div class="flex items-center gap-2">
-                            <span class="text-sm font-medium">{item.participant.label}</span>
-                            <span
-                              class="rounded px-1.5 py-0.5 text-[10px] {statusClass(
-                                item.run?.status,
-                              )}">{item.run?.status ?? "missing"}</span
-                            >
-                          </div>
-                          <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                            {truncate(runLabel(item.run), 180)}
+                          <h4 class="truncate text-sm font-semibold">
+                            {participant?.participant.label ?? t("room_waitingForParticipant")}
+                          </h4>
+                          <p class="truncate text-xs text-muted-foreground">
+                            {participant
+                              ? `${participant.participant.agent}${participant.run?.model ? ` · ${participant.run.model}` : ""}`
+                              : t("room_waitingResponse")}
                           </p>
-                          <div class="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            <span>{item.participant.agent}</span>
-                            <span>{item.participant.role}</span>
-                            {#if item.run?.model}<span>{item.run.model}</span>{/if}
-                            {#if item.run?.last_activity_at}
-                              <span>{relativeTime(item.run.last_activity_at)}</span>
-                            {/if}
-                          </div>
                         </div>
-                        <button
-                          class="shrink-0 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
-                          onclick={() => goto(`/chat?run=${item.participant.run_id}`)}
-                        >
-                          {t("room_open")}
-                        </button>
                       </div>
                     </div>
-                  {/each}
-                {/if}
-              </div>
-            </section>
-          </div>
-
-          <div class="border-t border-border p-3">
-            <div class="flex gap-2">
-              <textarea
-                class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                placeholder={store.room.kind === "driver"
-                  ? t("room_driverPlaceholder")
-                  : store.room.kind === "research"
-                    ? t("room_researchPlaceholder")
-                    : t("room_roundtablePlaceholder")}
-                bind:value={roundtableMessage}
-                onkeydown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                    event.preventDefault();
-                    void handleSendRoundtableMessage();
-                  }
-                }}
-              ></textarea>
-              <button
-                class="w-24 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-                disabled={!roundtableMessage.trim() ||
-                  store.saving ||
-                  store.room.participants.length === 0}
-                onclick={handleSendRoundtableMessage}
-              >
-                {t("room_send")}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <aside class="min-h-0 overflow-y-auto border-l border-border p-4">
-          <div class="space-y-6">
-            <section>
-              <h3 class="mb-2 text-sm font-semibold">{t("room_attachRun")}</h3>
-              <select
-                class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                bind:value={attachRunId}
-              >
-                <option value="">{t("room_selectClaudeRun")}</option>
-                {#each attachableRuns as run}
-                  <option value={run.id}>{truncate(runLabel(run), 80)}</option>
-                {/each}
-              </select>
-              <button
-                class="mt-2 w-full rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                disabled={!attachRunId || store.saving}
-                onclick={handleAttachRun}
-              >
-                {t("room_attach")}
-              </button>
-            </section>
-
-            <section>
-              <h3 class="mb-2 text-sm font-semibold">{t("room_newClaudeParticipant")}</h3>
-              <textarea
-                class="min-h-24 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                placeholder={t("room_initialPromptPlaceholder")}
-                bind:value={participantPrompt}
-              ></textarea>
-              <input
-                class="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                placeholder={t("room_projectPathPlaceholder")}
-                bind:value={participantCwd}
-              />
-              <button
-                class="mt-2 w-full rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-                disabled={!participantPrompt.trim() || store.saving}
-                onclick={handleCreateParticipant}
-              >
-                {t("room_createParticipant")}
-              </button>
-            </section>
-
-            <section>
-              <h3 class="mb-2 text-sm font-semibold">{t("room_memo")}</h3>
-              <textarea
-                class="min-h-32 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                bind:value={memoDraft}
-              ></textarea>
-              <button
-                class="mt-2 w-full rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
-                disabled={store.saving}
-                onclick={handleSaveMemo}
-              >
-                {t("room_saveMemo")}
-              </button>
-            </section>
-
-            {#if store.room.kind === "research" && store.room.research_artifact}
-              <section>
-                <h3 class="mb-2 text-sm font-semibold">{t("room_researchArtifact")}</h3>
-                <div class="rounded-md border border-border bg-card p-3 text-sm">
-                  <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>{store.room.research_artifact.topic}</span>
-                    <span>v{store.room.research_artifact.schema_version}</span>
+                    <span
+                      class={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(
+                        participantStatus(panel),
+                      )}`}
+                    >
+                      {participantStatus(panel)}
+                    </span>
                   </div>
-                  <p class="mt-2 text-xs text-muted-foreground">
-                    {store.room.research_artifact.generated_at}
-                  </p>
-                  {#if store.room.research_artifact.memory_candidates.length > 0}
-                    <div class="mt-3 space-y-2">
-                      {#each store.room.research_artifact.memory_candidates as candidate}
-                        <div class="rounded border border-border/70 px-2 py-1.5">
-                          <div class="flex flex-wrap gap-2 text-xs">
-                            <span class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
-                              >{memoryKindLabel(candidate.kind)}</span
+                </header>
+
+                <div class="flex min-h-0 flex-1 flex-col px-4 py-3">
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">
+                    {t("room_latestAnswer")}
+                  </div>
+                  {#if latest?.response.preview}
+                    <p class="min-h-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6">
+                      {latest.response.preview}
+                    </p>
+                    <p class="mt-3 rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                      {t("room_lastPrompt")}: {truncate(latest.turn.user_input, 180)}
+                    </p>
+                  {:else if latest?.response.error}
+                    <p class="text-sm text-destructive">{latest.response.error}</p>
+                  {:else}
+                    <div
+                      class="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground"
+                    >
+                      {participant ? t("room_noResponseYet") : t("room_waitingForParticipant")}
+                    </div>
+                  {/if}
+                </div>
+              </article>
+            {/each}
+          </div>
+        </section>
+
+        <section class="mt-6">
+          <h3 class="mb-3 text-sm font-semibold">{t("room_memo")}</h3>
+          <div class="flex gap-2">
+            <textarea
+              class="min-h-20 flex-1 resize-y rounded-md border border-border bg-background px-3 py-2 text-sm"
+              bind:value={memoDraft}
+            ></textarea>
+            <button
+              class="w-24 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
+              disabled={store.saving}
+              onclick={handleSaveMemo}
+            >
+              {t("room_saveMemo")}
+            </button>
+          </div>
+        </section>
+
+        <section class="mt-6">
+          <h3 class="mb-3 text-sm font-semibold">{t("room_history")}</h3>
+          <div class="space-y-2">
+            {#if store.room.turns.length === 0}
+              <p
+                class="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground"
+              >
+                {t("room_noTurns")}
+              </p>
+            {:else}
+              {#each store.room.turns as turn}
+                <div class="rounded-md border border-border bg-card p-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >#{turn.idx}</span
+                    >
+                    <span class="text-xs text-muted-foreground">{turn.user_input}</span>
+                  </div>
+                  {#if turn.responses.length > 0}
+                    <div class="mt-3 grid gap-2 md:grid-cols-3">
+                      {#each turn.responses as response}
+                        <div class="rounded-md border border-border bg-background px-3 py-2">
+                          <div class="flex flex-wrap items-center gap-2 text-xs">
+                            <span class="font-medium">
+                              {store.room.participants.find(
+                                (item) => item.participant.id === response.participant_id,
+                              )?.participant.label ?? response.participant_id}
+                            </span>
+                            <span class={`rounded px-1.5 py-0.5 ${statusClass(response.status)}`}
+                              >{response.status}</span
                             >
-                            <span class="text-muted-foreground">{candidate.source_run_id}</span>
                           </div>
-                          <p class="mt-1 text-xs text-foreground">{candidate.text}</p>
+                          {#if response.preview}
+                            <p class="mt-2 whitespace-pre-wrap break-words text-sm text-foreground">
+                              {response.preview}
+                            </p>
+                          {/if}
+                          {#if response.error}
+                            <p class="mt-1 text-xs text-destructive">{response.error}</p>
+                          {/if}
                         </div>
                       {/each}
                     </div>
-                  {:else}
-                    <p class="mt-3 text-xs text-muted-foreground">{t("room_noMemoryCandidates")}</p>
                   {/if}
                 </div>
-              </section>
+              {/each}
             {/if}
           </div>
-        </aside>
+        </section>
+      </div>
+
+      <div class="border-t border-border p-3">
+        <div class="flex gap-2">
+          <textarea
+            class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            placeholder={t("room_roundtablePlaceholder")}
+            bind:value={roundtableMessage}
+            onkeydown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                event.preventDefault();
+                void handleSendRoundtableMessage();
+              }
+            }}
+          ></textarea>
+          <button
+            class="w-24 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+            disabled={!roundtableMessage.trim() || store.saving || !hasThreeParticipants}
+            onclick={handleSendRoundtableMessage}
+          >
+            {t("room_send")}
+          </button>
+        </div>
       </div>
     {:else}
       <div class="flex h-full items-center justify-center">
-        <p class="text-sm text-muted-foreground">{t("room_selectOrCreate")}</p>
+        <div class="text-center">
+          <p class="text-sm text-muted-foreground">{t("room_selectOrCreate")}</p>
+          <button
+            class="mt-3 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+            onclick={openCreateDialog}
+          >
+            {t("room_newRoundtable")}
+          </button>
+        </div>
       </div>
     {/if}
   </section>
 </div>
+
+{#if showCreateDialog}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+    <div class="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-md border border-border bg-background shadow-lg">
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-semibold">{t("room_roundtableSetup")}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">{t("room_createStartsThree")}</p>
+          </div>
+          <button
+            class="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
+            onclick={() => (showCreateDialog = false)}
+          >
+            {t("room_confirmNo")}
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-4 p-5">
+        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
+          <input
+            class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+            placeholder={t("room_namePlaceholder")}
+            bind:value={createName}
+          />
+          <input
+            class="rounded-md border border-border bg-background px-3 py-2 text-sm"
+            placeholder={t("room_descriptionPlaceholder")}
+            bind:value={createDescription}
+          />
+          <button
+            type="button"
+            class="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-sm hover:bg-accent"
+            onclick={pickCreateCwd}
+            title={createCwd || t("room_selectProjectFolder")}
+          >
+            <span class={createCwd ? "min-w-0 truncate" : "min-w-0 truncate text-muted-foreground"}>
+              {createCwd || t("room_projectPathUnset")}
+            </span>
+            <span class="shrink-0 text-xs text-muted-foreground">{t("common_browse")}</span>
+          </button>
+        </div>
+
+        <div class="grid gap-3 xl:grid-cols-3">
+          {#each seatForms as seat, index}
+            <section class="rounded-md border border-border bg-card p-4">
+              <div class="mb-3 flex items-center gap-2">
+                <span
+                  class="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-sm font-semibold"
+                  >{index + 1}</span
+                >
+                <h3 class="text-sm font-semibold">{t("room_seat")} {index + 1}</h3>
+              </div>
+
+              {#if ccProfiles.length > 0}
+                <label class="mb-2 block text-xs font-medium text-muted-foreground">
+                  {t("room_profile")}
+                  <select
+                    class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                    value={seat.profileId}
+                    onchange={(event) => handleProfileChange(index, event.currentTarget.value)}
+                  >
+                    <option value="">{t("room_manualProfile")}</option>
+                    {#each ccProfiles as profile}
+                      <option value={profile.id}>{profileLabel(profile)}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+
+              <div class="grid grid-cols-2 gap-2">
+                <label class="block text-xs font-medium text-muted-foreground">
+                  {t("room_agent")}
+                  <select
+                    class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                    value={seat.agent}
+                    onchange={(event) => updateSeat(index, "agent", event.currentTarget.value as SeatAgent)}
+                  >
+                    <option value="claude">Claude Code</option>
+                    <option value="codex">Codex CLI</option>
+                    <option value="gemini">Gemini CLI</option>
+                  </select>
+                </label>
+                <label class="block text-xs font-medium text-muted-foreground">
+                  {t("room_model")}
+                  <input
+                    class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                    value={seat.model}
+                    placeholder="default"
+                    oninput={(event) => updateSeat(index, "model", event.currentTarget.value)}
+                  />
+                </label>
+              </div>
+
+              <label class="mt-2 block text-xs font-medium text-muted-foreground">
+                {t("room_seatLabel")}
+                <input
+                  class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  value={seat.label}
+                  oninput={(event) => updateSeat(index, "label", event.currentTarget.value)}
+                />
+              </label>
+
+              <label class="mt-2 block text-xs font-medium text-muted-foreground">
+                {t("room_slotPrompt")}
+                <textarea
+                  class="mt-1 min-h-28 w-full resize-y rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  value={seat.prompt}
+                  oninput={(event) => updateSeat(index, "prompt", event.currentTarget.value)}
+                ></textarea>
+              </label>
+            </section>
+          {/each}
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
+        <p class="text-xs text-muted-foreground">
+          {createCwd ? createCwd : t("room_requiredProjectFolder")}
+        </p>
+        <button
+          class="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+          disabled={!createCwd.trim() || store.saving}
+          onclick={handleCreateRoundtable}
+        >
+          {t("room_createRoundtable")}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

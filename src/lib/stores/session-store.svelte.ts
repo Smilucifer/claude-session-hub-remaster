@@ -35,6 +35,7 @@ import * as snapshotCache from "$lib/utils/snapshot-cache";
 import { getTransport } from "$lib/transport";
 import { getAgentFeatures, type AgentFeatures } from "$lib/utils/agent-features";
 import { dedupeMcpServersByName } from "$lib/utils/mcp";
+import { isActiveBackgroundTask } from "$lib/utils/background-tasks";
 
 // ── CLI permission mode normalization ──
 // CLI may return different names for the same mode across versions.
@@ -594,7 +595,7 @@ export class SessionStore {
   get activeBackgroundTasks(): TaskNotificationItem[] {
     const active: TaskNotificationItem[] = [];
     for (const item of this.taskNotifications.values()) {
-      if (item.status !== "completed" && item.status !== "failed" && item.status !== "error") {
+      if (isActiveBackgroundTask(item)) {
         active.push(item);
       }
     }

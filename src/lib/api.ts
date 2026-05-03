@@ -180,6 +180,29 @@ export async function createRoomClaudeParticipant(
   });
 }
 
+export async function createRoomParticipant(
+  roomId: string,
+  agent: "claude" | "codex" | "gemini",
+  prompt: string,
+  cwd: string,
+  model?: string,
+  platformId?: string,
+  label?: string,
+  role?: string,
+): Promise<RoomDetail> {
+  dbg("api", "createRoomParticipant", { roomId, agent, cwd });
+  return invoke<RoomDetail>("create_room_participant", {
+    roomId,
+    agent,
+    prompt,
+    cwd,
+    model: model ?? null,
+    platformId: platformId ?? null,
+    label: label ?? null,
+    role: role ?? null,
+  });
+}
+
 export async function updateRoomMemo(roomId: string, memo: string): Promise<RoomDetail> {
   dbg("api", "updateRoomMemo", { roomId });
   return invoke<RoomDetail>("update_room_memo", { roomId, memo });

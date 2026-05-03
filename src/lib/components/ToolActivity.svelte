@@ -1,6 +1,13 @@
 <script lang="ts">
-  import type { HookEvent, ContextSnapshot, SessionInfoData, FileEntry } from "$lib/types";
-  import type { TimelineEntry, BusToolItem, TurnUsage } from "$lib/stores/types";
+  import type {
+    HookEvent,
+    ContextSnapshot,
+    SessionInfoData,
+    FileEntry,
+    TimelineEntry,
+    BusToolItem,
+  } from "$lib/types";
+  import type { TurnUsage } from "$lib/stores/types";
   import { getToolColor } from "$lib/utils/tool-colors";
   import { truncate, formatTokenCount, formatDuration } from "$lib/utils/format";
   import { getToolDetail as getToolDetailRaw } from "$lib/utils/tool-rendering";
@@ -18,6 +25,7 @@
   } from "$lib/utils/file-entries";
   import { extractTaskToolMeta, type TaskToolMeta } from "$lib/utils/tool-rendering";
   import type { TaskNotificationItem } from "$lib/stores/session-store.svelte";
+  import { isActiveBackgroundTask, sortBackgroundTasks } from "$lib/utils/background-tasks";
 
   let {
     timeline = [],
@@ -30,7 +38,9 @@
     onToggle,
     onScrollToTool,
     onScrollToTurn,
-    requestedTab = $bindable(null as "tools" | "context" | "files" | "info" | "tasks" | null),
+    requestedTab = $bindable(
+      null as "tools" | "context" | "files" | "info" | "runningTasks" | "tasks" | null,
+    ),
     backgroundTasks = new Map(),
     activeBackgroundTasks = [],
   }: {
@@ -44,13 +54,13 @@
     onToggle: () => void;
     onScrollToTool?: (toolUseId: string) => void;
     onScrollToTurn?: (anchorId: string) => void;
-    requestedTab?: "tools" | "context" | "files" | "info" | "tasks" | null;
+    requestedTab?: "tools" | "context" | "files" | "info" | "runningTasks" | "tasks" | null;
     backgroundTasks?: Map<string, TaskNotificationItem>;
     activeBackgroundTasks?: TaskNotificationItem[];
   } = $props();
 
   // ── Tab state ──
-  type SidebarPanel = "tools" | "context" | "files" | "info" | "tasks";
+  type SidebarPanel = "tools" | "context" | "files" | "info" | "runningTasks" | "tasks";
   let activeTab: SidebarPanel = $state("tools");
 
   // ── External tab request ──
@@ -152,15 +162,11 @@
   // ── Background tasks (sorted: active first, then by recency) ──
 
   let sortedBgTasks = $derived.by(() => {
-    const items = [...backgroundTasks.values()];
-    return items.sort((a, b) => {
-      const aActive =
-        a.status !== "completed" && a.status !== "failed" && a.status !== "error" ? 0 : 1;
-      const bActive =
-        b.status !== "completed" && b.status !== "failed" && b.status !== "error" ? 0 : 1;
-      if (aActive !== bActive) return aActive - bActive;
-      return b.startedAt - a.startedAt;
-    });
+    return sortBackgroundTasks([...backgroundTasks.values()]);
+  });
+
+  let sortedRunningBgTasks = $derived.by(() => {
+    return sortBackgroundTasks(activeBackgroundTasks).filter(isActiveBackgroundTask);
   });
 
   function bgElapsed(startedAt: number): string {
@@ -515,6 +521,32 @@
               <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
           </button>
+          <!-- Running background tasks icon -->
+          <button
+            class="p-1.5 rounded transition-colors relative {activeTab === 'runningTasks'
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+            onclick={() => (activeTab = "runningTasks")}
+            title={t("toolActivity_tabRunningTasks")}
+          >
+            <svg
+              class="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M10 8l6 4-6 4V8z" />
+            </svg>
+            {#if activeBackgroundTasks.length > 0}
+              <span
+                class="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse"
+              ></span>
+            {/if}
+          </button>
           <!-- Tasks icon -->
           <button
             class="p-1.5 rounded transition-colors relative {activeTab === 'tasks'
@@ -562,7 +594,71 @@
       </div>
     </div>
 
-    {#if activeTab === "tasks"}
+    {#if activeTab === "runningTasks"}
+      <!-- Running background tasks panel -->
+      <div class="flex-1 overflow-y-auto">
+        {#if sortedRunningBgTasks.length === 0}
+          <div class="flex items-center justify-center h-32 text-xs text-muted-foreground/50">
+            {t("bgTask_runningEmpty")}
+          </div>
+        {:else}
+          <div class="px-2 py-2">
+            <div class="mb-2 flex items-center justify-between px-1">
+              <span class="text-[11px] font-medium text-foreground/70">
+                {t("bgTask_runningTitle", { count: String(sortedRunningBgTasks.length) })}
+              </span>
+              <span class="inline-flex items-center gap-1 text-[10px] text-blue-400">
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse"
+                ></span>
+                {t("bgTask_active", { count: String(sortedRunningBgTasks.length) })}
+              </span>
+            </div>
+            <div class="space-y-1">
+              {#each sortedRunningBgTasks as item (item.task_id)}
+                {@const rawData = (item.data as Record<string, unknown> | undefined)?.data as
+                  | Record<string, unknown>
+                  | undefined}
+                {@const usage = rawData?.usage as
+                  | { duration_ms?: number; tool_uses?: number; total_tokens?: number }
+                  | undefined}
+                {@const toolUseId = item.tool_use_id}
+                <button
+                  class="w-full rounded-md border border-blue-500/10 bg-blue-500/5 px-2.5 py-2 text-left text-foreground/75 transition-colors hover:bg-blue-500/10"
+                  onclick={() => {
+                    if (toolUseId) onScrollToTool?.(toolUseId);
+                  }}
+                  title={toolUseId ? t("toolActivity_scrollToTool") : ""}
+                >
+                  <div class="flex items-start gap-2">
+                    <StatusIcon status="running" size="sm" />
+                    <div class="min-w-0 flex-1">
+                      <div class="truncate text-[11px] font-medium">
+                        {item.summary || item.message}
+                      </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/70">
+                        <span class="tabular-nums">{bgElapsed(item.startedAt)}</span>
+                        {#if item.task_type}
+                          <span>·</span>
+                          <span>{item.task_type}</span>
+                        {/if}
+                        {#if usage && (usage.tool_uses || usage.total_tokens || usage.duration_ms)}
+                          <span>·</span>
+                          {#if usage.tool_uses}<span>{usage.tool_uses} tools</span>{/if}
+                          {#if usage.duration_ms}<span>{formatDuration(usage.duration_ms)}</span>{/if}
+                          {#if usage.total_tokens}
+                            <span>{formatTokenCount(usage.total_tokens)} tok</span>
+                          {/if}
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {:else if activeTab === "tasks"}
       <!-- Background tasks panel -->
       <div class="flex-1 overflow-y-auto">
         {#if backgroundTasks.size === 0}
@@ -981,6 +1077,33 @@
         <line x1="12" y1="16" x2="12" y2="12" />
         <line x1="12" y1="8" x2="12.01" y2="8" />
       </svg>
+    </button>
+    <button
+      class="p-1 rounded transition-colors relative {activeTab === 'runningTasks'
+        ? 'text-foreground bg-accent'
+        : 'text-muted-foreground/50 hover:text-muted-foreground'}"
+      onclick={() => {
+        activeTab = "runningTasks";
+        onToggle();
+      }}
+      title={t("toolActivity_tabRunningTasks")}
+    >
+      <svg
+        class="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <path d="M10 8l6 4-6 4V8z" />
+      </svg>
+      {#if activeBackgroundTasks.length > 0}
+        <span class="absolute top-0 right-0 h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse"
+        ></span>
+      {/if}
     </button>
     <button
       class="p-1 rounded transition-colors relative {activeTab === 'tasks'

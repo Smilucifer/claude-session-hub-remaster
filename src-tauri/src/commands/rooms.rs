@@ -1,12 +1,13 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::spawn_locks::SpawnLocks;
-use crate::models::{ExecutionPath, RunStatus};
+use crate::agent::stream::ProcessMap;
+use crate::models::{ExecutionPath, RunMeta, RunStatus};
 use crate::room::adapter::{can_use_room_actor_run, AgentCapabilities};
 use crate::room::models::{RoomDetail, RoomKind, RoomParticipantDetail, RoomSummary};
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
@@ -82,22 +83,59 @@ pub fn attach_room_run(
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
-    let capabilities = AgentCapabilities::for_agent(&run.agent);
-    if !capabilities.can_use_room_actor() {
-        return Err(format!(
-            "Agent '{}' does not support Room stream sessions yet",
-            run.agent
-        ));
-    }
-    if !can_use_room_actor_run(&run) {
-        return Err(format!(
-            "Run {} uses {:?} and is not a Room stream session",
-            run.id,
-            run.resolved_execution_path()
-        ));
-    }
+    validate_room_participant_run(&run)?;
     storage::rooms::attach_run(&room_id, &run_id, label, role)?;
     room_detail(&room_id)
+}
+
+fn validate_room_participant_run(run: &RunMeta) -> Result<(), String> {
+    let capabilities = AgentCapabilities::for_agent(&run.agent);
+    let path = run.resolved_execution_path();
+    let supported = match &path {
+        ExecutionPath::SessionActor => capabilities.stream_session && can_use_room_actor_run(run),
+        ExecutionPath::PipeExec => capabilities.pipe_exec,
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(format!(
+            "Run {} uses agent '{}' with {:?}, which is not supported in Rooms",
+            run.id, run.agent, path
+        ))
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_room_participant(
+    emitter: State<'_, Arc<BroadcastEmitter>>,
+    sessions: State<'_, ActorSessionMap>,
+    spawn_locks: State<'_, SpawnLocks>,
+    cancel_token: State<'_, CancellationToken>,
+    room_id: String,
+    agent: Option<String>,
+    prompt: String,
+    cwd: String,
+    model: Option<String>,
+    platform_id: Option<String>,
+    label: Option<String>,
+    role: Option<String>,
+) -> Result<RoomDetail, String> {
+    create_room_participant_impl(
+        emitter.inner(),
+        sessions.inner(),
+        spawn_locks.inner(),
+        cancel_token.inner(),
+        room_id,
+        agent.unwrap_or_else(|| "claude".to_string()),
+        prompt,
+        cwd,
+        model,
+        platform_id,
+        label,
+        role,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -115,57 +153,108 @@ pub async fn create_room_claude_participant(
     label: Option<String>,
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
-    let run_id = create_claude_participant_run(&room_id, prompt, cwd, model, platform_id.clone())?;
-    if let Err(e) = crate::commands::session::start_session_impl(
+    create_room_participant_impl(
         emitter.inner(),
         sessions.inner(),
         spawn_locks.inner(),
         cancel_token.inner(),
-        run_id.clone(),
-        None,
-        None,
-        None,
-        None,
+        room_id,
+        "claude".to_string(),
+        prompt,
+        cwd,
+        model,
         platform_id,
-        None,
+        label,
+        role,
     )
     .await
-    {
-        cleanup_unattached_participant_run(
-            emitter.inner(),
-            sessions.inner(),
-            spawn_locks.inner(),
-            &run_id,
-            &format!("Room participant startup failed: {e}"),
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_room_participant_impl(
+    emitter: &Arc<BroadcastEmitter>,
+    sessions: &ActorSessionMap,
+    spawn_locks: &SpawnLocks,
+    cancel_token: &CancellationToken,
+    room_id: String,
+    agent: String,
+    prompt: String,
+    cwd: String,
+    model: Option<String>,
+    platform_id: Option<String>,
+    label: Option<String>,
+    role: Option<String>,
+) -> Result<RoomDetail, String> {
+    let normalized_agent = normalize_agent(&agent)?;
+    let run_id = create_room_participant_run(
+        &room_id,
+        normalized_agent.clone(),
+        prompt,
+        cwd,
+        model,
+        platform_id.clone(),
+    )?;
+    let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
+    if matches!(run.resolved_execution_path(), ExecutionPath::SessionActor) {
+        if let Err(e) = crate::commands::session::start_session_impl(
+            emitter,
+            sessions,
+            spawn_locks,
+            cancel_token,
+            run_id.clone(),
+            None,
+            None,
+            None,
+            None,
+            platform_id,
+            None,
         )
         .await
-        .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
-        return Err(e);
+        {
+            cleanup_unattached_participant_run(
+                emitter,
+                sessions,
+                spawn_locks,
+                &run_id,
+                &format!("Room participant startup failed: {e}"),
+            )
+            .await
+            .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
+            return Err(e);
+        }
     }
 
     if let Err(e) = storage::rooms::attach_run(
         &room_id,
         &run_id,
-        label.or_else(|| Some("Claude".to_string())),
+        label.or_else(|| Some(default_participant_label(&normalized_agent))),
         role,
     ) {
-        cleanup_unattached_participant_run(
-            emitter.inner(),
-            sessions.inner(),
-            spawn_locks.inner(),
-            &run_id,
-            &format!("Room participant attach failed: {e}"),
-        )
-        .await
-        .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
+        if matches!(run.resolved_execution_path(), ExecutionPath::SessionActor) {
+            cleanup_unattached_participant_run(
+                emitter,
+                sessions,
+                spawn_locks,
+                &run_id,
+                &format!("Room participant attach failed: {e}"),
+            )
+            .await
+            .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
+        } else {
+            mark_participant_run_failed_and_deleted(
+                &run_id,
+                &format!("Room participant attach failed: {e}"),
+            )?;
+        }
         return Err(e);
     }
 
     room_detail(&room_id)
 }
 
-fn create_claude_participant_run(
+fn create_room_participant_run(
     room_id: &str,
+    agent: String,
     prompt: String,
     cwd: String,
     model: Option<String>,
@@ -174,11 +263,12 @@ fn create_claude_participant_run(
     let _room =
         storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
     let run_id = uuid::Uuid::new_v4().to_string();
+    let execution_path = default_room_execution_path(&agent)?;
     let mut meta = storage::runs::create_run(
         &run_id,
         &prompt,
         &cwd,
-        "claude",
+        &agent,
         RunStatus::Pending,
         model,
         None,
@@ -187,9 +277,56 @@ fn create_claude_participant_run(
         None,
         platform_id,
     )?;
-    meta.execution_path = Some(ExecutionPath::SessionActor);
+    meta.execution_path = Some(execution_path);
     storage::runs::save_meta(&meta)?;
     Ok(run_id)
+}
+
+#[cfg(test)]
+fn create_claude_participant_run(
+    room_id: &str,
+    prompt: String,
+    cwd: String,
+    model: Option<String>,
+    platform_id: Option<String>,
+) -> Result<String, String> {
+    create_room_participant_run(
+        room_id,
+        "claude".to_string(),
+        prompt,
+        cwd,
+        model,
+        platform_id,
+    )
+}
+
+fn normalize_agent(agent: &str) -> Result<String, String> {
+    let normalized = agent.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "claude" | "codex" | "gemini" => Ok(normalized),
+        _ => Err(format!(
+            "Unsupported Room participant agent: {agent}. Supported: claude, codex, gemini"
+        )),
+    }
+}
+
+fn default_room_execution_path(agent: &str) -> Result<ExecutionPath, String> {
+    let capabilities = AgentCapabilities::for_agent(agent);
+    if capabilities.stream_session {
+        Ok(ExecutionPath::SessionActor)
+    } else if capabilities.pipe_exec {
+        Ok(ExecutionPath::PipeExec)
+    } else {
+        Err(format!("Agent '{agent}' is not supported in Rooms"))
+    }
+}
+
+fn default_participant_label(agent: &str) -> String {
+    match agent {
+        "codex" => "Codex".to_string(),
+        "gemini" => "Gemini".to_string(),
+        _ => "Claude".to_string(),
+    }
 }
 
 async fn cleanup_unattached_participant_run(
@@ -218,24 +355,45 @@ pub fn update_room_memo(room_id: String, memo: String) -> Result<RoomDetail, Str
 
 #[tauri::command]
 pub async fn send_room_message(
+    app: AppHandle,
     sessions: State<'_, ActorSessionMap>,
+    process_map: State<'_, ProcessMap>,
     room_id: String,
     message: String,
 ) -> Result<RoomDetail, String> {
     let room =
         storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    let pipe_runtime = Some(crate::room::orchestrator::RoomPipeRuntime {
+        app,
+        process_map: process_map.inner().clone(),
+    });
     match room.kind {
         RoomKind::Roundtable => {
-            crate::room::orchestrator::run_roundtable_turn(&room_id, &message, sessions.inner())
-                .await?;
+            crate::room::orchestrator::run_roundtable_turn_with_runtime(
+                &room_id,
+                &message,
+                sessions.inner(),
+                pipe_runtime.clone(),
+            )
+            .await?;
         }
         RoomKind::Driver => {
-            crate::room::orchestrator::run_driver_turn(&room_id, &message, sessions.inner())
-                .await?;
+            crate::room::orchestrator::run_driver_turn_with_runtime(
+                &room_id,
+                &message,
+                sessions.inner(),
+                pipe_runtime.clone(),
+            )
+            .await?;
         }
         RoomKind::Research => {
-            crate::room::orchestrator::run_research_turn(&room_id, &message, sessions.inner())
-                .await?;
+            crate::room::orchestrator::run_research_turn_with_runtime(
+                &room_id,
+                &message,
+                sessions.inner(),
+                pipe_runtime,
+            )
+            .await?;
         }
     }
     room_detail(&room_id)
@@ -335,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_room_run_rejects_agents_without_room_stream_capability() {
+    fn attach_room_run_accepts_codex_pipe_exec_runs() {
         with_temp_data_dir(|| {
             let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
             crate::storage::runs::create_run(
@@ -353,15 +511,15 @@ mod tests {
             )
             .unwrap();
 
-            let error =
-                super::attach_room_run(room.id, "run-codex".into(), None, None).unwrap_err();
+            let detail = super::attach_room_run(room.id, "run-codex".into(), None, None).unwrap();
 
-            assert!(error.contains("does not support Room stream sessions yet"));
+            assert_eq!(detail.participants.len(), 1);
+            assert_eq!(detail.participants[0].participant.agent, "codex");
         });
     }
 
     #[test]
-    fn attach_room_run_rejects_claude_pipe_exec_runs() {
+    fn attach_room_run_accepts_claude_pipe_exec_runs() {
         with_temp_data_dir(|| {
             let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
             let mut run = crate::storage::runs::create_run(
@@ -381,10 +539,11 @@ mod tests {
             run.execution_path = Some(ExecutionPath::PipeExec);
             crate::storage::runs::save_meta(&run).unwrap();
 
-            let error =
-                super::attach_room_run(room.id, "run-claude-pipe".into(), None, None).unwrap_err();
+            let detail =
+                super::attach_room_run(room.id, "run-claude-pipe".into(), None, None).unwrap();
 
-            assert!(error.contains("is not a Room stream session"));
+            assert_eq!(detail.participants.len(), 1);
+            assert_eq!(detail.participants[0].participant.run_id, "run-claude-pipe");
         });
     }
 
@@ -442,6 +601,27 @@ mod tests {
                 run.execution_path,
                 Some(crate::models::ExecutionPath::SessionActor)
             );
+        });
+    }
+
+    #[test]
+    fn create_room_participant_run_defaults_codex_to_pipe_exec() {
+        with_temp_data_dir(|| {
+            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+
+            let run_id = super::create_room_participant_run(
+                &room.id,
+                "codex".to_string(),
+                "Investigate".to_string(),
+                "D:/work/app".to_string(),
+                Some("gpt-5.5".to_string()),
+                None,
+            )
+            .unwrap();
+
+            let run = crate::storage::runs::get_run(&run_id).unwrap();
+            assert_eq!(run.agent, "codex");
+            assert_eq!(run.execution_path, Some(ExecutionPath::PipeExec));
         });
     }
 
