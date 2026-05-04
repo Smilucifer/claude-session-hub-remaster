@@ -11,6 +11,7 @@
     RemoteHost,
     RemoteTestResult,
     SshKeyInfo,
+    CliCheckResult,
   } from "$lib/types";
   import Card from "$lib/components/Card.svelte";
   import Button from "$lib/components/Button.svelte";
@@ -113,6 +114,38 @@
   let authOverview = $state<import("$lib/types").AuthOverview | null>(null);
   let cliLoginLoading = $state(false);
   let cliLoginError = $state("");
+
+  type ConnectionAgentTab = "claude" | "codex" | "gemini";
+  const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
+    { id: "claude", label: "CC", command: "claude" },
+    { id: "codex", label: "Codex", command: "codex exec --json" },
+    { id: "gemini", label: "Gemini", command: "gemini --output-format text -p" },
+  ];
+  let connectionAgentTab = $state<ConnectionAgentTab>("claude");
+  let connectionCliChecks = $state<Record<ConnectionAgentTab, CliCheckResult | null>>({
+    claude: null,
+    codex: null,
+    gemini: null,
+  });
+  let connectionCliChecking = $state(false);
+
+  async function refreshConnectionCliChecks() {
+    connectionCliChecking = true;
+    const entries = await Promise.all(
+      connectionAgentTabs.map(async (tab) => {
+        try {
+          return [tab.id, await api.checkAgentCli(tab.id)] as const;
+        } catch {
+          return [tab.id, { agent: tab.id, found: false }] as const;
+        }
+      }),
+    );
+    connectionCliChecks = Object.fromEntries(entries) as Record<
+      ConnectionAgentTab,
+      CliCheckResult | null
+    >;
+    connectionCliChecking = false;
+  }
 
   // Derive merged platform list (static presets + dynamic custom endpoints)
   let platformList = $derived(buildPlatformList(platformCredentials));
@@ -1178,6 +1211,7 @@
     } catch (e) {
       dbgWarn("settings", "error", e);
     }
+    void refreshConnectionCliChecks();
     // Load auth overview
     api
       .getAuthOverview()
@@ -1945,6 +1979,22 @@
             {/if}
           </div>
 
+          <div class="inline-flex rounded-md border border-border bg-background p-0.5">
+            {#each connectionAgentTabs as tab}
+              <button
+                type="button"
+                class="h-8 px-3 text-xs font-medium rounded-sm transition-colors {connectionAgentTab ===
+                tab.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted'}"
+                onclick={() => (connectionAgentTab = tab.id)}
+              >
+                {tab.label}
+              </button>
+            {/each}
+          </div>
+
+          {#if connectionAgentTab === "claude"}
           <!-- Auth Mode selector: 2-way radio -->
           <div>
             <span class="text-sm font-medium mb-2 block">{t("settings_auth_modeLabel")}</span>
@@ -2634,6 +2684,73 @@
                   </p>
                 </div>
               {/if}
+            </div>
+          {/if}
+          {:else}
+            {@const activeNativeTab = connectionAgentTabs.find((tab) => tab.id === connectionAgentTab)}
+            {@const cliCheck = connectionCliChecks[connectionAgentTab]}
+            <div class="space-y-4 rounded-lg border border-border/50 p-4">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h3 class="text-sm font-medium">
+                    {connectionAgentTab === "codex" ? "Codex CLI" : "Gemini CLI"}
+                  </h3>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    {t("settings_connection_nativeDesc")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                  disabled={connectionCliChecking}
+                  onclick={() => void refreshConnectionCliChecks()}
+                >
+                  {connectionCliChecking ? t("common_loading") : t("common_refresh")}
+                </button>
+              </div>
+
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div class="mb-2 flex items-center gap-2">
+                    <span
+                      class="h-2 w-2 rounded-full {cliCheck?.found
+                        ? 'bg-emerald-500'
+                        : 'bg-muted-foreground/40'}"
+                    ></span>
+                    <span class="text-xs font-medium">
+                      {cliCheck?.found
+                        ? t("settings_connection_cliDetected")
+                        : t("settings_connection_cliMissing")}
+                    </span>
+                  </div>
+                  {#if cliCheck?.version}
+                    <p class="text-xs text-muted-foreground">
+                      {t("settings_remote_version", { version: cliCheck.version })}
+                    </p>
+                  {/if}
+                  {#if cliCheck?.path}
+                    <p class="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                      {cliCheck.path}
+                    </p>
+                  {:else}
+                    <p class="text-xs text-muted-foreground">
+                      {t("settings_connection_installHint")}
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="rounded-md border border-border/60 bg-muted/20 p-3">
+                  <p class="text-xs font-medium">{t("settings_connection_launchCommand")}</p>
+                  <code
+                    class="mt-2 block rounded bg-background px-2 py-1.5 font-mono text-[11px] text-foreground"
+                  >
+                    {activeNativeTab?.command}
+                  </code>
+                  <p class="mt-2 text-xs text-muted-foreground">
+                    {t("settings_connection_nativeConfigHint")}
+                  </p>
+                </div>
+              </div>
             </div>
           {/if}
         </Card>

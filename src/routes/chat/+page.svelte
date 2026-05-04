@@ -104,6 +104,7 @@
   let middlewareReady = $state(false);
   let settings = $state<UserSettings | null>(null);
   let xtermRef: XTerminal | undefined = $state();
+  let terminalReplayKey = $state("");
   let promptRef: PromptInput | undefined = $state();
   let sidebarCollapsed = $state(false);
   /** Reactive cwd override for new-chat-in-folder (cleared when a run is loaded) */
@@ -1609,8 +1610,18 @@
 
   // ── Terminal helpers ──
 
+  $effect(() => {
+    const run = store.run;
+    const terminal = xtermRef;
+    if (!run || store.useStreamSession || !terminal) return;
+    const key = `${run.id}:${run.status}`;
+    if (terminalReplayKey === key) return;
+    terminalReplayKey = key;
+    void store.loadRun(run.id, terminal);
+  });
+
   function handleTermReady(_cols: number, _rows: number) {
-    // Terminal ready — Codex pipe mode is output-only, no setup needed
+    // Replay is driven by the effect above once the terminal exists.
   }
 
   function handleTermResize(_cols: number, _rows: number) {
