@@ -24,3 +24,8 @@ export function roomMessagePlaceholderKey(kind: RoomKind): RoomPlaceholderKey {
   if (kind === "research") return "room_researchPlaceholder";
   return "room_roundtablePlaceholder";
 }
+
+export function roomParticipantBadge(kind: RoomKind, participantCount: number): string {
+  if (roomRequiresThreeParticipants(kind)) return `${participantCount}/3`;
+  return String(participantCount);
+}

@@ -13,6 +13,7 @@
   import { truncate } from "$lib/utils/format";
   import {
     canSendRoomMessage,
+    roomParticipantBadge,
     roomMessagePlaceholderKey,
     roomRequiresThreeParticipants,
   } from "$lib/utils/room-ui";
@@ -338,7 +339,7 @@
             <div class="flex items-center gap-2">
               <span class="min-w-0 flex-1 truncate text-sm font-medium">{room.name}</span>
               <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >{room.participant_count}/3</span
+                >{roomParticipantBadge(room.kind, room.participant_count)}</span
               >
               <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
                 >{roomKindLabel(room.kind)}</span

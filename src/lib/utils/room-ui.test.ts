@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canSendRoomMessage,
+  roomParticipantBadge,
   roomMessagePlaceholderKey,
   roomRequiresThreeParticipants,
 } from "./room-ui";
@@ -24,5 +25,11 @@ describe("room UI helpers", () => {
     expect(roomMessagePlaceholderKey("roundtable")).toBe("room_roundtablePlaceholder");
     expect(roomMessagePlaceholderKey("driver")).toBe("room_driverPlaceholder");
     expect(roomMessagePlaceholderKey("research")).toBe("room_researchPlaceholder");
+  });
+
+  it("shows three-seat capacity only for roundtable room badges", () => {
+    expect(roomParticipantBadge("roundtable", 2)).toBe("2/3");
+    expect(roomParticipantBadge("driver", 2)).toBe("2");
+    expect(roomParticipantBadge("research", 1)).toBe("1");
   });
 });
