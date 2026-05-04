@@ -64,7 +64,9 @@
     store.room ? roomMessagePlaceholderKey(store.room.kind) : "room_roundtablePlaceholder",
   );
   let canSendCurrentRoomMessage = $derived(
-    store.room ? canSendRoomMessage(store.room.kind, roomParticipantCount, roundtableMessage) : false,
+    store.room
+      ? canSendRoomMessage(store.room.kind, roomParticipantCount, roundtableMessage)
+      : false,
   );
 
   onMount(async () => {
@@ -79,7 +81,9 @@
   async function loadSettings() {
     const loaded = await getUserSettings();
     settings = loaded;
-    const profiles = (loaded.cc_agent_profiles ?? []).filter((profile) => profile.enabled !== false);
+    const profiles = (loaded.cc_agent_profiles ?? []).filter(
+      (profile) => profile.enabled !== false,
+    );
     if (!createCwd.trim() && loaded.working_directory) createCwd = loaded.working_directory;
     seatForms = defaultSeatForms().map((seat, index) => {
       const profile = profiles[index];
@@ -107,8 +111,9 @@
         createCwd = selected;
       }
     } catch {
-      const fallback = window.prompt(t("room_projectPathPlaceholder"), createCwd);
-      if (fallback !== null) createCwd = fallback.trim();
+      // Desktop builds should use the native folder picker here. Do not fall
+      // back to manual path entry; the room should share the app-level project
+      // selection behavior.
     }
   }
 
@@ -459,7 +464,9 @@
               {#each seatPanels as panel}
                 {@const participant = panel.participant}
                 {@const latest = latestResponse(participant?.participant.id)}
-                <article class="flex min-h-[320px] flex-col rounded-md border border-border bg-card">
+                <article
+                  class="flex min-h-[320px] flex-col rounded-md border border-border bg-card"
+                >
                   <header class="border-b border-border px-4 py-3">
                     <div class="flex items-start justify-between gap-3">
                       <div class="min-w-0">
@@ -525,7 +532,9 @@
               {:else}
                 {#each store.room.participants as participant}
                   {@const latest = latestResponse(participant.participant.id)}
-                  <article class="flex min-h-[220px] flex-col rounded-md border border-border bg-card">
+                  <article
+                    class="flex min-h-[220px] flex-col rounded-md border border-border bg-card"
+                  >
                     <header class="border-b border-border px-4 py-3">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
@@ -707,8 +716,12 @@
 </div>
 
 {#if showCreateDialog}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-    <div class="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-md border border-border bg-background shadow-lg">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+  >
+    <div
+      class="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-md border border-border bg-background shadow-lg"
+    >
       <div class="border-b border-border px-5 py-4">
         <div class="flex items-start justify-between gap-4">
           <div>

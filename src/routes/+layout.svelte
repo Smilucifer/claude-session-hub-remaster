@@ -44,6 +44,7 @@
     type SeenMessageCounts,
   } from "$lib/utils/workbench-polish";
   import { loadRemovedCwds } from "$lib/utils/removed-cwds";
+  import { routeMatches } from "$lib/utils/nav-route";
   import { page } from "$app/stores";
   import { goto, afterNavigate } from "$app/navigation";
   import { onMount, setContext, untrack } from "svelte";
@@ -444,7 +445,7 @@
   ];
 
   function navMatches(path: string): boolean {
-    return currentPath === path || currentPath.startsWith(`${path}/`);
+    return routeMatches(currentPath, path);
   }
 
   // Load initial data
@@ -1130,6 +1131,8 @@
 
   // Breadcrumb for non-chat pages
   let pageName = $derived.by(() => {
+    if (routeMatches(currentPath, "/memory")) return t("nav_memory");
+    if (routeMatches(currentPath, "/memo")) return t("memo_title");
     const nav = navItems.find((n) => navMatches(n.path));
     if (nav) return nav.label();
     if (currentPath.startsWith("/release-notes")) return t("release_cliChangelog");

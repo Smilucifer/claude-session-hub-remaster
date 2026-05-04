@@ -3,6 +3,7 @@
 //! Uses the system `ssh` binary — no new crate dependencies.
 //! All remote commands are shell-escaped to prevent injection.
 
+use crate::agent::adapter;
 use crate::models::RemoteHost;
 use crate::process_ext::HideConsole;
 use tokio::process::Command;
@@ -115,6 +116,9 @@ pub fn build_remote_claude_command(
     }
     // Inject extra env vars (only allow safe key names: [A-Z0-9_])
     if let Some(extra) = extra_env {
+        for key in adapter::auth_env_removals_for_extra_env(extra) {
+            claude_parts.push(format!("{}=", key));
+        }
         for (k, v) in extra {
             if k.chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')

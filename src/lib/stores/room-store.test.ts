@@ -195,6 +195,7 @@ describe("RoomStore", () => {
       "D:/work",
       "sonnet",
       "anthropic",
+      undefined,
       "Claude",
       "participant",
     );
@@ -206,6 +207,7 @@ describe("RoomStore", () => {
       "D:/work",
       "gpt-5.5",
       undefined,
+      undefined,
       "Codex",
       "participant",
     );
@@ -216,6 +218,7 @@ describe("RoomStore", () => {
       "You are Gemini.",
       "D:/work",
       "gemini-2.5-pro",
+      undefined,
       undefined,
       "Gemini",
       "participant",
@@ -319,6 +322,7 @@ describe("RoomStore", () => {
       "Review this",
       "D:/work",
       "gpt-5.5",
+      undefined,
       undefined,
       undefined,
       undefined,

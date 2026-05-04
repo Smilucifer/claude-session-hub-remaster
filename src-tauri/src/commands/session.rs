@@ -1884,6 +1884,9 @@ async fn spawn_cli_process(
                     cmd.env("PATH", path);
                 }
             }
+            for key in adapter::auth_env_removals_for_extra_env(extra) {
+                cmd.env_remove(key);
+            }
             for (key, value) in &merged_plan.msvc_env {
                 cmd.env(key, value);
             }
@@ -2067,6 +2070,9 @@ pub async fn side_question(
                 if let Some(path) = &merged_plan.path_override {
                     local_cmd.env("PATH", path);
                 }
+            }
+            for key in adapter::auth_env_removals_for_extra_env(extra) {
+                local_cmd.env_remove(key);
             }
             for (key, value) in &merged_plan.msvc_env {
                 local_cmd.env(key, value);

@@ -414,6 +414,8 @@
   "chat_apiMode": "API 模式",
   "chat_streamMode": "流式模式",
   "chat_continueLastSession": "继续上次会话",
+  "chat_connectionProfile": "接入方式",
+  "chat_defaultConnection": "默认接入方式",
   "chat_orTypeToStart": "或在下方输入消息开始新对话",
   "chat_typeToStart": "在下方输入消息开始",
   "chat_forkedBanner": "此会话从上一个对话分叉而来。",

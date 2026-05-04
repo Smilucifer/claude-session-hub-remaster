@@ -85,13 +85,17 @@ Currently useful for:
 - Creating a Research Room that fans out one research topic to multiple active participants.
 - Research Room writes a room-local structured `research/artifact.json` artifact for the latest research turn, appends artifact history to `research/artifacts.jsonl`, and surfaces `[fact]`, `[decision]`, and `[lesson]` lines as Arena Memory candidates.
 
-### Codex, Gemini, and CC JSON Profiles
+### Codex, Gemini, and Connection Profiles
 
-普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Codex 走 `codex exec --json` pipe mode；Gemini 走 `gemini --output-format text -p` pipe mode。
+普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Claude 使用 stream session；Codex 走原生 `codex exec --skip-git-repo-check` pipe mode；Gemini 走原生 `gemini --output-format text -p` pipe mode。Codex / Gemini 启动页与 Claude 保持一致，只提供继续可用会话和选择接入方式的入口，不再展示示例 prompt。
 
-The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Codex uses `codex exec --json` pipe mode; Gemini uses `gemini --output-format text -p` pipe mode.
+The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Claude uses stream sessions; Codex uses native `codex exec --skip-git-repo-check` pipe mode; Gemini uses native `gemini --output-format text -p` pipe mode. Codex / Gemini startup pages now match Claude's entry model: continue a supported previous session or choose a connection profile, without example-prompt shortcuts.
 
-Rooms can now mix Claude Code stream-session participants with native Codex and Gemini pipe-exec participants. Claude Code profiles still support cross-API / cross-model seats through `platform_id`. Add profiles under `user.cc_agent_profiles` in `~/.opencovibe/settings.json`, without replacing the other fields in that file:
+Settings provides separate connection panels for CC / Codex / Gemini. Saved connection profiles can use CLI authentication or app-managed API keys, and both normal chat and Room creation can launch from a selected saved connection. Room project paths are selected through the folder picker and then shared by all three fixed Roundtable seats.
+
+Settings 为 CC / Codex / Gemini 提供独立连接配置页。保存的接入方式可以使用 CLI 认证或 App 管理的 API key；普通聊天和 Room 创建都可以从已保存接入方式启动。Room 项目路径通过文件夹选择器选择，并由三个固定 Roundtable seat 共享。
+
+Rooms can mix Claude Code stream-session participants with native Codex and Gemini pipe-exec participants. Claude Code profiles still support cross-API / cross-model seats through `platform_id`. Add profiles under `user.cc_agent_profiles` in `~/.opencovibe/settings.json`, without replacing the other fields in that file:
 
 会议室现在可以混用 Claude Code stream session 参与者，以及原生 Codex / Gemini pipe-exec 参与者。Claude Code profile 仍可通过 `platform_id` 接不同 API / 不同模型。把 profile 写到 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles`，不要覆盖文件里的其他字段：
 
@@ -142,9 +146,9 @@ Rooms can now mix Claude Code stream-session participants with native Codex and 
 }
 ```
 
-`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。`platform_id` 仅用于 Claude Code 参与者，并对应 Settings 里已有的 platform credential / provider id。`model` 会作为该 participant 的 per-run model snapshot；`prompt`、`label`、`role` 会预填 Room 的新 participant 表单。项目路径从 Room 创建时的文件夹选择器继承。
+`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。`platform_id` 仅用于 Claude Code 参与者，并对应 Settings 里已有的 platform credential / provider id。`model` 会作为该 participant 的 per-run model snapshot；`prompt`、`label`、`role` 会预填 Room 的新 participant 表单。`connection_profile_id` 可绑定一个保存的接入方式；未指定时使用对应 agent 的默认连接设置。项目路径从 Room 创建时的文件夹选择器继承。
 
-`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. `platform_id` only applies to Claude Code participants and should match an existing platform credential / provider id in Settings. `model` becomes the participant run's per-run model snapshot; `prompt`, `label`, and `role` prefill the Room new participant form. The project path is inherited from the Room-level folder picker.
+`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. `platform_id` only applies to Claude Code participants and should match an existing platform credential / provider id in Settings. `model` becomes the participant run's per-run model snapshot; `prompt`, `label`, and `role` prefill the Room new participant form. `connection_profile_id` can bind a saved connection profile; omitted values use the agent's default connection settings. The project path is inherited from the Room-level folder picker.
 
 ### Windows Native Toolchain Support
 
@@ -171,6 +175,7 @@ You can switch the mode in Settings and view the MSVC environment status for the
 ## 当前限制 / Current Limitations
 
 - Claude Code Room 参与者仍依赖活跃 stream session；Codex / Gemini 参与者以单轮 native CLI pipe-exec 方式运行，不是长驻 stream actor。
+- 继续上次会话目前只展示后端已支持继续的 agent / run；Codex thread 记录已保存，但尚未接入可恢复的交互式 stream actor。
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
 - 仍有部分上游基线检查需要后续清理。
@@ -178,6 +183,7 @@ You can switch the mode in Settings and view the MSVC environment status for the
 Current limitations:
 
 - Claude Code Room participants still depend on active stream sessions; Codex / Gemini participants run as one-shot native CLI pipe-exec seats rather than persistent stream actors.
+- Continue-last-session only appears for agent / run combinations that the backend can actually resume; Codex thread references are stored, but resumable interactive stream actors are not wired yet.
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
 - Some upstream baseline checks still need cleanup.

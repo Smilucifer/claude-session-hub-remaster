@@ -427,6 +427,9 @@ pub async fn fork_oneshot(
                     local_cmd.env("PATH", path);
                 }
             }
+            for key in adapter::auth_env_removals_for_extra_env(extra) {
+                local_cmd.env_remove(key);
+            }
             for (key, value) in &merged_plan.msvc_env {
                 local_cmd.env(key, value);
             }

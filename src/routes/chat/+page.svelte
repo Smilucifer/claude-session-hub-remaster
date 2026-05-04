@@ -91,6 +91,7 @@
   import { truncate, cwdDisplayLabel, formatTokenCount } from "$lib/utils/format";
   import { mapSettled } from "$lib/utils/async-utils";
   import { getPipeExecTerminalReplayKey } from "$lib/utils/pipe-terminal-replay";
+  import { findLastContinuableRun } from "$lib/utils/continuable-run";
   import { uuid } from "$lib/utils/uuid";
   import RewindModal from "$lib/components/RewindModal.svelte";
   import type { ElementSelection } from "$lib/types";
@@ -126,7 +127,8 @@
   /** Suppress "Session ended" flash during tool approval restart cycle. */
   let approving = $state(false);
   // (pendingResumeText removed — auto-resume uses atomic resume+send via initialMessage)
-  /** Most recent run with a session_id — for "Continue last session" on welcome screen. */
+  let continuableRunCandidates = $state<import("$lib/types").TaskRun[]>([]);
+  /** Most recent run the active startup agent can actually continue. */
   let lastContinuableRun = $state<import("$lib/types").TaskRun | null>(null);
   /** Available remote hosts from settings. */
   let remoteHosts = $state<import("$lib/types").RemoteHost[]>([]);
@@ -786,6 +788,17 @@
   let welcomeVisible = $derived(
     store.timeline.length === 0 && !store.streamingText && !store.run && store.phase !== "loading",
   );
+  let startupConnectionProfiles = $derived(
+    (settings?.connection_profiles ?? []).filter(
+      (profile) => profile.enabled !== false && profile.agent === store.agent,
+    ),
+  );
+  let hasStartupConnectionEntry = $derived(store.agent !== "claude" || !!authOverview);
+  let hasHeroMetaItems = $derived(!!cliVersionInfo?.installed || remoteHosts.length > 0);
+
+  $effect(() => {
+    lastContinuableRun = findLastContinuableRun(continuableRunCandidates, store.agent);
+  });
 
   let inputBlockedByPermission = $derived(store.hasPendingPermission || store.hasElicitation);
   let pendingToolPermissions = $derived(store.pendingToolPermissions);
@@ -1018,13 +1031,6 @@
   // ── Computed (thin wrappers for template convenience) ──
   let sending = $derived(store.phase === "spawning");
 
-  // Example prompts for empty state
-  const examplePrompts = [
-    () => t("chat_examplePrompt1"),
-    () => t("chat_examplePrompt2"),
-    () => t("chat_examplePrompt3"),
-  ];
-
   // ── Lifecycle ──
 
   // Load settings
@@ -1091,15 +1097,11 @@
         store.permissionModeSetByUser = true;
       }
     }
-    // Find most recent run with session_id for "Continue last session"
+    // Find most recent run the active startup agent can continue.
     try {
       const runs = await api.listRuns();
-      lastContinuableRun =
-        runs.find(
-          (r) =>
-            r.session_id &&
-            (r.status === "completed" || r.status === "stopped" || r.status === "failed"),
-        ) ?? null;
+      continuableRunCandidates = runs;
+      lastContinuableRun = findLastContinuableRun(runs, store.agent);
     } catch (e) {
       dbgWarn("chat", "failed to load runs for continue:", e);
     }
@@ -1833,13 +1835,12 @@
     }
   }
 
-  function fillPrompt(text: string) {
-    promptRef?.setValue(text);
-  }
-
   // ── Project init detection ──
   let showInitHint = $derived(
-    projectInitStatus !== null && !projectInitStatus.has_claude_md && !store.run,
+    store.agent === "claude" &&
+      projectInitStatus !== null &&
+      !projectInitStatus.has_claude_md &&
+      !store.run,
   );
 
   /** Reload project-level data (skills, agents, commands) with race guard. */
@@ -3615,8 +3616,45 @@
   {/if}
 {/snippet}
 
+{#snippet startupConnectionEntry()}
+  {#if store.agent === "claude"}
+    <AuthSourceBadge
+      {authOverview}
+      authSourceLabel={store.authSourceLabel}
+      authSourceCategory={store.authSourceCategory}
+      apiKeySource={store.apiKeySource}
+      hasRun={false}
+      authMode={store.authMode}
+      platformCredentials={settings?.platform_credentials ?? []}
+      platformId={store.platformId ?? "anthropic"}
+      onAuthModeChange={handleAuthModeChange}
+      onPlatformChange={handlePlatformChange}
+      {localProxyStatuses}
+      variant="hero"
+    />
+  {:else}
+    <select
+      value={store.connectionProfileId ?? ""}
+      class="max-w-[180px] rounded-md border border-border/50 bg-background px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-ring"
+      title={t("chat_connectionProfile")}
+      onchange={(e) => handleConnectionProfileChange((e.currentTarget as HTMLSelectElement).value)}
+    >
+      <option value="">{t("chat_defaultConnection")}</option>
+      {#each startupConnectionProfiles as profile}
+        <option value={profile.id}>{profile.label}</option>
+      {/each}
+    </select>
+  {/if}
+{/snippet}
+
 {#snippet heroMetaFooter()}
   <div class="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+    {#if hasStartupConnectionEntry}
+      {@render startupConnectionEntry()}
+    {/if}
+    {#if hasStartupConnectionEntry && hasHeroMetaItems}
+      <span class="text-muted-foreground">·</span>
+    {/if}
     {@render heroMetaItems()}
   </div>
 {/snippet}
@@ -3879,21 +3917,12 @@
                 <div
                   class="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground"
                 >
-                  <AuthSourceBadge
-                    {authOverview}
-                    authSourceLabel={store.authSourceLabel}
-                    authSourceCategory={store.authSourceCategory}
-                    apiKeySource={store.apiKeySource}
-                    hasRun={false}
-                    authMode={store.authMode}
-                    platformCredentials={settings?.platform_credentials ?? []}
-                    platformId={store.platformId ?? "anthropic"}
-                    onAuthModeChange={handleAuthModeChange}
-                    onPlatformChange={handlePlatformChange}
-                    {localProxyStatuses}
-                    variant="hero"
-                  />
-                  <span class="text-muted-foreground">·</span>
+                  {#if hasStartupConnectionEntry}
+                    {@render startupConnectionEntry()}
+                  {/if}
+                  {#if hasStartupConnectionEntry && hasHeroMetaItems}
+                    <span class="text-muted-foreground">·</span>
+                  {/if}
                   {@render heroMetaItems()}
                 </div>
               </div>
@@ -4441,24 +4470,41 @@
           <div class="text-center max-w-md animate-slide-up">
             <img src="/logo.png?v=2" alt="OC" class="mx-auto mb-4 h-12 w-12 rounded-2xl" />
             <h2 class="text-lg font-semibold text-primary mb-2">{t("layout_appName")}</h2>
-            <p class="text-sm text-muted-foreground mb-4">
-              {store.run ? t("chat_typeToStartSession") : t("chat_startSessionHint")}
-            </p>
             {#if !store.run}
-              <div class="flex flex-col gap-2">
-                {#each examplePrompts as prompt}
-                  <button
-                    class="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-neutral-300 hover:bg-white/10 hover:border-white/20 transition-all duration-150 group"
-                    onclick={() => fillPrompt(prompt())}
+              {@const welcomeCwd =
+                store.effectiveCwd ||
+                folderCwdOverride ||
+                localStorage.getItem("ocv:project-cwd") ||
+                ""}
+              {#if welcomeCwd}
+                <p class="mb-3 truncate text-xs text-muted-foreground/60" title={welcomeCwd}>
+                  {cwdDisplayLabel(welcomeCwd)}
+                </p>
+              {:else}
+                <div class="mb-3"></div>
+              {/if}
+              {#if lastContinuableRun}
+                <button
+                  class="mx-auto flex w-full max-w-[220px] items-center justify-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-foreground transition-all duration-150 hover:border-ring/30 hover:bg-accent"
+                  onclick={() => goto(`/chat?run=${lastContinuableRun!.id}&resume=continue`)}
+                >
+                  <svg
+                    class="h-4 w-4 text-muted-foreground"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg
                   >
-                    <span
-                      class="text-muted-foreground/50 mr-2 group-hover:text-muted-foreground transition-colors"
-                      >&rarr;</span
-                    >
-                    {prompt()}
-                  </button>
-                {/each}
-              </div>
+                  {t("chat_continueLastSession")}
+                </button>
+                <p class="mt-2 text-xs text-muted-foreground">{t("chat_orTypeToStart")}</p>
+              {:else}
+                <p class="text-sm text-muted-foreground">{t("chat_typeToStart")}</p>
+              {/if}
+            {:else}
+              <p class="text-sm text-muted-foreground mb-4">{t("chat_typeToStartSession")}</p>
             {/if}
             {@render initHintCard()}
             {@render heroMetaFooter()}

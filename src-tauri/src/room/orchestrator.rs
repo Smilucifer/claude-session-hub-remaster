@@ -331,12 +331,12 @@ async fn execute_pipe_turn(
             }
         };
 
-    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let inherited_path = crate::agent::claude_stream::augmented_path();
     let mut spawn_env_plan = resolve_spawn_env_plan(
         Path::new(&run.cwd),
         false,
         user_settings.windows_msvc_env_mode,
-        SpawnPathPolicy::InheritUnlessInjected,
+        SpawnPathPolicy::AlwaysUseAugmentedPath,
         Some(&inherited_path),
     );
     if !profile_env.is_empty() {

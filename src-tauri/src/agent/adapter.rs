@@ -213,6 +213,23 @@ fn default_base_url_env(agent: &str) -> &'static str {
     }
 }
 
+pub fn auth_env_removals_for_extra_env(env: &HashMap<String, String>) -> Vec<&'static str> {
+    let has_anthropic_api_key = env
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("ANTHROPIC_API_KEY"));
+    let has_anthropic_auth_token = env
+        .keys()
+        .any(|key| key.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN"));
+    let mut removals = Vec::new();
+    if has_anthropic_api_key {
+        removals.push("ANTHROPIC_AUTH_TOKEN");
+    }
+    if has_anthropic_auth_token {
+        removals.push("ANTHROPIC_API_KEY");
+    }
+    removals
+}
+
 pub fn apply_connection_profile(
     settings: &mut AdapterSettings,
     profile: &ConnectionProfile,
@@ -658,5 +675,22 @@ mod tests {
         s.agents_json = Some("".into());
         let args = build_settings_args(&s, false);
         assert!(!args.contains(&"--agents".to_string()));
+    }
+
+    #[test]
+    fn auth_env_removals_clear_the_opposite_anthropic_key() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "token".to_string());
+        assert_eq!(
+            auth_env_removals_for_extra_env(&env),
+            vec!["ANTHROPIC_API_KEY"]
+        );
+
+        env.clear();
+        env.insert("anthropic_api_key".to_string(), "key".to_string());
+        assert_eq!(
+            auth_env_removals_for_extra_env(&env),
+            vec!["ANTHROPIC_AUTH_TOKEN"]
+        );
     }
 }

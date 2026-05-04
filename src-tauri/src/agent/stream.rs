@@ -1,3 +1,4 @@
+use crate::agent::adapter;
 use crate::agent::pipe_parser::{CodexStdoutParser, PipeStdoutParser};
 use crate::agent::windows_msvc_env::SpawnEnvPlan;
 use crate::models::{ChatDelta, ChatDone, RunEventType};
@@ -65,6 +66,9 @@ pub async fn run_agent(
 
     if let Some(path) = &spawn_env_plan.path_override {
         cmd.env("PATH", path);
+    }
+    for key in adapter::auth_env_removals_for_extra_env(&spawn_env_plan.msvc_env) {
+        cmd.env_remove(key);
     }
     for (key, value) in &spawn_env_plan.msvc_env {
         cmd.env(key, value);

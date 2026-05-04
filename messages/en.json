@@ -414,6 +414,8 @@
   "chat_apiMode": "API Mode",
   "chat_streamMode": "Stream Mode",
   "chat_continueLastSession": "Continue last session",
+  "chat_connectionProfile": "Connection profile",
+  "chat_defaultConnection": "Default connection",
   "chat_orTypeToStart": "or type a message below to start a new chat",
   "chat_typeToStart": "Type a message below to start",
   "chat_forkedBanner": "This session was forked from a previous conversation.",
