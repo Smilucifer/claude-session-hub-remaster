@@ -2,6 +2,7 @@ use crate::models::{
     CliCommand, CommunitySkillDetail, CommunitySkillResult, InstalledPlugin, MarketplaceInfo,
     MarketplacePlugin, PluginOperationResult, ProviderHealth, StandaloneSkill,
 };
+use crate::storage::managed_apps::ManagedCliApp;
 
 /// Validate and resolve cwd for plugin commands.
 /// Returns `Some(cwd)` when scope is project/local (cwd required),
@@ -26,15 +27,19 @@ fn validate_plugin_cwd<'a>(scope: &str, cwd: Option<&'a str>) -> Result<Option<&
 }
 
 #[tauri::command]
-pub fn list_marketplaces() -> Result<Vec<MarketplaceInfo>, String> {
-    log::debug!("[plugins] list_marketplaces");
-    Ok(crate::storage::plugins::list_marketplaces())
+pub fn list_marketplaces(app: Option<String>) -> Result<Vec<MarketplaceInfo>, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!("[plugins] list_marketplaces: app={}", app.id());
+    Ok(crate::storage::plugins::list_marketplaces_for_app(app))
 }
 
 #[tauri::command]
-pub fn list_marketplace_plugins() -> Result<Vec<MarketplacePlugin>, String> {
-    log::debug!("[plugins] list_marketplace_plugins");
-    Ok(crate::storage::plugins::list_marketplace_plugins())
+pub fn list_marketplace_plugins(app: Option<String>) -> Result<Vec<MarketplacePlugin>, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!("[plugins] list_marketplace_plugins: app={}", app.id());
+    Ok(crate::storage::plugins::list_marketplace_plugins_for_app(
+        app,
+    ))
 }
 
 #[tauri::command]
@@ -45,17 +50,37 @@ pub fn list_project_commands(cwd: Option<String>) -> Result<Vec<CliCommand>, Str
 }
 
 #[tauri::command]
-pub fn list_standalone_skills(cwd: Option<String>) -> Result<Vec<StandaloneSkill>, String> {
+pub fn list_standalone_skills(
+    cwd: Option<String>,
+    app: Option<String>,
+) -> Result<Vec<StandaloneSkill>, String> {
     let cwd = cwd.unwrap_or_default();
-    log::debug!("[plugins] list_standalone_skills: cwd={}", cwd);
-    Ok(crate::storage::plugins::list_standalone_skills(&cwd))
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!(
+        "[plugins] list_standalone_skills: app={}, cwd={}",
+        app.id(),
+        cwd
+    );
+    Ok(crate::storage::plugins::list_standalone_skills_for_app(
+        app, &cwd,
+    ))
 }
 
 #[tauri::command]
-pub fn get_skill_content(path: String, cwd: Option<String>) -> Result<String, String> {
+pub fn get_skill_content(
+    path: String,
+    cwd: Option<String>,
+    app: Option<String>,
+) -> Result<String, String> {
     let cwd = cwd.unwrap_or_default();
-    log::debug!("[plugins] get_skill_content: path={}, cwd={}", path, cwd);
-    crate::storage::plugins::read_skill_content(&path, &cwd)
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!(
+        "[plugins] get_skill_content: app={}, path={}, cwd={}",
+        app.id(),
+        path,
+        cwd
+    );
+    crate::storage::plugins::read_skill_content_for_app(app, &path, &cwd)
 }
 
 #[tauri::command]
@@ -65,29 +90,49 @@ pub fn create_skill(
     content: String,
     scope: String,
     cwd: Option<String>,
+    app: Option<String>,
 ) -> Result<StandaloneSkill, String> {
     let cwd = cwd.unwrap_or_default();
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
     log::debug!(
-        "[plugins] create_skill: name={}, scope={}, cwd={}",
+        "[plugins] create_skill: app={}, name={}, scope={}, cwd={}",
+        app.id(),
         name,
         scope,
         cwd
     );
-    crate::storage::plugins::create_skill(&name, &description, &content, &scope, &cwd)
+    crate::storage::plugins::create_skill_for_app(app, &name, &description, &content, &scope, &cwd)
 }
 
 #[tauri::command]
-pub fn update_skill(path: String, content: String, cwd: Option<String>) -> Result<(), String> {
+pub fn update_skill(
+    path: String,
+    content: String,
+    cwd: Option<String>,
+    app: Option<String>,
+) -> Result<(), String> {
     let cwd = cwd.unwrap_or_default();
-    log::debug!("[plugins] update_skill: path={}, cwd={}", path, cwd);
-    crate::storage::plugins::update_skill_content(&path, &content, &cwd)
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!(
+        "[plugins] update_skill: app={}, path={}, cwd={}",
+        app.id(),
+        path,
+        cwd
+    );
+    crate::storage::plugins::update_skill_content_for_app(app, &path, &content, &cwd)
 }
 
 #[tauri::command]
-pub fn delete_skill(path: String, cwd: Option<String>) -> Result<(), String> {
+pub fn delete_skill(path: String, cwd: Option<String>, app: Option<String>) -> Result<(), String> {
     let cwd = cwd.unwrap_or_default();
-    log::debug!("[plugins] delete_skill: path={}, cwd={}", path, cwd);
-    crate::storage::plugins::delete_skill(&path, &cwd)
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!(
+        "[plugins] delete_skill: app={}, path={}, cwd={}",
+        app.id(),
+        path,
+        cwd
+    );
+    crate::storage::plugins::delete_skill_for_app(app, &path, &cwd)
 }
 
 // ── L2: Plugin lifecycle commands ──
@@ -272,16 +317,25 @@ pub async fn install_community_skill(
     skill_id: String,
     scope: String,
     cwd: Option<String>,
+    app: Option<String>,
 ) -> Result<PluginOperationResult, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
     log::debug!(
-        "[community] install: source={}, skill_id={}, scope={}",
+        "[community] install: app={}, source={}, skill_id={}, scope={}",
+        app.id(),
         source,
         skill_id,
         scope
     );
     crate::storage::community_skills::validate_skill_id(&skill_id)?;
-    crate::storage::community_skills::install_skill(&source, &skill_id, &scope, cwd.as_deref())
-        .await
+    crate::storage::community_skills::install_skill_for_app(
+        app,
+        &source,
+        &skill_id,
+        &scope,
+        cwd.as_deref(),
+    )
+    .await
 }
 
 #[cfg(test)]

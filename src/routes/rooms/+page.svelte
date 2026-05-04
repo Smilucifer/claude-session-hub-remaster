@@ -5,6 +5,7 @@
   import { RoomStore, type RoundtableSeatDraft } from "$lib/stores/room-store.svelte";
   import type {
     CcAgentProfile,
+    ConnectionProfile,
     RoomParticipantDetail,
     RoomResponseRef,
     RoomTurn,
@@ -23,6 +24,7 @@
   interface SeatForm {
     agent: SeatAgent;
     profileId: string;
+    connectionProfileId: string;
     label: string;
     model: string;
     platformId: string;
@@ -53,6 +55,9 @@
   let deletingRoomId = $state("");
 
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
+  let connectionProfiles = $derived(
+    (settings?.connection_profiles ?? []).filter((p) => p.enabled !== false),
+  );
   let seatPanels = $derived(fixedSeatPanels(store.room?.participants ?? []));
   let roomParticipantCount = $derived(store.room?.participants.length ?? 0);
   let roomComposerPlaceholderKey = $derived(
@@ -117,6 +122,7 @@
         prompt: cleanText(seat.prompt) || defaultSeatPrompt(index, agent),
         model: cleanText(seat.model) || undefined,
         platformId: cleanText(seat.platformId) || undefined,
+        connectionProfileId: cleanText(seat.connectionProfileId) || undefined,
         label: cleanText(seat.label) || defaultSeatLabel(index, agent),
         role: cleanText(seat.role) || "participant",
       };
@@ -164,6 +170,21 @@
     });
   }
 
+  function handleConnectionProfileChange(index: number, profileId: string) {
+    const profile = connectionProfiles.find((item) => item.id === profileId);
+    seatForms = seatForms.map((seat, seatIndex) => {
+      if (seatIndex !== index) return seat;
+      if (!profile) return { ...seat, connectionProfileId: "" };
+      return {
+        ...seat,
+        connectionProfileId: profile.id,
+        agent: profile.agent,
+        model: cleanText(profile.model) || seat.model,
+        platformId: cleanText(profile.platform_id) || seat.platformId,
+      };
+    });
+  }
+
   function updateSeat<K extends keyof SeatForm>(index: number, key: K, value: SeatForm[K]) {
     seatForms = seatForms.map((seat, seatIndex) =>
       seatIndex === index ? { ...seat, [key]: value } : seat,
@@ -175,6 +196,7 @@
       {
         agent: "claude",
         profileId: "",
+        connectionProfileId: "",
         label: "Claude",
         model: "",
         platformId: "",
@@ -184,6 +206,7 @@
       {
         agent: "codex",
         profileId: "",
+        connectionProfileId: "",
         label: "Codex",
         model: "",
         platformId: "",
@@ -193,6 +216,7 @@
       {
         agent: "gemini",
         profileId: "",
+        connectionProfileId: "",
         label: "Gemini",
         model: "",
         platformId: "",
@@ -207,6 +231,7 @@
     return {
       ...seat,
       profileId: profile.id,
+      connectionProfileId: seat.connectionProfileId,
       agent,
       label: cleanText(profile.label) || displayAgentLabel(agent),
       model: cleanText(profile.model),
@@ -254,6 +279,16 @@
     if (model && platform) return `${profile.label} · ${agent} · ${platform} · ${model}`;
     if (model || platform) return `${profile.label} · ${agent} · ${model || platform}`;
     return `${profile.label} · ${agent}`;
+  }
+
+  function connectionProfilesForAgent(agent: SeatAgent): ConnectionProfile[] {
+    return connectionProfiles.filter((profile) => profile.agent === agent);
+  }
+
+  function connectionProfileLabel(profile: ConnectionProfile): string {
+    const mode = profile.auth_mode === "api" ? "API" : "CLI";
+    const model = cleanText(profile.model);
+    return model ? `${profile.label} · ${mode} · ${model}` : `${profile.label} · ${mode}`;
   }
 
   function displayAgentLabel(agent: SeatAgent): string {
@@ -747,7 +782,10 @@
                   <select
                     class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                     value={seat.agent}
-                    onchange={(event) => updateSeat(index, "agent", event.currentTarget.value as SeatAgent)}
+                    onchange={(event) => {
+                      updateSeat(index, "agent", event.currentTarget.value as SeatAgent);
+                      updateSeat(index, "connectionProfileId", "");
+                    }}
                   >
                     <option value="claude">Claude Code</option>
                     <option value="codex">Codex CLI</option>
@@ -764,6 +802,23 @@
                   />
                 </label>
               </div>
+
+              {#if connectionProfilesForAgent(seat.agent).length > 0}
+                <label class="mt-2 block text-xs font-medium text-muted-foreground">
+                  Connection
+                  <select
+                    class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                    value={seat.connectionProfileId}
+                    onchange={(event) =>
+                      handleConnectionProfileChange(index, event.currentTarget.value)}
+                  >
+                    <option value="">Default connection</option>
+                    {#each connectionProfilesForAgent(seat.agent) as profile}
+                      <option value={profile.id}>{connectionProfileLabel(profile)}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
 
               <label class="mt-2 block text-xs font-medium text-muted-foreground">
                 {t("room_seatLabel")}

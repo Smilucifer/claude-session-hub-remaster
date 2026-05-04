@@ -45,6 +45,8 @@ export interface TaskRun {
   remote_cwd?: string;
   /** Snapshot of active_platform_id at run creation time. */
   platform_id?: string;
+  /** Saved connection profile used to launch this run. */
+  connection_profile_id?: string;
   /** Snapshot of anthropic_base_url at run creation time. */
   platform_base_url?: string;
   /** Run source (native or cli_import). */
@@ -255,6 +257,7 @@ export interface UserSettings {
   remote_hosts?: RemoteHost[];
   platform_credentials?: PlatformCredential[];
   cc_agent_profiles?: CcAgentProfile[];
+  connection_profiles?: ConnectionProfile[];
   active_platform_id?: string;
   ui_zoom?: number;
   onboarding_completed: boolean;
@@ -389,6 +392,25 @@ export interface AgentSettings {
   extra_args?: string[];
   yolo_mode?: boolean;
   updated_at: string;
+}
+
+export interface ConnectionProfile {
+  id: string;
+  label: string;
+  agent: "claude" | "codex" | "gemini";
+  auth_mode: string;
+  platform_id?: string;
+  command_path?: string;
+  model?: string;
+  api_key?: string;
+  auth_env_var?: string;
+  base_url?: string;
+  env?: Record<string, string>;
+  extra_args?: string[];
+  add_dirs?: string[];
+  yolo_mode?: boolean;
+  no_session_persistence?: boolean;
+  enabled: boolean;
 }
 
 export type SessionMode = "new" | "resume" | "continue" | "fork";

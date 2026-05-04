@@ -7,6 +7,7 @@ export interface RoundtableSeatDraft {
   prompt: string;
   model?: string;
   platformId?: string;
+  connectionProfileId?: string;
   label?: string;
   role?: string;
 }
@@ -104,6 +105,7 @@ export class RoomStore {
           cwd,
           seat.model,
           seat.platformId,
+          seat.connectionProfileId,
           seat.label,
           seat.role,
         );
@@ -139,6 +141,7 @@ export class RoomStore {
     cwd: string,
     model?: string,
     platformId?: string,
+    connectionProfileId?: string,
     label?: string,
     role?: string,
   ): Promise<void> {
@@ -152,6 +155,7 @@ export class RoomStore {
         cwd,
         model,
         platformId,
+        connectionProfileId,
         label,
         role,
       );
@@ -171,6 +175,7 @@ export class RoomStore {
     cwd: string,
     model?: string,
     platformId?: string,
+    connectionProfileId?: string,
     label?: string,
     role?: string,
   ): Promise<void> {
@@ -185,6 +190,7 @@ export class RoomStore {
         cwd,
         model,
         platformId,
+        connectionProfileId,
         label,
         role,
       );

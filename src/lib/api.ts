@@ -4,6 +4,7 @@ import { dbg, dbgWarn, redactSensitive } from "./utils/debug";
 function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return getTransport().invoke<T>(cmd, args);
 }
+export type ManagedCliApp = "claude" | "codex" | "gemini";
 import type {
   TaskRun,
   RunEvent,
@@ -74,6 +75,7 @@ export async function startRun(
   model?: string,
   remoteHostName?: string,
   platformId?: string,
+  connectionProfileId?: string,
   executionPath?: string,
 ): Promise<TaskRun> {
   dbg("api", "startRun", {
@@ -82,6 +84,7 @@ export async function startRun(
     cwd,
     remoteHostName,
     platformId,
+    connectionProfileId,
     executionPath,
   });
   const result = await invoke<TaskRun>("start_run", {
@@ -91,6 +94,7 @@ export async function startRun(
     model,
     remoteHostName: remoteHostName ?? null,
     platformId: platformId ?? null,
+    connectionProfileId: connectionProfileId ?? null,
     executionPath: executionPath ?? null,
   });
   dbg("api", "startRun →", result.id);
@@ -165,6 +169,7 @@ export async function createRoomClaudeParticipant(
   cwd: string,
   model?: string,
   platformId?: string,
+  connectionProfileId?: string,
   label?: string,
   role?: string,
 ): Promise<RoomDetail> {
@@ -175,6 +180,7 @@ export async function createRoomClaudeParticipant(
     cwd,
     model: model ?? null,
     platformId: platformId ?? null,
+    connectionProfileId: connectionProfileId ?? null,
     label: label ?? null,
     role: role ?? null,
   });
@@ -187,6 +193,7 @@ export async function createRoomParticipant(
   cwd: string,
   model?: string,
   platformId?: string,
+  connectionProfileId?: string,
   label?: string,
   role?: string,
 ): Promise<RoomDetail> {
@@ -198,6 +205,7 @@ export async function createRoomParticipant(
     cwd,
     model: model ?? null,
     platformId: platformId ?? null,
+    connectionProfileId: connectionProfileId ?? null,
     label: label ?? null,
     role: role ?? null,
   });
@@ -869,14 +877,14 @@ export async function saveTempAttachment(name: string, contentBase64: string): P
 
 // ── Plugins ──
 
-export async function listMarketplaces(): Promise<MarketplaceInfo[]> {
-  dbg("api", "listMarketplaces");
-  return invoke<MarketplaceInfo[]>("list_marketplaces");
+export async function listMarketplaces(app?: ManagedCliApp): Promise<MarketplaceInfo[]> {
+  dbg("api", "listMarketplaces", { app });
+  return invoke<MarketplaceInfo[]>("list_marketplaces", { app: app ?? null });
 }
 
-export async function listMarketplacePlugins(): Promise<MarketplacePlugin[]> {
-  dbg("api", "listMarketplacePlugins");
-  return invoke<MarketplacePlugin[]>("list_marketplace_plugins");
+export async function listMarketplacePlugins(app?: ManagedCliApp): Promise<MarketplacePlugin[]> {
+  dbg("api", "listMarketplacePlugins", { app });
+  return invoke<MarketplacePlugin[]>("list_marketplace_plugins", { app: app ?? null });
 }
 
 export async function listProjectCommands(cwd?: string): Promise<import("./types").CliCommand[]> {
@@ -884,14 +892,21 @@ export async function listProjectCommands(cwd?: string): Promise<import("./types
   return invoke<import("./types").CliCommand[]>("list_project_commands", { cwd: cwd ?? null });
 }
 
-export async function listStandaloneSkills(cwd?: string): Promise<StandaloneSkill[]> {
-  dbg("api", "listStandaloneSkills", { cwd });
-  return invoke<StandaloneSkill[]>("list_standalone_skills", { cwd: cwd ?? null });
+export async function listStandaloneSkills(
+  cwd?: string,
+  app?: ManagedCliApp,
+): Promise<StandaloneSkill[]> {
+  dbg("api", "listStandaloneSkills", { cwd, app });
+  return invoke<StandaloneSkill[]>("list_standalone_skills", { cwd: cwd ?? null, app: app ?? null });
 }
 
-export async function getSkillContent(path: string, cwd?: string): Promise<string> {
-  dbg("api", "getSkillContent", path);
-  return invoke<string>("get_skill_content", { path, cwd: cwd ?? "" });
+export async function getSkillContent(
+  path: string,
+  cwd?: string,
+  app?: ManagedCliApp,
+): Promise<string> {
+  dbg("api", "getSkillContent", { path, app });
+  return invoke<string>("get_skill_content", { path, cwd: cwd ?? "", app: app ?? null });
 }
 
 export async function createSkill(
@@ -900,25 +915,32 @@ export async function createSkill(
   content: string,
   scope: string,
   cwd?: string,
+  app?: ManagedCliApp,
 ): Promise<StandaloneSkill> {
-  dbg("api", "createSkill", { name, scope, cwd });
+  dbg("api", "createSkill", { name, scope, cwd, app });
   return invoke<StandaloneSkill>("create_skill", {
     name,
     description,
     content,
     scope,
     cwd: cwd ?? null,
+    app: app ?? null,
   });
 }
 
-export async function updateSkill(path: string, content: string, cwd?: string): Promise<void> {
-  dbg("api", "updateSkill", { path, cwd });
-  return invoke<void>("update_skill", { path, content, cwd: cwd ?? null });
+export async function updateSkill(
+  path: string,
+  content: string,
+  cwd?: string,
+  app?: ManagedCliApp,
+): Promise<void> {
+  dbg("api", "updateSkill", { path, cwd, app });
+  return invoke<void>("update_skill", { path, content, cwd: cwd ?? null, app: app ?? null });
 }
 
-export async function deleteSkill(path: string, cwd?: string): Promise<void> {
-  dbg("api", "deleteSkill", { path, cwd });
-  return invoke<void>("delete_skill", { path, cwd: cwd ?? null });
+export async function deleteSkill(path: string, cwd?: string, app?: ManagedCliApp): Promise<void> {
+  dbg("api", "deleteSkill", { path, cwd, app });
+  return invoke<void>("delete_skill", { path, cwd: cwd ?? null, app: app ?? null });
 }
 
 export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
@@ -1020,21 +1042,29 @@ export async function installCommunitySkill(
   skillId: string,
   scope: string,
   cwd?: string,
+  app?: ManagedCliApp,
 ): Promise<PluginOperationResult> {
-  dbg("api", "installCommunitySkill", { source, skillId, scope });
+  dbg("api", "installCommunitySkill", { source, skillId, scope, app });
   return invoke<PluginOperationResult>("install_community_skill", {
     source,
     skillId,
     scope,
     cwd: cwd ?? null,
+    app: app ?? null,
   });
 }
 
 // ── MCP Registry ──
 
-export async function listConfiguredMcpServers(cwd?: string): Promise<ConfiguredMcpServer[]> {
-  dbg("api", "listConfiguredMcpServers", { cwd });
-  return invoke<ConfiguredMcpServer[]>("list_configured_mcp_servers", { cwd: cwd ?? null });
+export async function listConfiguredMcpServers(
+  cwd?: string,
+  app?: ManagedCliApp,
+): Promise<ConfiguredMcpServer[]> {
+  dbg("api", "listConfiguredMcpServers", { cwd, app });
+  return invoke<ConfiguredMcpServer[]>("list_configured_mcp_servers", {
+    cwd: cwd ?? null,
+    app: app ?? null,
+  });
 }
 
 export async function addMcpServer(
@@ -1042,17 +1072,19 @@ export async function addMcpServer(
   transport: string,
   scope: string,
   cwd?: string,
+  app?: ManagedCliApp,
   configJson?: string,
   url?: string,
   envVars?: Record<string, string>,
   headers?: Record<string, string>,
 ): Promise<PluginOperationResult> {
-  dbg("api", "addMcpServer", { name, transport, scope });
+  dbg("api", "addMcpServer", { name, transport, scope, app });
   return invoke<PluginOperationResult>("add_mcp_server", {
     name,
     transport,
     scope,
     cwd: cwd ?? null,
+    app: app ?? null,
     configJson: configJson ?? null,
     url: url ?? null,
     envVars: envVars ?? null,
@@ -1064,12 +1096,14 @@ export async function removeMcpServer(
   name: string,
   scope: string,
   cwd?: string,
+  app?: ManagedCliApp,
 ): Promise<PluginOperationResult> {
-  dbg("api", "removeMcpServer", { name, scope, cwd });
+  dbg("api", "removeMcpServer", { name, scope, cwd, app });
   return invoke<PluginOperationResult>("remove_mcp_server", {
     name,
     scope,
     cwd: cwd ?? null,
+    app: app ?? null,
   });
 }
 

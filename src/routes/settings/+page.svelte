@@ -13,6 +13,7 @@
     RemoteTestResult,
     SshKeyInfo,
     CliCheckResult,
+    ConnectionProfile,
   } from "$lib/types";
   import Card from "$lib/components/Card.svelte";
   import Button from "$lib/components/Button.svelte";
@@ -106,6 +107,17 @@
   let modelHaiku = $state("");
   let selectedPlatformId = $state<string | null>(null);
   let platformCredentials = $state<PlatformCredential[]>([]);
+  let connectionProfiles = $state<ConnectionProfile[]>([]);
+  let connectionProfileJson = $state<Record<ConnectionAgentTab, string>>({
+    claude: "[]",
+    codex: "[]",
+    gemini: "[]",
+  });
+  let connectionProfileError = $state<Record<ConnectionAgentTab, string>>({
+    claude: "",
+    codex: "",
+    gemini: "",
+  });
   let platformExtraEnv = $state<Array<{ key: string; value: string }>>([]);
   // Track whether user manually edited extra_env (per platform ID).
   // Untouched platforms don't write extra_env, avoiding preset defaults being baked into credentials.
@@ -119,7 +131,7 @@
   type ConnectionAgentTab = "claude" | "codex" | "gemini";
   const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
     { id: "claude", label: "CC", command: "claude" },
-    { id: "codex", label: "Codex", command: "codex exec --json" },
+    { id: "codex", label: "Codex", command: "codex exec" },
     { id: "gemini", label: "Gemini", command: "gemini --output-format text -p" },
   ];
   let connectionAgentTab = $state<ConnectionAgentTab>("claude");
@@ -274,6 +286,98 @@
       ...nativeAddDirs,
       [agent]: nativeAddDirs[agent].filter((_, i) => i !== index),
     };
+  }
+
+  function syncConnectionProfileJsonDrafts() {
+    connectionProfileJson = {
+      claude: JSON.stringify(
+        connectionProfiles.filter((profile) => profile.agent === "claude"),
+        null,
+        2,
+      ),
+      codex: JSON.stringify(
+        connectionProfiles.filter((profile) => profile.agent === "codex"),
+        null,
+        2,
+      ),
+      gemini: JSON.stringify(
+        connectionProfiles.filter((profile) => profile.agent === "gemini"),
+        null,
+        2,
+      ),
+    };
+  }
+
+  function defaultAuthEnvVar(agent: ConnectionAgentTab): string {
+    if (agent === "codex") return "OPENAI_API_KEY";
+    if (agent === "gemini") return "GEMINI_API_KEY";
+    return "ANTHROPIC_API_KEY";
+  }
+
+  function makeConnectionProfile(agent: ConnectionAgentTab, authMode: "cli" | "api") {
+    return {
+      id: `${agent}-${authMode}-${crypto.randomUUID()}`,
+      label: authMode === "cli" ? `${agent} CLI auth` : `${agent} API key`,
+      agent,
+      auth_mode: authMode,
+      auth_env_var: authMode === "api" ? defaultAuthEnvVar(agent) : undefined,
+      env: {},
+      extra_args: [],
+      add_dirs: [],
+      enabled: true,
+    } satisfies ConnectionProfile;
+  }
+
+  function addConnectionProfileDraft(agent: ConnectionAgentTab, authMode: "cli" | "api") {
+    let current: ConnectionProfile[] = [];
+    try {
+      const parsed = JSON.parse(connectionProfileJson[agent] || "[]");
+      if (Array.isArray(parsed)) current = parsed as ConnectionProfile[];
+    } catch {
+      current = connectionProfiles.filter((profile) => profile.agent === agent);
+    }
+    connectionProfileJson = {
+      ...connectionProfileJson,
+      [agent]: JSON.stringify([...current, makeConnectionProfile(agent, authMode)], null, 2),
+    };
+    connectionProfileError = { ...connectionProfileError, [agent]: "" };
+  }
+
+  async function saveConnectionProfilesForAgent(agent: ConnectionAgentTab) {
+    try {
+      const parsed = JSON.parse(connectionProfileJson[agent] || "[]");
+      if (!Array.isArray(parsed)) throw new Error("Profile JSON must be an array");
+      const normalized = parsed.map((profile: Partial<ConnectionProfile>, index: number) => ({
+        id: (profile.id || `${agent}-${index}-${crypto.randomUUID()}`).trim(),
+        label: (profile.label || `${agent} profile ${index + 1}`).trim(),
+        agent,
+        auth_mode: profile.auth_mode || "cli",
+        platform_id: profile.platform_id || undefined,
+        command_path: profile.command_path || undefined,
+        model: profile.model || undefined,
+        api_key: profile.api_key || undefined,
+        auth_env_var: profile.auth_env_var || undefined,
+        base_url: profile.base_url || undefined,
+        env: profile.env || {},
+        extra_args: profile.extra_args || [],
+        add_dirs: profile.add_dirs || [],
+        yolo_mode: profile.yolo_mode,
+        no_session_persistence: profile.no_session_persistence,
+        enabled: profile.enabled !== false,
+      }));
+      const next = [
+        ...connectionProfiles.filter((profile) => profile.agent !== agent),
+        ...normalized,
+      ];
+      settings = await api.updateUserSettings({ connection_profiles: next });
+      connectionProfiles = settings.connection_profiles ?? [];
+      syncConnectionProfileJsonDrafts();
+      connectionProfileError = { ...connectionProfileError, [agent]: "" };
+      generalSaved = true;
+      setTimeout(() => (generalSaved = false), 1500);
+    } catch (e) {
+      connectionProfileError = { ...connectionProfileError, [agent]: String(e) };
+    }
   }
 
   // Derive merged platform list (static presets + dynamic custom endpoints)
@@ -1325,6 +1429,8 @@
       msvcEnvMode = settings.windows_msvc_env_mode ?? "auto";
       remoteHosts = settings.remote_hosts ?? [];
       platformCredentials = settings.platform_credentials ?? [];
+      connectionProfiles = settings.connection_profiles ?? [];
+      syncConnectionProfileJsonDrafts();
       // Load display fields from credentials (not global fields)
       if (authMode === "api") {
         selectedPlatformId = detectPlatformFromUrl(
@@ -3103,7 +3209,7 @@
                     class="mt-2 block whitespace-pre-wrap rounded bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-foreground"
                   >
                     {nativeCommandDisplay} {connectionAgentTab === "codex"
-                      ? "exec --json --skip-git-repo-check"
+                      ? "exec --skip-git-repo-check"
                       : "--output-format text -p <prompt>"}
                     {nativeYoloMode[connectionAgentTab]
                       ? connectionAgentTab === "gemini"
@@ -3118,6 +3224,57 @@
               </div>
             </div>
           {/if}
+
+          <div class="space-y-3 rounded-lg border border-border/50 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-medium">Saved Login Methods</h3>
+                <p class="mt-1 text-xs text-muted-foreground">
+                  JSON profiles for the active CLI. New chats and roundtables can launch from these
+                  saved connections.
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent"
+                  onclick={() => addConnectionProfileDraft(connectionAgentTab, "cli")}
+                >
+                  Add CLI
+                </button>
+                <button
+                  type="button"
+                  class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent"
+                  onclick={() => addConnectionProfileDraft(connectionAgentTab, "api")}
+                >
+                  Add API
+                </button>
+                <button
+                  type="button"
+                  class="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
+                  onclick={() => void saveConnectionProfilesForAgent(connectionAgentTab)}
+                >
+                  Save JSON
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={connectionProfileJson[connectionAgentTab]}
+              rows="9"
+              spellcheck="false"
+              class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+              oninput={(e) => {
+                connectionProfileJson = {
+                  ...connectionProfileJson,
+                  [connectionAgentTab]: (e.currentTarget as HTMLTextAreaElement).value,
+                };
+                connectionProfileError = { ...connectionProfileError, [connectionAgentTab]: "" };
+              }}
+            ></textarea>
+            {#if connectionProfileError[connectionAgentTab]}
+              <p class="text-xs text-destructive">{connectionProfileError[connectionAgentTab]}</p>
+            {/if}
+          </div>
         </Card>
 
         {#if IS_WINDOWS}

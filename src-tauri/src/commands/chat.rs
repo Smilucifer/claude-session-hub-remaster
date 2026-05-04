@@ -1,7 +1,8 @@
 use crate::agent::spawn::build_agent_command;
 use crate::agent::stream::{run_agent, ProcessMap};
 use crate::agent::windows_msvc_env::{
-    resolve_spawn_env_plan, MsvcEnvStatus, MsvcEnvWarning, SpawnPathPolicy,
+    merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan, MsvcEnvStatus, MsvcEnvWarning,
+    SpawnPathPolicy,
 };
 use crate::models::{max_attachment_size, Attachment, RunEventType, RunStatus};
 use crate::storage;
@@ -216,8 +217,23 @@ pub async fn send_chat_message(
     // Build unified adapter settings
     let agent_settings = storage::settings::get_agent_settings(&run.agent);
     let user_settings = storage::settings::get_user_settings();
-    let adapter_settings =
+    let has_model_override = model.is_some();
+    let mut adapter_settings =
         crate::agent::adapter::build_adapter_settings(&agent_settings, &user_settings, model);
+    let profile = storage::settings::find_connection_profile(
+        &user_settings,
+        &run.agent,
+        run.connection_profile_id.as_deref(),
+    )?;
+    let profile_env = if let Some(profile) = profile.as_ref() {
+        crate::agent::adapter::apply_connection_profile(
+            &mut adapter_settings,
+            profile,
+            has_model_override,
+        )
+    } else {
+        std::collections::HashMap::new()
+    };
 
     // Build command
     let (command, args) = build_agent_command(
@@ -234,13 +250,16 @@ pub async fn send_chat_message(
     let agent_clone = run.agent.clone();
     let cwd = run.cwd.clone();
     let inherited_path = crate::agent::claude_stream::augmented_path();
-    let spawn_env_plan = resolve_spawn_env_plan(
+    let mut spawn_env_plan = resolve_spawn_env_plan(
         Path::new(&cwd),
         false,
         user_settings.windows_msvc_env_mode,
         SpawnPathPolicy::AlwaysUseAugmentedPath,
         Some(&inherited_path),
     );
+    if !profile_env.is_empty() {
+        merge_extra_env_into_spawn_env_plan(&mut spawn_env_plan, &profile_env);
+    }
     log_pipe_msvc_plan(&spawn_env_plan.status, &spawn_env_plan.warnings);
 
     tokio::spawn(async move {

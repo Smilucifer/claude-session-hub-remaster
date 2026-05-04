@@ -45,6 +45,37 @@ pub fn create_run(
     remote_host_snapshot: Option<crate::models::RemoteHost>,
     platform_id: Option<String>,
 ) -> Result<RunMeta, String> {
+    create_run_with_connection_profile(
+        id,
+        prompt,
+        cwd,
+        agent,
+        status,
+        model,
+        parent_run_id,
+        remote_host_name,
+        remote_cwd,
+        remote_host_snapshot,
+        platform_id,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_run_with_connection_profile(
+    id: &str,
+    prompt: &str,
+    cwd: &str,
+    agent: &str,
+    status: RunStatus,
+    model: Option<String>,
+    parent_run_id: Option<String>,
+    remote_host_name: Option<String>,
+    remote_cwd: Option<String>,
+    remote_host_snapshot: Option<crate::models::RemoteHost>,
+    platform_id: Option<String>,
+    connection_profile_id: Option<String>,
+) -> Result<RunMeta, String> {
     log::debug!(
         "[storage/runs] create_run: id={}, agent={}, model={:?}, parent={:?}, remote={:?}, platform={:?}, prompt_len={}",
         id,
@@ -60,8 +91,20 @@ pub fn create_run(
 
     let settings = super::settings::get_user_settings();
 
-    // Use explicit platform_id if provided, otherwise fall back to global active
-    let resolved_pid = platform_id.or_else(|| settings.active_platform_id.clone());
+    let resolved_profile = super::settings::find_connection_profile(
+        &settings,
+        agent,
+        connection_profile_id.as_deref(),
+    )?;
+
+    // Use explicit platform_id, then the selected connection profile, then global active.
+    let resolved_pid = platform_id
+        .or_else(|| {
+            resolved_profile
+                .as_ref()
+                .and_then(|p| p.platform_id.clone())
+        })
+        .or_else(|| settings.active_platform_id.clone());
 
     // Resolve base_url: credential → known provider defaults → global
     let resolved_base_url = resolved_pid
@@ -88,7 +131,10 @@ pub fn create_run(
         prompt: prompt.to_string(),
         cwd: cwd.to_string(),
         agent: agent.to_string(),
-        auth_mode: settings.auth_mode,
+        auth_mode: resolved_profile
+            .as_ref()
+            .map(|profile| profile.auth_mode.clone())
+            .unwrap_or(settings.auth_mode),
         status,
         started_at: now_iso(),
         ended_at: None,
@@ -103,6 +149,7 @@ pub fn create_run(
         remote_cwd,
         remote_host_snapshot,
         platform_id: resolved_pid,
+        connection_profile_id,
         platform_base_url: resolved_base_url,
         source: None,
         cli_import_watermark: None,

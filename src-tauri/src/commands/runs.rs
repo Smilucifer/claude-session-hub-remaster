@@ -80,14 +80,16 @@ pub fn start_run(
     model: Option<String>,
     remote_host_name: Option<String>,
     platform_id: Option<String>,
+    connection_profile_id: Option<String>,
     execution_path: Option<String>,
 ) -> Result<TaskRun, String> {
     log::debug!(
-        "[runs] start_run: agent={}, model={:?}, remote={:?}, platform={:?}, path={:?}, prompt_len={}, cwd={}",
+        "[runs] start_run: agent={}, model={:?}, remote={:?}, platform={:?}, profile={:?}, path={:?}, prompt_len={}, cwd={}",
         agent,
         model,
         remote_host_name,
         platform_id,
+        connection_profile_id,
         execution_path,
         prompt.len(),
         cwd
@@ -121,7 +123,7 @@ pub fn start_run(
     };
 
     let id = uuid::Uuid::new_v4().to_string();
-    let mut meta = storage::runs::create_run(
+    let mut meta = storage::runs::create_run_with_connection_profile(
         &id,
         &prompt,
         &cwd,
@@ -133,6 +135,7 @@ pub fn start_run(
         remote_cwd,
         remote_host_snapshot,
         platform_id,
+        connection_profile_id,
     )?;
     meta.execution_path = Some(path);
     storage::runs::save_meta(&meta)?;

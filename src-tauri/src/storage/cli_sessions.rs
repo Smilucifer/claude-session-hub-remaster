@@ -1277,6 +1277,7 @@ pub fn import_session(
         remote_cwd: None,
         remote_host_snapshot: None,
         platform_id: None,
+        connection_profile_id: None,
         platform_base_url: None,
         source: Some(RunSource::CliImport),
         cli_import_watermark: Some(ImportWatermark {

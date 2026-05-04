@@ -165,6 +165,9 @@ pub struct TaskRun {
     /// Snapshot of active_platform_id at run creation time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
+    /// Saved connection profile used to launch this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_profile_id: Option<String>,
     /// Snapshot of anthropic_base_url at run creation time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_base_url: Option<String>,
@@ -244,6 +247,40 @@ pub struct CcAgentProfile {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConnectionProfile {
+    pub id: String,
+    pub label: String,
+    #[serde(default = "default_cc_agent")]
+    pub agent: String,
+    #[serde(default = "default_auth_mode")]
+    pub auth_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_env_var: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_args: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_dirs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_session_persistence: Option<bool>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -285,6 +322,8 @@ pub struct UserSettings {
     pub platform_credentials: Vec<PlatformCredential>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cc_agent_profiles: Vec<CcAgentProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connection_profiles: Vec<ConnectionProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_platform_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -385,6 +424,7 @@ impl Default for UserSettings {
             remote_hosts: vec![],
             platform_credentials: vec![],
             cc_agent_profiles: vec![],
+            connection_profiles: vec![],
             active_platform_id: None,
             ui_zoom: None,
             onboarding_completed: false,
@@ -546,6 +586,9 @@ pub struct RunMeta {
     /// Snapshot of active_platform_id at run creation time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
+    /// Saved connection profile used to launch this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_profile_id: Option<String>,
     /// Snapshot of anthropic_base_url at run creation time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform_base_url: Option<String>,
@@ -627,6 +670,7 @@ impl RunMeta {
             remote_host_name: self.remote_host_name.clone(),
             remote_cwd: self.remote_cwd.clone(),
             platform_id: self.platform_id.clone(),
+            connection_profile_id: self.connection_profile_id.clone(),
             platform_base_url: self.platform_base_url.clone(),
             source: self.source.clone(),
             cli_import_watermark: self.cli_import_watermark.clone(),

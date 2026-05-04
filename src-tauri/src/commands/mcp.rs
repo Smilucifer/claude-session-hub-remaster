@@ -1,14 +1,22 @@
 use crate::models::{
     ConfiguredMcpServer, McpRegistrySearchResult, PluginOperationResult, ProviderHealth,
 };
+use crate::storage::managed_apps::ManagedCliApp;
 use std::collections::HashMap;
 
 #[tauri::command]
 pub fn list_configured_mcp_servers(
     cwd: Option<String>,
+    app: Option<String>,
 ) -> Result<Vec<ConfiguredMcpServer>, String> {
-    log::debug!("[mcp] list_configured_mcp_servers: cwd={:?}", cwd);
-    Ok(crate::storage::mcp_registry::list_configured(
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
+    log::debug!(
+        "[mcp] list_configured_mcp_servers: app={}, cwd={:?}",
+        app.id(),
+        cwd
+    );
+    Ok(crate::storage::mcp_registry::list_configured_for_app(
+        app,
         cwd.as_deref(),
     ))
 }
@@ -20,19 +28,23 @@ pub async fn add_mcp_server(
     transport: String,
     scope: String,
     cwd: Option<String>,
+    app: Option<String>,
     config_json: Option<String>,
     url: Option<String>,
     env_vars: Option<HashMap<String, String>>,
     headers: Option<HashMap<String, String>>,
 ) -> Result<PluginOperationResult, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
     log::debug!(
-        "[mcp] add_mcp_server: name={}, transport={}, scope={}, cwd={:?}",
+        "[mcp] add_mcp_server: app={}, name={}, transport={}, scope={}, cwd={:?}",
+        app.id(),
         name,
         transport,
         scope,
         cwd
     );
-    crate::storage::mcp_registry::add_server(
+    crate::storage::mcp_registry::add_server_for_app(
+        app,
         &name,
         &transport,
         &scope,
@@ -50,14 +62,17 @@ pub async fn remove_mcp_server(
     name: String,
     scope: String,
     cwd: Option<String>,
+    app: Option<String>,
 ) -> Result<PluginOperationResult, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
     log::debug!(
-        "[mcp] remove_mcp_server: name={}, scope={}, cwd={:?}",
+        "[mcp] remove_mcp_server: app={}, name={}, scope={}, cwd={:?}",
+        app.id(),
         name,
         scope,
         cwd
     );
-    crate::storage::mcp_registry::remove_server(&name, &scope, cwd.as_deref()).await
+    crate::storage::mcp_registry::remove_server_for_app(app, &name, &scope, cwd.as_deref()).await
 }
 
 #[tauri::command]
@@ -66,15 +81,24 @@ pub fn toggle_mcp_server_config(
     enabled: bool,
     scope: String,
     cwd: Option<String>,
+    app: Option<String>,
 ) -> Result<PluginOperationResult, String> {
+    let app = ManagedCliApp::from_optional(app.as_deref())?;
     log::debug!(
-        "[mcp] toggle_mcp_server_config: name={}, enabled={}, scope={}, cwd={:?}",
+        "[mcp] toggle_mcp_server_config: app={}, name={}, enabled={}, scope={}, cwd={:?}",
+        app.id(),
         name,
         enabled,
         scope,
         cwd
     );
-    crate::storage::mcp_registry::toggle_server_config(&name, enabled, &scope, cwd.as_deref())
+    crate::storage::mcp_registry::toggle_server_config_for_app(
+        app,
+        &name,
+        enabled,
+        &scope,
+        cwd.as_deref(),
+    )
 }
 
 #[tauri::command]

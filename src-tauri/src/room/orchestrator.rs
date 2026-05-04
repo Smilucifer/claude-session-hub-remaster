@@ -2,7 +2,9 @@ use crate::agent::adapter::ActorSessionMap;
 use crate::agent::session_actor::ActorCommand;
 use crate::agent::spawn::build_agent_command;
 use crate::agent::stream::{run_agent, ProcessMap};
-use crate::agent::windows_msvc_env::{resolve_spawn_env_plan, SpawnPathPolicy};
+use crate::agent::windows_msvc_env::{
+    merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan, SpawnPathPolicy,
+};
 use crate::room::adapter::{
     adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
@@ -285,11 +287,36 @@ async fn execute_pipe_turn(
 
     let agent_settings = storage::settings::get_agent_settings(&run.agent);
     let user_settings = storage::settings::get_user_settings();
-    let adapter_settings = crate::agent::adapter::build_adapter_settings(
+    let mut adapter_settings = crate::agent::adapter::build_adapter_settings(
         &agent_settings,
         &user_settings,
         run.model.clone(),
     );
+    let profile = match storage::settings::find_connection_profile(
+        &user_settings,
+        &run.agent,
+        run.connection_profile_id.as_deref(),
+    ) {
+        Ok(profile) => profile,
+        Err(e) => {
+            let _ = storage::runs::update_status(
+                &participant.run_id,
+                RunStatus::Failed,
+                Some(1),
+                Some(e.clone()),
+            );
+            return failed_response(participant, event_seq_start, e);
+        }
+    };
+    let profile_env = if let Some(profile) = profile.as_ref() {
+        crate::agent::adapter::apply_connection_profile(
+            &mut adapter_settings,
+            profile,
+            run.model.is_some(),
+        )
+    } else {
+        std::collections::HashMap::new()
+    };
     let (command, args) =
         match build_agent_command(&run.agent, &full_prompt, &adapter_settings, true) {
             Ok(command) => command,
@@ -305,13 +332,16 @@ async fn execute_pipe_turn(
         };
 
     let inherited_path = std::env::var("PATH").unwrap_or_default();
-    let spawn_env_plan = resolve_spawn_env_plan(
+    let mut spawn_env_plan = resolve_spawn_env_plan(
         Path::new(&run.cwd),
         false,
         user_settings.windows_msvc_env_mode,
         SpawnPathPolicy::InheritUnlessInjected,
         Some(&inherited_path),
     );
+    if !profile_env.is_empty() {
+        merge_extra_env_into_spawn_env_plan(&mut spawn_env_plan, &profile_env);
+    }
 
     if let Err(e) = run_agent(
         app.clone(),

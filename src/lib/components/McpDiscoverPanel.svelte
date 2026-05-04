@@ -15,11 +15,13 @@
   } from "$lib/types";
 
   let {
+    app = "claude",
     projectCwd = "",
     visible = false,
     operationLoading = $bindable<string | null>(null),
     showToast,
   }: {
+    app?: "claude" | "codex" | "gemini";
     projectCwd: string;
     visible?: boolean;
     operationLoading: string | null;
@@ -69,7 +71,7 @@
 
   async function refreshInstalledServers() {
     try {
-      const servers = await listConfiguredMcpServers(projectCwd || undefined);
+      const servers = await listConfiguredMcpServers(projectCwd || undefined, app);
       installedServers = servers;
       dbg("mcp-discover", "installed servers", servers.length);
     } catch (e) {
@@ -186,6 +188,7 @@
   async function handleInstall(server: McpRegistryServer) {
     operationLoading = server.name;
     const transport = getTransportType(server);
+    const effectiveScope = app === "claude" ? installScope : "user";
 
     try {
       let result: PluginOperationResult;
@@ -200,8 +203,9 @@
         result = await addMcpServer(
           server.name,
           "http",
-          installScope,
+          effectiveScope,
           projectCwd || undefined,
+          app,
           undefined,
           remote.url,
           undefined,
@@ -226,8 +230,9 @@
         result = await addMcpServer(
           server.name,
           "stdio",
-          installScope,
+          effectiveScope,
           projectCwd || undefined,
+          app,
           JSON.stringify(config),
         );
       } else {
@@ -312,22 +317,24 @@
         : 'text-muted-foreground hover:text-foreground'}"
       onclick={() => (installScope = "user")}>{t("mcp_scopeUser")}</button
     >
-    <button
-      class="rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed {installScope ===
-      'project'
-        ? 'bg-primary text-primary-foreground'
-        : 'text-muted-foreground hover:text-foreground'}"
-      disabled={!projectCwd}
-      onclick={() => (installScope = "project")}>{t("mcp_scopeProject")}</button
-    >
-    <button
-      class="rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed {installScope ===
-      'local'
-        ? 'bg-primary text-primary-foreground'
-        : 'text-muted-foreground hover:text-foreground'}"
-      disabled={!projectCwd}
-      onclick={() => (installScope = "local")}>{t("mcp_scopeLocal")}</button
-    >
+    {#if app === "claude"}
+      <button
+        class="rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed {installScope ===
+        'project'
+          ? 'bg-primary text-primary-foreground'
+          : 'text-muted-foreground hover:text-foreground'}"
+        disabled={!projectCwd}
+        onclick={() => (installScope = "project")}>{t("mcp_scopeProject")}</button
+      >
+      <button
+        class="rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed {installScope ===
+        'local'
+          ? 'bg-primary text-primary-foreground'
+          : 'text-muted-foreground hover:text-foreground'}"
+        disabled={!projectCwd}
+        onclick={() => (installScope = "local")}>{t("mcp_scopeLocal")}</button
+      >
+    {/if}
   </div>
 </div>
 
@@ -606,7 +613,7 @@
                   >
                     {operationLoading === detail.name
                       ? t("mcp_adding")
-                      : t("mcp_addToScope", { scope: installScope })}
+                      : t("mcp_addToScope", { scope: app === "claude" ? installScope : "user" })}
                   </button>
                 {/if}
               </div>

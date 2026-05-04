@@ -166,6 +166,10 @@ pub async fn run_agent(
                     if events.is_empty() && !type_str.is_empty() {
                         log::debug!("[codex] unhandled event: type={}", type_str);
                     }
+                } else {
+                    let text = format!("{line}\n");
+                    assistant_text.push_str(&text);
+                    let _ = app_out.emit("chat-delta", ChatDelta { text });
                 }
             }
         } else {

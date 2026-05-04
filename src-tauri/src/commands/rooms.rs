@@ -118,6 +118,7 @@ pub async fn create_room_participant(
     cwd: String,
     model: Option<String>,
     platform_id: Option<String>,
+    connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
@@ -132,6 +133,7 @@ pub async fn create_room_participant(
         cwd,
         model,
         platform_id,
+        connection_profile_id,
         label,
         role,
     )
@@ -150,6 +152,7 @@ pub async fn create_room_claude_participant(
     cwd: String,
     model: Option<String>,
     platform_id: Option<String>,
+    connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
@@ -164,6 +167,7 @@ pub async fn create_room_claude_participant(
         cwd,
         model,
         platform_id,
+        connection_profile_id,
         label,
         role,
     )
@@ -182,6 +186,7 @@ async fn create_room_participant_impl(
     cwd: String,
     model: Option<String>,
     platform_id: Option<String>,
+    connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
 ) -> Result<RoomDetail, String> {
@@ -193,6 +198,7 @@ async fn create_room_participant_impl(
         cwd,
         model,
         platform_id.clone(),
+        connection_profile_id.clone(),
     )?;
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
     if matches!(run.resolved_execution_path(), ExecutionPath::SessionActor) {
@@ -259,12 +265,13 @@ fn create_room_participant_run(
     cwd: String,
     model: Option<String>,
     platform_id: Option<String>,
+    connection_profile_id: Option<String>,
 ) -> Result<String, String> {
     let _room =
         storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
     let run_id = uuid::Uuid::new_v4().to_string();
     let execution_path = default_room_execution_path(&agent)?;
-    let mut meta = storage::runs::create_run(
+    let mut meta = storage::runs::create_run_with_connection_profile(
         &run_id,
         &prompt,
         &cwd,
@@ -276,6 +283,7 @@ fn create_room_participant_run(
         None,
         None,
         platform_id,
+        connection_profile_id,
     )?;
     meta.execution_path = Some(execution_path);
     storage::runs::save_meta(&meta)?;
@@ -297,6 +305,7 @@ fn create_claude_participant_run(
         cwd,
         model,
         platform_id,
+        None,
     )
 }
 
@@ -615,6 +624,7 @@ mod tests {
                 "Investigate".to_string(),
                 "D:/work/app".to_string(),
                 Some("gpt-5.5".to_string()),
+                None,
                 None,
             )
             .unwrap();

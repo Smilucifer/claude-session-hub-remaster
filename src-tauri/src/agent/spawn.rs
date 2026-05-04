@@ -41,11 +41,8 @@ pub fn build_agent_command(
             Ok(("claude".to_string(), args))
         }
         "codex" => {
-            let mut args: Vec<String> = vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "--skip-git-repo-check".to_string(),
-            ];
+            let mut args: Vec<String> =
+                vec!["exec".to_string(), "--skip-git-repo-check".to_string()];
             if native_yolo_enabled(settings) {
                 args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
             }
@@ -166,6 +163,7 @@ mod tests {
 
         assert_eq!(command, "codex");
         assert!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        assert!(!args.contains(&"--json".to_string()));
         assert!(args.windows(2).any(|w| w == ["--add-dir", "D:/shared"]));
         assert!(args.windows(2).any(|w| w == ["--model", "gpt-5.5"]));
         assert_eq!(args.last().map(String::as_str), Some("Fix it"));
