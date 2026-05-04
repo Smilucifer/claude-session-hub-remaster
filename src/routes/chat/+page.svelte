@@ -81,6 +81,11 @@
     parseRalphArgs,
   } from "$lib/utils/slash-commands";
   import { executeAddDir } from "$lib/utils/add-dir";
+  import {
+    isNativeAgent,
+    nativeYoloToPermissionMode,
+    permissionModeToNativeYolo,
+  } from "$lib/utils/native-permission";
   import { buildDoctorReport } from "$lib/utils/doctor";
   import type { RewindCandidate, RewindMarker } from "$lib/utils/rewind";
   import { truncate, cwdDisplayLabel, formatTokenCount } from "$lib/utils/format";
@@ -151,16 +156,20 @@
   /** Cache of last confirmed-clean Anthropic model, used as final fallback. */
   let lastKnownGoodAnthropicModel: string | undefined;
 
-  async function loadAgentSettingsFor(agent: string) {
+  async function loadAgentSettingsFor(agent: string): Promise<AgentSettings | null> {
     const seq = ++agentSettingsLoadSeq;
     try {
       const loaded = await api.getAgentSettings(agent);
-      if (seq !== agentSettingsLoadSeq) return;
+      if (seq !== agentSettingsLoadSeq) return null;
       agentSettings = loaded;
 
       if (agent !== "claude") {
         if (!store.run && !store.model && loaded.model) store.model = loaded.model;
-        return;
+        if (!store.permissionModeSetByUser) {
+          store.permissionMode = nativeYoloToPermissionMode(loaded.yolo_mode);
+          store.permissionModeSetByUser = true;
+        }
+        return loaded;
       }
 
       // Read effort from CLI config (~/.claude/settings.json) — the authoritative source.
@@ -177,10 +186,12 @@
       if (loaded?.effort) {
         api.updateAgentSettings("claude", { effort: "" }).catch(() => {});
       }
+      return loaded;
     } catch (e) {
-      if (seq !== agentSettingsLoadSeq) return;
+      if (seq !== agentSettingsLoadSeq) return null;
       agentSettings = null;
       dbgWarn("chat", "failed to load agent settings:", e);
+      return null;
     }
   }
 
@@ -214,11 +225,28 @@
   function handleAgentChange(agent: string) {
     if (store.run) return;
     store.agent = agent;
+    store.permissionMode = "";
+    store.permissionModeSetByUser = false;
+    store.permissionModePersistFailed = false;
     if (agent !== "claude") {
       store.model = "";
     } else if (!store.model && settings?.default_model && store.platformId === "anthropic") {
       store.model = settings.default_model;
     }
+    void loadAgentSettingsFor(agent).then((loaded) => {
+      if (store.run || store.agent !== agent || store.permissionModeSetByUser) return;
+      if (isNativeAgent(agent)) {
+        store.permissionMode = nativeYoloToPermissionMode(loaded?.yolo_mode);
+        store.permissionModeSetByUser = true;
+      } else if (loaded?.plan_mode) {
+        store.permissionMode = "plan";
+        store.permissionModeSetByUser = true;
+      } else if (settings?.permission_mode) {
+        const cliName = APP_TO_CLI_MODE[settings.permission_mode] ?? settings.permission_mode;
+        store.permissionMode = cliName;
+        store.permissionModeSetByUser = true;
+      }
+    });
   }
 
   function normalizeChatAgent(value: string): string {
@@ -1036,11 +1064,15 @@
     } catch (e) {
       dbgWarn("chat", "failed to load settings:", e);
     }
-    void loadAgentSettingsFor(store.run?.agent ?? store.agent);
+    const activeAgent = store.run?.agent ?? store.agent;
+    const loadedAgentSettings = await loadAgentSettingsFor(activeAgent);
     // Initialize permission mode from saved settings (before session_init arrives)
     // Agent plan_mode=true overrides user permission_mode (legacy compat)
     if (!store.permissionModeSetByUser) {
-      if (agentSettings?.plan_mode) {
+      if (isNativeAgent(activeAgent)) {
+        store.permissionMode = nativeYoloToPermissionMode(loadedAgentSettings?.yolo_mode);
+        store.permissionModeSetByUser = true;
+      } else if (loadedAgentSettings?.plan_mode) {
         store.permissionMode = "plan";
         store.permissionModeSetByUser = true;
       } else if (settings?.permission_mode) {
@@ -1926,6 +1958,37 @@
     store.permissionMode = newMode;
     store.permissionModeSetByUser = true;
     store.permissionModePersistFailed = false;
+
+    if (isNativeAgent(store.agent)) {
+      let persistFailed = false;
+      const yoloMode = permissionModeToNativeYolo(newMode);
+      pendingPersist = pendingPersist
+        .then(async () => {
+          if (seq !== permissionModeChangeSeq) return;
+          try {
+            const updated = await api.updateAgentSettings(store.agent, { yolo_mode: yoloMode });
+            if (seq !== permissionModeChangeSeq) return;
+            agentSettings = updated;
+            dbg("chat", "native permission mode persisted", { agent: store.agent, yoloMode });
+          } catch (e) {
+            if (seq !== permissionModeChangeSeq) return;
+            persistFailed = true;
+            store.permissionMode = oldMode;
+            store.permissionModeSetByUser = oldFlag;
+            store.permissionModePersistFailed = oldPersistFailed;
+            dbgWarn("chat", "native permission mode persist failed:", e);
+            if (opts?.toast !== false) showChatToast(t("toast_permissionChangeFailed"));
+          }
+        })
+        .catch(() => {});
+
+      await pendingPersist;
+
+      if (!persistFailed && opts?.toast !== false) {
+        showChatToast(t("toast_permissionMode", { mode: getPermModeLabel(newMode) }));
+      }
+      return seq === permissionModeChangeSeq && !persistFailed;
+    }
 
     if (hadActiveSession && store.run) {
       // Active session: hot-switch via control protocol (CLI expects CLI names)

@@ -37,6 +37,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import { formatPasteSize } from "$lib/utils/format";
   import { getAgentFeatures } from "$lib/utils/agent-features";
+  import { isPermissionModeVisibleForAgent } from "$lib/utils/native-permission";
   import {
     BINARY_ATTACHMENT_TYPES,
     MAX_ATTACHMENTS,
@@ -288,8 +289,13 @@
   let modeDropdownEl: HTMLDivElement | undefined = $state();
   let modeDropdownStyle = $state("");
 
+  let visiblePermissionModes = $derived(
+    PERMISSION_MODES.filter((m) => isPermissionModeVisibleForAgent(agent, m.value)),
+  );
   let currentMode = $derived(
-    PERMISSION_MODES.find((m) => m.value === permissionMode) ?? PERMISSION_MODES[0],
+    visiblePermissionModes.find((m) => m.value === permissionMode) ??
+      visiblePermissionModes[0] ??
+      PERMISSION_MODES[0],
   );
 
   function toggleModeDropdown() {
@@ -2315,7 +2321,7 @@
       style={modeDropdownStyle}
     >
       <div class="p-1">
-        {#each PERMISSION_MODES as mode}
+        {#each visiblePermissionModes as mode}
           <button
             class="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-xs hover:bg-accent transition-colors
               {permissionMode === mode.value ? 'bg-accent font-medium' : ''}"

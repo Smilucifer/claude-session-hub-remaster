@@ -10,13 +10,7 @@ fn native_command(default_command: &str, settings: &AdapterSettings) -> String {
 }
 
 fn native_yolo_enabled(settings: &AdapterSettings) -> bool {
-    if settings.yolo_mode.unwrap_or(false) {
-        return true;
-    }
-    matches!(
-        settings.permission_mode.as_deref(),
-        Some("bypassPermissions" | "dontAsk" | "yolo" | "auto_all")
-    )
+    settings.yolo_mode.unwrap_or(false)
 }
 
 /// Build the command + args for a given agent (pipe-exec mode, not stream session)
@@ -191,5 +185,19 @@ mod tests {
             .windows(2)
             .any(|w| w == ["--include-directories", "D:/shared"]));
         assert_eq!(args.last().map(String::as_str), Some("Explain this repo"));
+    }
+
+    #[test]
+    fn native_agents_do_not_inherit_global_permission_bypass() {
+        let mut s = settings(None);
+        s.permission_mode = Some("bypassPermissions".to_string());
+
+        let (_codex_command, codex_args) =
+            build_agent_command("codex", "Fix it", &s, true).expect("codex command");
+        assert!(!codex_args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+
+        let (_gemini_command, gemini_args) =
+            build_agent_command("gemini", "Fix it", &s, true).expect("gemini command");
+        assert!(!gemini_args.contains(&"--yolo".to_string()));
     }
 }
