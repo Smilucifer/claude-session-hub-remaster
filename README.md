@@ -87,13 +87,13 @@ Currently useful for:
 
 ### Codex, Gemini, and Connection Profiles
 
-普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Claude 使用 stream session；Codex 走原生 `codex exec --skip-git-repo-check` pipe mode；Gemini 走原生 `gemini --output-format text -p` pipe mode。Codex / Gemini 启动页与 Claude 保持一致，只提供继续可用会话和选择接入方式的入口，不再展示示例 prompt。
+普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Claude 使用 stream session；Codex 走原生 `codex exec --skip-git-repo-check` pipe mode；Gemini 走原生 `gemini --output-format text -p` pipe mode。Codex / Gemini 启动页与 Claude 保持一致，只提供继续可用会话和选择接入方式的入口，不再展示示例 prompt。Codex / Gemini 的输出默认按聊天时间线渲染，历史回放会保留多轮 `user -> assistant` 顺序，而不是显示为终端 dump。
 
-The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Claude uses stream sessions; Codex uses native `codex exec --skip-git-repo-check` pipe mode; Gemini uses native `gemini --output-format text -p` pipe mode. Codex / Gemini startup pages now match Claude's entry model: continue a supported previous session or choose a connection profile, without example-prompt shortcuts.
+The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Claude uses stream sessions; Codex uses native `codex exec --skip-git-repo-check` pipe mode; Gemini uses native `gemini --output-format text -p` pipe mode. Codex / Gemini startup pages now match Claude's entry model: continue a supported previous session or choose a connection profile, without example-prompt shortcuts. Codex / Gemini output renders as the normal chat timeline by default, and history replay preserves multi-turn `user -> assistant` order instead of showing a terminal dump.
 
-Settings provides separate connection panels for CC / Codex / Gemini. Saved connection profiles can use CLI authentication or app-managed API keys, and both normal chat and Room creation can launch from a selected saved connection. Room project paths are selected through the folder picker and then shared by all three fixed Roundtable seats.
+Settings provides separate connection panels for CC / Codex / Gemini. Codex and Gemini use the same CLI Auth / App API Key card pattern as CC, while keeping their native launch settings and No-review mode. Saved connection profiles can use CLI authentication or app-managed API keys, and both normal chat and Room creation can launch from a selected saved connection. Room project paths are selected through the folder picker and then shared by all three fixed Roundtable seats.
 
-Settings 为 CC / Codex / Gemini 提供独立连接配置页。保存的接入方式可以使用 CLI 认证或 App 管理的 API key；普通聊天和 Room 创建都可以从已保存接入方式启动。Room 项目路径通过文件夹选择器选择，并由三个固定 Roundtable seat 共享。
+Settings 为 CC / Codex / Gemini 提供独立连接配置页。Codex 和 Gemini 使用与 CC 一致的 CLI Auth / App API Key 卡片模式，同时保留各自的原生命令设置和 No-review mode。保存的接入方式可以使用 CLI 认证或 App 管理的 API key；普通聊天和 Room 创建都可以从已保存接入方式启动。Room 项目路径通过文件夹选择器选择，并由三个固定 Roundtable seat 共享。
 
 Rooms can mix Claude Code stream-session participants with native Codex and Gemini pipe-exec participants. Claude Code profiles still support cross-API / cross-model seats through `platform_id`. Add profiles under `user.cc_agent_profiles` in `~/.opencovibe/settings.json`, without replacing the other fields in that file:
 
@@ -152,9 +152,9 @@ Rooms can mix Claude Code stream-session participants with native Codex and Gemi
 
 ### Windows Native Toolchain Support
 
-在 Windows 上，如果你从普通桌面窗口启动应用，Claude / Codex 子进程通常拿不到 Visual Studio Developer Prompt 里的 `cl`、`link`、Windows SDK 等环境。当前版本会在明确需要 native toolchain 的项目中，自动为本地 CLI 子进程补充 MSVC developer environment。
+在 Windows 上，如果你从普通桌面窗口启动应用，Claude / Codex 子进程通常拿不到 Visual Studio Developer Prompt 里的 `cl`、`link`、Windows SDK 等环境。当前版本会在明确需要 native toolchain 的项目中，自动为本地 CLI 子进程补充 MSVC developer environment。Codex / Gemini 如果通过 npm `.cmd` shim 安装，应用会在 Windows 上直接以 `node.exe + CLI js` 方式启动，避免对话时闪出临时 `cmd` 窗口。
 
-On Windows, when the app is launched from the normal desktop environment, Claude / Codex child processes usually do not inherit the `cl`, `link`, Windows SDK, and related variables from a Visual Studio Developer Prompt. This version can automatically add an MSVC developer environment for local CLI child processes when the current project clearly needs native tooling.
+On Windows, when the app is launched from the normal desktop environment, Claude / Codex child processes usually do not inherit the `cl`, `link`, Windows SDK, and related variables from a Visual Studio Developer Prompt. This version can automatically add an MSVC developer environment for local CLI child processes when the current project clearly needs native tooling. When Codex / Gemini are installed through npm `.cmd` shims, the app launches `node.exe + the CLI js` directly on Windows to avoid transient `cmd` windows during chat.
 
 模式：
 

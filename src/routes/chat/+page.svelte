@@ -3855,8 +3855,8 @@
 
     <!-- Main area -->
     <div class="flex-1 overflow-hidden relative">
-      {#if store.useStreamSession}
-        <!-- API mode: chat messages -->
+      {#if store.useStreamSession || store.run?.execution_path === "pipe_exec"}
+        <!-- Chat messages. Native pipe-exec runs render their answer here; raw terminal output stays out of the default view. -->
         <div
           class="h-full overflow-y-auto"
           style="overflow-anchor:auto"

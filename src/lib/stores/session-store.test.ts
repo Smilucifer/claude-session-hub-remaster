@@ -3882,8 +3882,8 @@ describe("SessionStore reducer", () => {
       mockGetRunEvents.mockReset().mockResolvedValue([]);
     });
 
-    describe("pipe exec terminal replay", () => {
-      it("replays assistant output for completed native CLI runs", async () => {
+    describe("pipe exec chat rendering", () => {
+      it("replays completed native CLI runs into the chat timeline", async () => {
         const run = makeRun("run-pipe-1", {
           status: "completed",
           agent: "gemini",
@@ -3920,6 +3920,97 @@ describe("SessionStore reducer", () => {
         expect(output).toContain("> review this");
         expect(output).toContain("Looks good.");
         expect(output).toContain("--- Session ended ---");
+        expect(testStore.timeline).toHaveLength(2);
+        expect(testStore.timeline[0].kind).toBe("user");
+        expect(testStore.timeline[0].kind === "user" && testStore.timeline[0].content).toBe(
+          "review this",
+        );
+        expect(testStore.timeline[1].kind).toBe("assistant");
+        expect(
+          testStore.timeline[1].kind === "assistant" && testStore.timeline[1].content,
+        ).toBe("Looks good.");
+      });
+
+      it("preserves multi-turn native CLI replay order", async () => {
+        const run = makeRun("run-pipe-multi", {
+          status: "completed",
+          agent: "codex",
+          execution_path: "pipe_exec",
+        });
+        mockGetRun.mockResolvedValue(run);
+        mockGetRunEvents.mockResolvedValue([
+          {
+            id: "ev-1",
+            task_id: "run-pipe-multi",
+            seq: 1,
+            type: "user",
+            payload: { text: "first" },
+            timestamp: "2026-05-05T00:00:01.000Z",
+          },
+          {
+            id: "ev-2",
+            task_id: "run-pipe-multi",
+            seq: 2,
+            type: "assistant",
+            payload: { text: "answer one" },
+            timestamp: "2026-05-05T00:00:02.000Z",
+          },
+          {
+            id: "ev-3",
+            task_id: "run-pipe-multi",
+            seq: 3,
+            type: "user",
+            payload: { text: "second" },
+            timestamp: "2026-05-05T00:00:03.000Z",
+          },
+          {
+            id: "ev-4",
+            task_id: "run-pipe-multi",
+            seq: 4,
+            type: "assistant",
+            payload: { text: "answer two" },
+            timestamp: "2026-05-05T00:00:04.000Z",
+          },
+        ]);
+
+        const testStore = new SessionStore();
+        await testStore.loadRun("run-pipe-multi");
+
+        expect(
+          testStore.timeline.map((entry) =>
+            entry.kind === "user" || entry.kind === "assistant"
+              ? `${entry.kind}:${entry.content}`
+              : entry.kind,
+          ),
+        ).toEqual([
+          "user:first",
+          "assistant:answer one",
+          "user:second",
+          "assistant:answer two",
+        ]);
+      });
+
+      it("finalizes live native CLI deltas as assistant messages on chat done", () => {
+        const testStore = new SessionStore();
+        testStore.run = makeRun("run-pipe-2", {
+          status: "running",
+          agent: "codex",
+          execution_path: "pipe_exec",
+        });
+        mockGetRun.mockResolvedValue(makeRun("run-pipe-2", { status: "completed" }));
+        testStore.phase = "running";
+
+        testStore.handleChatDelta("Hello", undefined);
+        testStore.handleChatDelta(" world", undefined);
+        testStore.handleChatDone({ ok: true, code: 0 });
+
+        expect(testStore.streamingText).toBe("");
+        expect(testStore.phase).toBe("completed");
+        expect(testStore.timeline).toHaveLength(1);
+        expect(testStore.timeline[0].kind).toBe("assistant");
+        expect(
+          testStore.timeline[0].kind === "assistant" && testStore.timeline[0].content,
+        ).toBe("Hello world");
       });
     });
 

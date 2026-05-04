@@ -1599,38 +1599,93 @@ export class SessionStore {
         });
       } else {
         this._isLoadingReplay = false;
-        // CLI mode: replay history in terminal
+        // Pipe-exec mode: replay run events into the chat timeline by default.
+        // The terminal replay was too noisy for native Codex/Gemini sessions.
         const events = await api.getRunEvents(id);
         if (gen !== this._loadGen) {
           dbg("store", "stale after getRunEvents, gen=", gen);
           return;
         }
         const hasAssistantEvent = events.some((event) => event.type === "assistant");
+        const pipeTimeline: TimelineEntry[] = [];
+        let assistantText = "";
+        let assistantTs = "";
         let hasHistory = false;
+        const pushAssistant = (content: string, ts?: string) => {
+          const trimmed = content.trim();
+          if (!trimmed) return;
+          const entryId = uuid();
+          pipeTimeline.push({
+            kind: "assistant",
+            id: entryId,
+            anchorId: entryId,
+            content: trimmed,
+            ts: ts || this.run?.ended_at || new Date().toISOString(),
+            ...(this.run?.model ? { model: this.run.model } : {}),
+          });
+        };
+        const flushAssistantBuffer = (ts?: string) => {
+          pushAssistant(assistantText, assistantTs || ts);
+          assistantText = "";
+          assistantTs = "";
+        };
         for (const event of events) {
           const text = String(
             (event.payload as Record<string, unknown>).text ??
               (event.payload as Record<string, unknown>).message ??
               "",
           );
-          if (!text || !xtermRef) continue;
+          if (!text) continue;
           if (event.type === "user") {
-            xtermRef.writeText(`\x1b[1;36m> ${text}\x1b[0m\r\n`);
+            flushAssistantBuffer(event.timestamp);
+            const entryId = uuid();
+            pipeTimeline.push({
+              kind: "user",
+              id: entryId,
+              anchorId: entryId,
+              content: text,
+              ts: event.timestamp,
+            });
+            xtermRef?.writeText(`\x1b[1;36m> ${text}\x1b[0m\r\n`);
             hasHistory = true;
           } else if (event.type === "assistant") {
-            xtermRef.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
+            flushAssistantBuffer(event.timestamp);
+            pushAssistant(text, event.timestamp);
+            xtermRef?.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
             hasHistory = true;
           } else if (event.type === "system") {
-            xtermRef.writeText(`\x1b[90m${text}\x1b[0m\r\n`);
+            xtermRef?.writeText(`\x1b[90m${text}\x1b[0m\r\n`);
           } else if (event.type === "stderr") {
-            xtermRef.writeText(`\x1b[31m${text}\x1b[0m\r\n`);
+            xtermRef?.writeText(`\x1b[31m${text}\x1b[0m\r\n`);
           } else if (event.type === "stdout" && !hasAssistantEvent) {
-            xtermRef.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
+            assistantText += text.endsWith("\n") ? text : `${text}\n`;
+            assistantTs = event.timestamp;
+            xtermRef?.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
             hasHistory = true;
           } else if (event.type === "command") {
-            xtermRef.writeText(`\x1b[33m${text}\x1b[0m\r\n`);
+            xtermRef?.writeText(`\x1b[33m${text}\x1b[0m\r\n`);
           }
         }
+        if (pipeTimeline.length === 0 && this.run?.prompt) {
+          const entryId = uuid();
+          pipeTimeline.push({
+            kind: "user",
+            id: entryId,
+            anchorId: entryId,
+            content: this.run.prompt,
+            ts: this.run.started_at ?? new Date().toISOString(),
+          });
+        }
+        const trimmedAssistant = assistantText.trim();
+        if (trimmedAssistant) {
+          if (this.isRunning) {
+            this.streamingText = trimmedAssistant;
+          } else {
+            flushAssistantBuffer(this.run?.ended_at ?? new Date().toISOString());
+            this.streamingText = "";
+          }
+        }
+        this.timeline = pipeTimeline;
         if (hasHistory && !this.isRunning && xtermRef) {
           xtermRef.writeText(`\r\n\x1b[90m--- Session ended ---\x1b[0m\r\n`);
         }
@@ -1770,6 +1825,7 @@ export class SessionStore {
       } else {
         // Codex pipe mode
         this._setPhase("running");
+        this._pushOptimisticUser(prompt, attachments);
         await api.sendChatMessage(run.id, prompt, attachments.length > 0 ? attachments : undefined);
       }
 
@@ -1802,6 +1858,7 @@ export class SessionStore {
         }
       } else {
         this._setPhase("running");
+        this._pushOptimisticUser(text, attachments);
         await api.sendChatMessage(
           this.run.id,
           text,
@@ -2269,6 +2326,22 @@ export class SessionStore {
     if (!this.run) return;
 
     if (!this.useStreamSession) {
+      const content = this.streamingText.trim();
+      if (content) {
+        const entryId = uuid();
+        this.timeline = [
+          ...this.timeline,
+          {
+            kind: "assistant",
+            id: entryId,
+            anchorId: entryId,
+            content,
+            ts: new Date().toISOString(),
+            ...(this.run.model ? { model: this.run.model } : {}),
+          },
+        ];
+        this.streamingText = "";
+      }
       this._setPhase("completed");
       api
         .getRun(this.run.id)
@@ -2282,8 +2355,9 @@ export class SessionStore {
   /** Handle chat-delta event (pipe-exec mode). */
   handleChatDelta(text: string, xtermRef?: { writeText(s: string): void }): void {
     if (!this.run) return;
-    if (!this.useStreamSession && xtermRef) {
-      xtermRef.writeText(text);
+    if (!this.useStreamSession) {
+      this.streamingText += text;
+      xtermRef?.writeText(text);
     }
   }
 

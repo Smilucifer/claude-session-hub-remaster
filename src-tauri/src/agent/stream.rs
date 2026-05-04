@@ -5,6 +5,7 @@ use crate::models::{ChatDelta, ChatDone, RunEventType};
 use crate::process_ext::HideConsole;
 use crate::storage;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -16,6 +17,98 @@ pub type ProcessMap = Arc<Mutex<HashMap<String, Child>>>;
 
 pub fn new_process_map() -> ProcessMap {
     Arc::new(Mutex::new(HashMap::new()))
+}
+
+fn should_resolve_command_from_path(command: &str) -> bool {
+    !command.trim().is_empty() && !command.contains('\\') && !command.contains('/')
+}
+
+fn resolve_process_command(command: &str) -> String {
+    if should_resolve_command_from_path(command) {
+        crate::agent::claude_stream::which_binary(command).unwrap_or_else(|| command.to_string())
+    } else {
+        command.to_string()
+    }
+}
+
+fn resolve_windows_npm_shim(command: &str) -> Option<(String, Vec<String>)> {
+    #[cfg(windows)]
+    {
+        let path = Path::new(command);
+        let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
+        if ext != "cmd" && ext != "bat" {
+            return None;
+        }
+
+        let base = path.parent()?;
+        let node = base.join("node.exe");
+        let node_bin = if node.exists() {
+            node
+        } else {
+            PathBuf::from(crate::agent::claude_stream::which_binary("node")?)
+        };
+
+        let stem = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
+        let script = if stem == "codex" {
+            base.join("node_modules")
+                .join("@openai")
+                .join("codex")
+                .join("bin")
+                .join("codex.js")
+        } else if stem == "gemini" {
+            base.join("node_modules")
+                .join("@google")
+                .join("gemini-cli")
+                .join("bundle")
+                .join("gemini.js")
+        } else {
+            return None;
+        };
+
+        if !script.exists() {
+            return None;
+        }
+
+        Some((
+            node_bin.to_string_lossy().into_owned(),
+            vec![script.to_string_lossy().into_owned()],
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+        None
+    }
+}
+
+fn resolve_spawn_invocation(command: String, mut args: Vec<String>) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    if let Some((node, mut shim_args)) = resolve_windows_npm_shim(&command) {
+        shim_args.append(&mut args);
+        return (node, shim_args);
+    }
+
+    (command, args)
+}
+
+fn quote_display_arg(arg: &str) -> String {
+    let safe = !arg.is_empty()
+        && arg.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | '\\' | ':' | '=')
+        });
+    if safe {
+        return arg.to_string();
+    }
+
+    let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn format_started_command(command: &str, args: &[String]) -> String {
+    std::iter::once(quote_display_arg(command))
+        .chain(args.iter().map(|arg| quote_display_arg(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -37,6 +130,16 @@ pub async fn run_agent(
         cwd,
         agent
     );
+    let display_command = format_started_command(&command, &args);
+    let process_command = resolve_process_command(&command);
+    let (process_command, args) = resolve_spawn_invocation(process_command, args);
+    if process_command != command {
+        log::debug!(
+            "[stream] resolved command for spawn: {} -> {}",
+            command,
+            process_command
+        );
+    }
 
     let emit_run_event = |rt: RunEventType, payload: serde_json::Value| {
         if let Err(e) = storage::events::append_event(&run_id, rt, payload) {
@@ -52,12 +155,12 @@ pub async fn run_agent(
     emit_run_event(
         RunEventType::System,
         serde_json::json!({
-            "message": format!("Started {} {}", command, args.join(" ")),
+            "message": format!("Started {}", display_command),
             "source": "ui_chat"
         }),
     );
 
-    let mut cmd = Command::new(&command);
+    let mut cmd = Command::new(&process_command);
     cmd.args(&args)
         .current_dir(&cwd)
         .stdin(Stdio::null())
@@ -335,5 +438,83 @@ pub async fn stop_process(process_map: &ProcessMap, run_id: &str) -> bool {
     } else {
         log::debug!("[stream] stop_process: no process for run_id={}", run_id);
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_command_quotes_prompt_arguments_without_losing_boundaries() {
+        let args = vec![
+            "exec".to_string(),
+            "--skip-git-repo-check".to_string(),
+            "--model".to_string(),
+            "gpt-5.5".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "你好".to_string(),
+            "hello world".to_string(),
+        ];
+
+        assert_eq!(
+            format_started_command("codex", &args),
+            "codex exec --skip-git-repo-check --model gpt-5.5 --dangerously-bypass-approvals-and-sandbox \"你好\" \"hello world\""
+        );
+    }
+
+    #[test]
+    fn bare_cli_names_are_resolved_before_spawn_but_paths_are_left_intact() {
+        assert!(should_resolve_command_from_path("codex"));
+        assert!(should_resolve_command_from_path("gemini.cmd"));
+        assert!(!should_resolve_command_from_path(
+            "C:\\Users\\InBlu\\AppData\\Roaming\\npm\\codex.cmd"
+        ));
+        assert!(!should_resolve_command_from_path("./codex"));
+        assert!(!should_resolve_command_from_path(""));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn npm_shim_invocation_prefers_node_without_shelling_out_to_cmd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::write(base.join("node.exe"), "").unwrap();
+        let codex_js = base
+            .join("node_modules")
+            .join("@openai")
+            .join("codex")
+            .join("bin");
+        std::fs::create_dir_all(&codex_js).unwrap();
+        std::fs::write(codex_js.join("codex.js"), "").unwrap();
+
+        let shim = base.join("codex.cmd");
+        std::fs::write(&shim, "@echo off").unwrap();
+
+        let resolved = resolve_windows_npm_shim(&shim.to_string_lossy()).expect("shim");
+        assert!(resolved.0.ends_with("node.exe"));
+        assert!(resolved.1[0].ends_with("codex.js"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn gemini_npm_shim_invocation_prefers_node_without_shelling_out_to_cmd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        std::fs::write(base.join("node.exe"), "").unwrap();
+        let gemini_js = base
+            .join("node_modules")
+            .join("@google")
+            .join("gemini-cli")
+            .join("bundle");
+        std::fs::create_dir_all(&gemini_js).unwrap();
+        std::fs::write(gemini_js.join("gemini.js"), "").unwrap();
+
+        let shim = base.join("gemini.cmd");
+        std::fs::write(&shim, "@echo off").unwrap();
+
+        let resolved = resolve_windows_npm_shim(&shim.to_string_lossy()).expect("shim");
+        assert!(resolved.0.ends_with("node.exe"));
+        assert!(resolved.1[0].ends_with("gemini.js"));
     }
 }
