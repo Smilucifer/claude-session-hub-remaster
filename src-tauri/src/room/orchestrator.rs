@@ -1,5 +1,8 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::agent::session_actor::ActorCommand;
+use crate::agent::spawn::build_agent_command;
+use crate::agent::stream::{run_agent, ProcessMap};
+use crate::agent::windows_msvc_env::{resolve_spawn_env_plan, SpawnPathPolicy};
 use crate::room::adapter::{
     adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
@@ -7,10 +10,15 @@ use crate::room::models::{
     ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult, RoomKind,
     RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode,
 };
-use crate::{models::now_iso, storage};
+use crate::{
+    models::{now_iso, ExecutionPath, RunEventType, RunMeta, RunStatus},
+    storage,
+};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 static ROOM_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
@@ -21,7 +29,26 @@ static RUN_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>
 #[derive(Clone)]
 struct RoundtableTarget {
     participant: RoomParticipant,
-    cmd_tx: mpsc::Sender<ActorCommand>,
+    runtime: RoundtableTargetRuntime,
+}
+
+#[derive(Clone)]
+enum RoundtableTargetRuntime {
+    Actor { cmd_tx: mpsc::Sender<ActorCommand> },
+    Pipe,
+}
+
+impl RoundtableTarget {
+    #[cfg(test)]
+    fn is_pipe(&self) -> bool {
+        matches!(self.runtime, RoundtableTargetRuntime::Pipe)
+    }
+}
+
+#[derive(Clone)]
+pub struct RoomPipeRuntime {
+    pub app: AppHandle,
+    pub process_map: ProcessMap,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +68,15 @@ pub async fn run_roundtable_turn(
     room_id: &str,
     message: &str,
     sessions: &ActorSessionMap,
+) -> Result<RoomTurn, String> {
+    run_roundtable_turn_with_runtime(room_id, message, sessions, None).await
+}
+
+pub async fn run_roundtable_turn_with_runtime(
+    room_id: &str,
+    message: &str,
+    sessions: &ActorSessionMap,
+    pipe_runtime: Option<RoomPipeRuntime>,
 ) -> Result<RoomTurn, String> {
     let room_lock = room_orchestration_lock(room_id);
     let _room_guard = room_lock.lock().await;
@@ -105,6 +141,7 @@ pub async fn run_roundtable_turn(
     let mut response_tasks = Vec::with_capacity(targets.len());
 
     for target in &targets {
+        let target = target.clone();
         let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
@@ -113,48 +150,13 @@ pub async fn run_roundtable_turn(
         } else {
             prompt.clone()
         };
-        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
+        let pipe_runtime = pipe_runtime.clone();
 
         response_tasks.push(tokio::spawn(async move {
             let run_lock = run_orchestration_lock(&participant.run_id);
             let _run_guard = run_lock.lock().await;
-            let event_seq_start = storage::events::next_seq(&participant.run_id);
-
-            match adapter.stream_message(&target_prompt).await {
-                Ok(()) => match adapter.wait_turn_complete().await {
-                    Ok(outcome) => {
-                        let event_seq_end =
-                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
-                        RoomResponseRef {
-                            participant_id: participant.id.clone(),
-                            run_id: participant.run_id.clone(),
-                            event_seq_start,
-                            event_seq_end,
-                            preview: run_preview(&participant.run_id),
-                            status: outcome_status_label(outcome.status).to_string(),
-                            error: outcome.error,
-                        }
-                    }
-                    Err(error) => RoomResponseRef {
-                        participant_id: participant.id.clone(),
-                        run_id: participant.run_id.clone(),
-                        event_seq_start,
-                        event_seq_end: event_seq_start.saturating_sub(1),
-                        preview: None,
-                        status: "failed".to_string(),
-                        error: Some(error.message),
-                    },
-                },
-                Err(error) => RoomResponseRef {
-                    participant_id: participant.id.clone(),
-                    run_id: participant.run_id.clone(),
-                    event_seq_start,
-                    event_seq_end: event_seq_start.saturating_sub(1),
-                    preview: None,
-                    status: "failed".to_string(),
-                    error: Some(error.message),
-                },
-            }
+            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
+                .await
         }));
     }
 
@@ -194,10 +196,201 @@ pub async fn run_roundtable_turn(
     Ok(turn)
 }
 
+async fn execute_roundtable_target(
+    target: RoundtableTarget,
+    participant: &RoomParticipant,
+    run: &RunMeta,
+    target_prompt: &str,
+    pipe_runtime: Option<RoomPipeRuntime>,
+) -> RoomResponseRef {
+    match target.runtime {
+        RoundtableTargetRuntime::Actor { cmd_tx } => {
+            execute_actor_turn(participant, run, target_prompt, cmd_tx).await
+        }
+        RoundtableTargetRuntime::Pipe => match pipe_runtime {
+            Some(runtime) => {
+                execute_pipe_turn(
+                    participant,
+                    run,
+                    target_prompt,
+                    runtime.app,
+                    runtime.process_map,
+                )
+                .await
+            }
+            None => failed_response(
+                participant,
+                storage::events::next_seq(&participant.run_id),
+                "Native CLI Room participant runtime is unavailable",
+            ),
+        },
+    }
+}
+
+async fn execute_actor_turn(
+    participant: &RoomParticipant,
+    run: &RunMeta,
+    target_prompt: &str,
+    cmd_tx: mpsc::Sender<ActorCommand>,
+) -> RoomResponseRef {
+    let event_seq_start = storage::events::next_seq(&participant.run_id);
+    let mut adapter = adapter_for_run(run).with_command_sender(cmd_tx);
+    match adapter.stream_message(target_prompt).await {
+        Ok(()) => match adapter.wait_turn_complete().await {
+            Ok(outcome) => {
+                let event_seq_end =
+                    storage::events::next_seq(&participant.run_id).saturating_sub(1);
+                RoomResponseRef {
+                    participant_id: participant.id.clone(),
+                    run_id: participant.run_id.clone(),
+                    event_seq_start,
+                    event_seq_end,
+                    preview: run_preview(&participant.run_id),
+                    status: outcome_status_label(outcome.status).to_string(),
+                    error: outcome.error,
+                }
+            }
+            Err(error) => failed_response(participant, event_seq_start, error.message),
+        },
+        Err(error) => failed_response(participant, event_seq_start, error.message),
+    }
+}
+
+async fn execute_pipe_turn(
+    participant: &RoomParticipant,
+    run: &RunMeta,
+    target_prompt: &str,
+    app: AppHandle,
+    process_map: ProcessMap,
+) -> RoomResponseRef {
+    let event_seq_start = storage::events::next_seq(&participant.run_id);
+    let full_prompt = compose_pipe_turn_prompt(&run.prompt, target_prompt);
+    if let Err(e) = storage::events::append_event(
+        &participant.run_id,
+        RunEventType::User,
+        serde_json::json!({
+            "text": target_prompt,
+            "source": "room",
+            "participant_id": participant.id
+        }),
+    ) {
+        log::warn!("[room] failed to append pipe user event: {}", e);
+    }
+
+    if let Err(e) =
+        storage::runs::update_status(&participant.run_id, RunStatus::Running, None, None)
+    {
+        return failed_response(participant, event_seq_start, e);
+    }
+
+    let agent_settings = storage::settings::get_agent_settings(&run.agent);
+    let user_settings = storage::settings::get_user_settings();
+    let adapter_settings = crate::agent::adapter::build_adapter_settings(
+        &agent_settings,
+        &user_settings,
+        run.model.clone(),
+    );
+    let (command, args) =
+        match build_agent_command(&run.agent, &full_prompt, &adapter_settings, true) {
+            Ok(command) => command,
+            Err(e) => {
+                let _ = storage::runs::update_status(
+                    &participant.run_id,
+                    RunStatus::Failed,
+                    Some(1),
+                    Some(e.clone()),
+                );
+                return failed_response(participant, event_seq_start, e);
+            }
+        };
+
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let spawn_env_plan = resolve_spawn_env_plan(
+        Path::new(&run.cwd),
+        false,
+        user_settings.windows_msvc_env_mode,
+        SpawnPathPolicy::InheritUnlessInjected,
+        Some(&inherited_path),
+    );
+
+    if let Err(e) = run_agent(
+        app.clone(),
+        process_map,
+        participant.run_id.clone(),
+        command,
+        args,
+        run.cwd.clone(),
+        run.agent.clone(),
+        spawn_env_plan,
+    )
+    .await
+    {
+        let _ = storage::runs::update_status(
+            &participant.run_id,
+            RunStatus::Failed,
+            Some(1),
+            Some(e.clone()),
+        );
+        return failed_response(participant, event_seq_start, e);
+    }
+
+    let event_seq_end = storage::events::next_seq(&participant.run_id).saturating_sub(1);
+    let completed_run = storage::runs::get_run(&participant.run_id);
+    RoomResponseRef {
+        participant_id: participant.id.clone(),
+        run_id: participant.run_id.clone(),
+        event_seq_start,
+        event_seq_end,
+        preview: run_preview(&participant.run_id),
+        status: completed_run
+            .as_ref()
+            .map(|run| run_status_label(run.status.clone()).to_string())
+            .unwrap_or_else(|| "complete".to_string()),
+        error: completed_run.and_then(|run| run.error_message),
+    }
+}
+
+fn compose_pipe_turn_prompt(base_prompt: &str, target_prompt: &str) -> String {
+    let base = base_prompt.trim();
+    let target = target_prompt.trim();
+    if base.is_empty() {
+        target.to_string()
+    } else if target.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}\n\n{target}")
+    }
+}
+
+fn failed_response(
+    participant: &RoomParticipant,
+    event_seq_start: u64,
+    error: impl Into<String>,
+) -> RoomResponseRef {
+    RoomResponseRef {
+        participant_id: participant.id.clone(),
+        run_id: participant.run_id.clone(),
+        event_seq_start,
+        event_seq_end: event_seq_start.saturating_sub(1),
+        preview: None,
+        status: "failed".to_string(),
+        error: Some(error.into()),
+    }
+}
+
 pub async fn run_driver_turn(
     room_id: &str,
     message: &str,
     sessions: &ActorSessionMap,
+) -> Result<RoomTurn, String> {
+    run_driver_turn_with_runtime(room_id, message, sessions, None).await
+}
+
+pub async fn run_driver_turn_with_runtime(
+    room_id: &str,
+    message: &str,
+    sessions: &ActorSessionMap,
+    pipe_runtime: Option<RoomPipeRuntime>,
 ) -> Result<RoomTurn, String> {
     let room_lock = room_orchestration_lock(room_id);
     let _room_guard = room_lock.lock().await;
@@ -260,52 +453,18 @@ pub async fn run_driver_turn(
     let mut response_tasks = Vec::with_capacity(targets.len());
 
     for target in &targets {
+        let target = target.clone();
         let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
         let target_prompt = prompt.clone();
-        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
+        let pipe_runtime = pipe_runtime.clone();
 
         response_tasks.push(tokio::spawn(async move {
             let run_lock = run_orchestration_lock(&participant.run_id);
             let _run_guard = run_lock.lock().await;
-            let event_seq_start = storage::events::next_seq(&participant.run_id);
-
-            match adapter.stream_message(&target_prompt).await {
-                Ok(()) => match adapter.wait_turn_complete().await {
-                    Ok(outcome) => {
-                        let event_seq_end =
-                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
-                        RoomResponseRef {
-                            participant_id: participant.id.clone(),
-                            run_id: participant.run_id.clone(),
-                            event_seq_start,
-                            event_seq_end,
-                            preview: run_preview(&participant.run_id),
-                            status: outcome_status_label(outcome.status).to_string(),
-                            error: outcome.error,
-                        }
-                    }
-                    Err(error) => RoomResponseRef {
-                        participant_id: participant.id.clone(),
-                        run_id: participant.run_id.clone(),
-                        event_seq_start,
-                        event_seq_end: event_seq_start.saturating_sub(1),
-                        preview: None,
-                        status: "failed".to_string(),
-                        error: Some(error.message),
-                    },
-                },
-                Err(error) => RoomResponseRef {
-                    participant_id: participant.id.clone(),
-                    run_id: participant.run_id.clone(),
-                    event_seq_start,
-                    event_seq_end: event_seq_start.saturating_sub(1),
-                    preview: None,
-                    status: "failed".to_string(),
-                    error: Some(error.message),
-                },
-            }
+            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
+                .await
         }));
     }
 
@@ -340,6 +499,15 @@ pub async fn run_research_turn(
     message: &str,
     sessions: &ActorSessionMap,
 ) -> Result<RoomTurn, String> {
+    run_research_turn_with_runtime(room_id, message, sessions, None).await
+}
+
+pub async fn run_research_turn_with_runtime(
+    room_id: &str,
+    message: &str,
+    sessions: &ActorSessionMap,
+    pipe_runtime: Option<RoomPipeRuntime>,
+) -> Result<RoomTurn, String> {
     let room_lock = room_orchestration_lock(room_id);
     let _room_guard = room_lock.lock().await;
 
@@ -364,6 +532,7 @@ pub async fn run_research_turn(
     let mut response_tasks = Vec::with_capacity(targets.len());
 
     for target in &targets {
+        let target = target.clone();
         let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
@@ -374,48 +543,13 @@ pub async fn run_research_turn(
             &room.participants,
             &room.memo,
         );
-        let mut adapter = adapter_for_run(&run).with_command_sender(target.cmd_tx.clone());
+        let pipe_runtime = pipe_runtime.clone();
 
         response_tasks.push(tokio::spawn(async move {
             let run_lock = run_orchestration_lock(&participant.run_id);
             let _run_guard = run_lock.lock().await;
-            let event_seq_start = storage::events::next_seq(&participant.run_id);
-
-            match adapter.stream_message(&target_prompt).await {
-                Ok(()) => match adapter.wait_turn_complete().await {
-                    Ok(outcome) => {
-                        let event_seq_end =
-                            storage::events::next_seq(&participant.run_id).saturating_sub(1);
-                        RoomResponseRef {
-                            participant_id: participant.id.clone(),
-                            run_id: participant.run_id.clone(),
-                            event_seq_start,
-                            event_seq_end,
-                            preview: run_preview(&participant.run_id),
-                            status: outcome_status_label(outcome.status).to_string(),
-                            error: outcome.error,
-                        }
-                    }
-                    Err(error) => RoomResponseRef {
-                        participant_id: participant.id.clone(),
-                        run_id: participant.run_id.clone(),
-                        event_seq_start,
-                        event_seq_end: event_seq_start.saturating_sub(1),
-                        preview: None,
-                        status: "failed".to_string(),
-                        error: Some(error.message),
-                    },
-                },
-                Err(error) => RoomResponseRef {
-                    participant_id: participant.id.clone(),
-                    run_id: participant.run_id.clone(),
-                    event_seq_start,
-                    event_seq_end: event_seq_start.saturating_sub(1),
-                    preview: None,
-                    status: "failed".to_string(),
-                    error: Some(error.message),
-                },
-            }
+            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
+                .await
         }));
     }
 
@@ -868,13 +1002,24 @@ async fn active_targets(
         .iter()
         .filter_map(|participant| {
             let run = storage::runs::get_run(&participant.run_id)?;
-            if !can_use_room_actor_run(&run) {
-                return None;
+            let capabilities = AgentCapabilities::for_agent(&run.agent);
+            if capabilities.stream_session && can_use_room_actor_run(&run) {
+                return map.get(&participant.run_id).map(|handle| RoundtableTarget {
+                    participant: participant.clone(),
+                    runtime: RoundtableTargetRuntime::Actor {
+                        cmd_tx: handle.cmd_tx.clone(),
+                    },
+                });
             }
-            map.get(&participant.run_id).map(|handle| RoundtableTarget {
-                participant: participant.clone(),
-                cmd_tx: handle.cmd_tx.clone(),
-            })
+            if capabilities.pipe_exec
+                && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec)
+            {
+                return Some(RoundtableTarget {
+                    participant: participant.clone(),
+                    runtime: RoundtableTargetRuntime::Pipe,
+                });
+            }
+            None
         })
         .collect()
 }
@@ -889,13 +1034,24 @@ async fn active_copilot_targets(
         .filter(|participant| participant.role == "copilot")
         .filter_map(|participant| {
             let run = storage::runs::get_run(&participant.run_id)?;
-            if !can_use_room_actor_run(&run) {
-                return None;
+            let capabilities = AgentCapabilities::for_agent(&run.agent);
+            if capabilities.stream_session && can_use_room_actor_run(&run) {
+                return map.get(&participant.run_id).map(|handle| RoundtableTarget {
+                    participant: participant.clone(),
+                    runtime: RoundtableTargetRuntime::Actor {
+                        cmd_tx: handle.cmd_tx.clone(),
+                    },
+                });
             }
-            map.get(&participant.run_id).map(|handle| RoundtableTarget {
-                participant: participant.clone(),
-                cmd_tx: handle.cmd_tx.clone(),
-            })
+            if capabilities.pipe_exec
+                && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec)
+            {
+                return Some(RoundtableTarget {
+                    participant: participant.clone(),
+                    runtime: RoundtableTargetRuntime::Pipe,
+                });
+            }
+            None
         })
         .collect()
 }
@@ -904,36 +1060,36 @@ async fn active_target_for_participant(
     participant: RoomParticipant,
     sessions: &ActorSessionMap,
 ) -> Result<RoundtableTarget, String> {
-    if !AgentCapabilities::for_agent(&participant.agent).can_use_room_actor() {
-        return Err(format!(
-            "Room participant {} uses agent '{}' which does not support Room stream sessions yet",
-            participant.label, participant.agent
-        ));
-    }
     let run = storage::runs::get_run(&participant.run_id)
         .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-    if !can_use_room_actor_run(&run) {
-        return Err(format!(
-            "Room participant {} is not backed by a Room stream session",
-            participant.label
-        ));
+    let capabilities = AgentCapabilities::for_agent(&run.agent);
+    if capabilities.stream_session && can_use_room_actor_run(&run) {
+        let map = sessions.lock().await;
+        let cmd_tx = map
+            .get(&participant.run_id)
+            .map(|handle| handle.cmd_tx.clone())
+            .ok_or_else(|| {
+                format!(
+                    "Room participant {} is not attached to an active session",
+                    participant.label
+                )
+            })?;
+        return Ok(RoundtableTarget {
+            participant,
+            runtime: RoundtableTargetRuntime::Actor { cmd_tx },
+        });
+    }
+    if capabilities.pipe_exec && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec) {
+        return Ok(RoundtableTarget {
+            participant,
+            runtime: RoundtableTargetRuntime::Pipe,
+        });
     }
 
-    let map = sessions.lock().await;
-    let cmd_tx = map
-        .get(&participant.run_id)
-        .map(|handle| handle.cmd_tx.clone())
-        .ok_or_else(|| {
-            format!(
-                "Room participant {} is not attached to an active session",
-                participant.label
-            )
-        })?;
-
-    Ok(RoundtableTarget {
-        participant,
-        cmd_tx,
-    })
+    Err(format!(
+        "Room participant {} uses agent '{}' which does not support this Room execution path",
+        participant.label, participant.agent
+    ))
 }
 
 fn find_participant<'a>(
@@ -958,10 +1114,37 @@ fn outcome_status_label(status: TurnOutcomeStatus) -> &'static str {
     }
 }
 
+fn run_status_label(status: RunStatus) -> &'static str {
+    match status {
+        RunStatus::Pending => "pending",
+        RunStatus::Running => "running",
+        RunStatus::Idle | RunStatus::Completed => "complete",
+        RunStatus::Failed => "failed",
+        RunStatus::Stopped => "stopped",
+    }
+}
+
 fn run_preview(run_id: &str) -> Option<String> {
-    crate::commands::runs::get_run(run_id.to_string())
-        .ok()
-        .and_then(|run| run.last_message_preview)
+    crate::storage::events::list_events(run_id, 0)
+        .into_iter()
+        .rev()
+        .find_map(|event| {
+            if !matches!(event.event_type, crate::models::RunEventType::Assistant) {
+                return None;
+            }
+            event
+                .payload
+                .get("text")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            crate::commands::runs::get_run(run_id.to_string())
+                .ok()
+                .and_then(|run| run.last_message_preview)
+        })
 }
 
 #[cfg(test)]
@@ -1180,6 +1363,29 @@ mod tests {
 
                 assert_eq!(targets.len(), 1);
                 assert_eq!(targets[0].participant.run_id, "run-session");
+            });
+        });
+    }
+
+    #[test]
+    fn active_targets_include_pipe_exec_runs_without_actor_session() {
+        with_temp_data_dir(|| {
+            create_run_for_agent("run-codex", "codex");
+            let mut run = crate::storage::runs::get_run("run-codex").unwrap();
+            run.execution_path = Some(crate::models::ExecutionPath::PipeExec);
+            crate::storage::runs::save_meta(&run).unwrap();
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let mut pipe = participant("pipe", "Pipe");
+                pipe.run_id = "run-codex".to_string();
+                pipe.agent = "codex".to_string();
+
+                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                let targets = active_targets(&[pipe], &sessions).await;
+
+                assert_eq!(targets.len(), 1);
+                assert!(targets[0].is_pipe());
             });
         });
     }

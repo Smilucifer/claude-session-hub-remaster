@@ -31,7 +31,7 @@ export function capabilitiesForAgent(agent: string): AgentCapabilities {
   return {
     kind,
     stream_session: false,
-    pipe_exec: false,
+    pipe_exec: kind === "gemini",
     interactive_pty: false,
     resume: "none",
     prompt_injection: null,
@@ -47,6 +47,15 @@ export function canUseRoomActor(agent: string): boolean {
 
 export function canUseRoomActorRun(run: { agent: string; execution_path: ExecutionPath }): boolean {
   return canUseRoomActor(run.agent) && run.execution_path === "session_actor";
+}
+
+export function canUseRoomParticipantRun(run: {
+  agent: string;
+  execution_path: ExecutionPath;
+}): boolean {
+  const capabilities = capabilitiesForAgent(run.agent);
+  if (run.execution_path === "session_actor") return capabilities.stream_session;
+  return capabilities.pipe_exec;
 }
 
 function normalizeAgentKind(agent: string): AgentKind {

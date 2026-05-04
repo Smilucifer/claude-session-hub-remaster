@@ -42,6 +42,7 @@
 
   const EMPTY_BATCH_MAP = new Map();
   const EMPTY_BURST_MAP = new Map() as Map<number, ToolBurst>;
+  const CHAT_AGENTS = new Set(["claude", "codex", "gemini"]);
   import XTerminal from "$lib/components/XTerminal.svelte";
   import ChatMessage from "$lib/components/ChatMessage.svelte";
   import InlineToolCard from "$lib/components/InlineToolCard.svelte";
@@ -168,6 +169,21 @@
     return inThirdParty ? true : null; // not in CLI + not in third-party = unknown
   }
 
+  function handleAgentChange(agent: string) {
+    if (store.run) return;
+    store.agent = agent;
+    if (agent !== "claude") {
+      store.model = "";
+    } else if (!store.model && settings?.default_model && store.platformId === "anthropic") {
+      store.model = settings.default_model;
+    }
+  }
+
+  function normalizeChatAgent(value: string): string {
+    const agent = value.trim().toLowerCase();
+    return CHAT_AGENTS.has(agent) ? agent : "";
+  }
+
   // ── Project init detection ──
   let projectInitStatus = $state<import("$lib/types").ProjectInitStatus | null>(null);
   let initCheckSeq = 0;
@@ -246,7 +262,9 @@
   let shortcutHelpOpen = $state(false);
   let statusBarRef: SessionStatusBar | undefined = $state();
   let stashedInput: PromptInputSnapshot | null = $state(null);
-  let sidebarRequestedTab = $state<"tools" | "context" | "files" | "info" | "tasks" | null>(null);
+  let sidebarRequestedTab = $state<
+    "tools" | "context" | "files" | "info" | "runningTasks" | "tasks" | null
+  >(null);
 
   // ── Verbose state (chat page level) ──
   let verboseEnabled = $state(false);
@@ -887,6 +905,19 @@
   let runId = $derived($page.url.searchParams.get("run") ?? "");
   let hasResumeParam = $derived($page.url.searchParams.has("resume"));
   let folderParam = $derived($page.url.searchParams.get("folder"));
+  let agentParam = $derived($page.url.searchParams.get("agent") ?? "");
+
+  // Consume ?agent=codex/gemini from command palette shortcuts for a new chat.
+  $effect(() => {
+    const agent = normalizeChatAgent(agentParam);
+    if (!agent || runId || store.run) return;
+    untrack(() => {
+      handleAgentChange(agent);
+      const clean = new URL($page.url);
+      clean.searchParams.delete("agent");
+      replaceState(clean, {});
+    });
+  });
 
   // Consume ?folder= param: switch to new chat in that folder, then clean URL
   $effect(() => {
@@ -941,7 +972,7 @@
       }
       // Initialize model: for third-party platforms, use credential > preset default model
       // Only for new sessions — if runId is set, loadRun will handle model restoration.
-      if (!store.model && !runId && store.phase !== "loading") {
+      if (store.agent === "claude" && !store.model && !runId && store.phase !== "loading") {
         const initCred = findCredential(settings.platform_credentials ?? [], store.platformId);
         const initPreset = PLATFORM_PRESETS.find((p) => p.id === store.platformId);
         const initModels = initCred?.models?.length ? initCred.models : initPreset?.models;
@@ -1527,19 +1558,21 @@
   // (only if confirmed clean via three-state contamination check).
   $effect(() => {
     if (!store.model) {
+      if (store.agent !== "claude") return;
       // Don't overwrite model during loadRun async gap — loadRun will set it
       if (store.phase === "loading") return;
 
-      const isThirdParty = store.platformId && store.platformId !== "anthropic";
+      const platformId = store.platformId ?? "";
+      const isThirdParty = platformId && platformId !== "anthropic";
       if (isThirdParty) {
-        const restoreCred = findCredential(settings?.platform_credentials ?? [], store.platformId);
-        const restorePreset = PLATFORM_PRESETS.find((p) => p.id === store.platformId);
+        const restoreCred = findCredential(settings?.platform_credentials ?? [], platformId);
+        const restorePreset = PLATFORM_PRESETS.find((p) => p.id === platformId);
         const restoreModels = restoreCred?.models?.length
           ? restoreCred.models
           : restorePreset?.models;
         if (restoreModels?.[0]) {
           dbg("chat", "restore model from credential/preset", {
-            platform: store.platformId,
+            platform: platformId,
             model: restoreModels[0],
           });
           store.model = restoreModels[0];
@@ -1549,7 +1582,7 @@
       // Only fall back to default_model for Anthropic platform — otherwise
       // default_model may belong to a different platform (cross-pollution).
       const cliModel = getCliCurrentModel();
-      const isAnthropicPlatform = !store.platformId || store.platformId === "anthropic";
+      const isAnthropicPlatform = !platformId || platformId === "anthropic";
       const rawFallback = isAnthropicPlatform ? settings?.default_model : undefined;
       const contaminated = rawFallback ? isContaminatedDefaultModel(rawFallback) : null;
       // Only use default_model when confirmed clean (false). true/null → skip.
@@ -4591,7 +4624,7 @@
         platformCredentials={settings?.platform_credentials ?? []}
         onSend={sendMessage}
         onBtwSend={handleBtwSend}
-        onAgentChange={undefined}
+        onAgentChange={handleAgentChange}
         onInterrupt={() => store.interrupt()}
         onModelSwitch={handleModelChange}
         onPermissionModeChange={store.features.permissionModeSwitch

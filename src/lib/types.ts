@@ -254,6 +254,7 @@ export interface UserSettings {
   keybinding_overrides: KeyBindingOverride[];
   remote_hosts?: RemoteHost[];
   platform_credentials?: PlatformCredential[];
+  cc_agent_profiles?: CcAgentProfile[];
   active_platform_id?: string;
   ui_zoom?: number;
   onboarding_completed: boolean;
@@ -1515,6 +1516,18 @@ export interface PlatformCredential {
   name?: string;
   models?: string[];
   extra_env?: Record<string, string>;
+}
+
+export interface CcAgentProfile {
+  id: string;
+  label: string;
+  agent?: "claude" | "codex" | "gemini";
+  platform_id?: string;
+  model?: string;
+  prompt?: string;
+  cwd?: string;
+  role?: string;
+  enabled?: boolean;
 }
 
 /** BTW side question streaming events (from Tauri) */

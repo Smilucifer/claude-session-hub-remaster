@@ -2,6 +2,15 @@ import * as api from "$lib/api";
 import type { RoomDetail, RoomKind, RoomSummary } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 
+export interface RoundtableSeatDraft {
+  agent: "claude" | "codex" | "gemini";
+  prompt: string;
+  model?: string;
+  platformId?: string;
+  label?: string;
+  role?: string;
+}
+
 export class RoomStore {
   rooms = $state<RoomSummary[]>([]);
   selectedRoomId = $state("");
@@ -72,6 +81,43 @@ export class RoomStore {
     }
   }
 
+  async createRoundtableWithParticipants(
+    name: string,
+    description: string,
+    cwd: string,
+    seats: RoundtableSeatDraft[],
+  ): Promise<void> {
+    if (seats.length !== 3) {
+      throw new Error("Roundtable requires exactly three participants");
+    }
+    this.saving = true;
+    this.error = null;
+    try {
+      const room = await api.createRoom(name, description, cwd, "roundtable");
+      this.selectedRoomId = room.id;
+      this.room = room;
+      for (const seat of seats) {
+        this.room = await api.createRoomParticipant(
+          room.id,
+          seat.agent,
+          seat.prompt,
+          cwd,
+          seat.model,
+          seat.platformId,
+          seat.label,
+          seat.role,
+        );
+      }
+      await this.loadRooms();
+    } catch (e) {
+      this.error = errorMessage(e);
+      dbgWarn("rooms", "createRoundtableWithParticipants error", e);
+      throw e;
+    } finally {
+      this.saving = false;
+    }
+  }
+
   async attachRun(runId: string, label?: string, role?: string): Promise<void> {
     if (!this.selectedRoomId) throw new Error("No room selected");
     this.saving = true;
@@ -113,6 +159,39 @@ export class RoomStore {
     } catch (e) {
       this.error = errorMessage(e);
       dbgWarn("rooms", "createClaudeParticipant error", e);
+      throw e;
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  async createParticipant(
+    agent: "claude" | "codex" | "gemini",
+    prompt: string,
+    cwd: string,
+    model?: string,
+    platformId?: string,
+    label?: string,
+    role?: string,
+  ): Promise<void> {
+    if (!this.selectedRoomId) throw new Error("No room selected");
+    this.saving = true;
+    this.error = null;
+    try {
+      this.room = await api.createRoomParticipant(
+        this.selectedRoomId,
+        agent,
+        prompt,
+        cwd,
+        model,
+        platformId,
+        label,
+        role,
+      );
+      await this.loadRooms();
+    } catch (e) {
+      this.error = errorMessage(e);
+      dbgWarn("rooms", "createParticipant error", e);
       throw e;
     } finally {
       this.saving = false;

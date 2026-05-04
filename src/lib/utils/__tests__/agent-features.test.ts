@@ -28,13 +28,13 @@ describe("getAgentFeatures", () => {
 });
 
 describe("isKnownAgent", () => {
-  it("recognizes claude and codex", () => {
+  it("recognizes claude, codex, and gemini", () => {
     expect(isKnownAgent("claude")).toBe(true);
     expect(isKnownAgent("codex")).toBe(true);
+    expect(isKnownAgent("gemini")).toBe(true);
   });
 
   it("returns false for unknown agents", () => {
-    expect(isKnownAgent("gemini")).toBe(false);
     expect(isKnownAgent("")).toBe(false);
   });
 });

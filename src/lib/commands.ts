@@ -1,5 +1,5 @@
 export type CommandCategory = "chat" | "tools" | "navigation" | "settings" | "diagnostics";
-export type CommandAgent = "claude" | "codex" | "both";
+export type CommandAgent = "claude" | "codex" | "gemini" | "both";
 export type CommandAction =
   | "send_prompt"
   | "navigate"
@@ -86,16 +86,24 @@ export const commands: CommandDef[] = [
     action: "navigate",
     payload: "/chat?agent=claude",
   },
-  // Codex disabled
-  // {
-  //   id: "new-codex",
-  //   name: "New Codex Chat",
-  //   description: "Start a new Codex conversation",
-  //   category: "chat",
-  //   agent: "both",
-  //   action: "navigate",
-  //   payload: "/chat?agent=codex",
-  // },
+  {
+    id: "new-codex",
+    name: "New Codex Chat",
+    description: "Start a new Codex conversation",
+    category: "chat",
+    agent: "both",
+    action: "navigate",
+    payload: "/chat?agent=codex",
+  },
+  {
+    id: "new-gemini",
+    name: "New Gemini Chat",
+    description: "Start a new Gemini conversation",
+    category: "chat",
+    agent: "both",
+    action: "navigate",
+    payload: "/chat?agent=gemini",
+  },
   {
     id: "stop-run",
     name: "Stop Run",
@@ -182,16 +190,15 @@ export const commands: CommandDef[] = [
     action: "navigate",
     payload: "/usage",
   },
-  // Codex disabled
-  // {
-  //   id: "go-codex-config",
-  //   name: "Go to Codex Config",
-  //   description: "Navigate to Codex agent configuration",
-  //   category: "navigation",
-  //   agent: "both",
-  //   action: "navigate",
-  //   payload: "/config/codex",
-  // },
+  {
+    id: "go-codex-config",
+    name: "Go to Codex Config",
+    description: "Navigate to Codex agent configuration",
+    category: "navigation",
+    agent: "both",
+    action: "navigate",
+    payload: "/config/codex",
+  },
   {
     id: "go-plugins",
     name: "Go to Plugins",

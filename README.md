@@ -53,9 +53,9 @@ Supported:
 
 ### Rooms, Roundtable, and Driver/Copilot
 
-Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。
+Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude / Codex / Gemini participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。
 
-Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point.
+Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude / Codex / Gemini participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point.
 
 当前适合用来：
 
@@ -85,6 +85,67 @@ Currently useful for:
 - Creating a Research Room that fans out one research topic to multiple active participants.
 - Research Room writes a room-local structured `research/artifact.json` artifact for the latest research turn, appends artifact history to `research/artifacts.jsonl`, and surfaces `[fact]`, `[decision]`, and `[lesson]` lines as Arena Memory candidates.
 
+### Codex, Gemini, and CC JSON Profiles
+
+普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Codex 走 `codex exec --json` pipe mode；Gemini 走 `gemini --output-format text -p` pipe mode。
+
+The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Codex uses `codex exec --json` pipe mode; Gemini uses `gemini --output-format text -p` pipe mode.
+
+Rooms can now mix Claude Code stream-session participants with native Codex and Gemini pipe-exec participants. Claude Code profiles still support cross-API / cross-model seats through `platform_id`. Add profiles under `user.cc_agent_profiles` in `~/.opencovibe/settings.json`, without replacing the other fields in that file:
+
+会议室现在可以混用 Claude Code stream session 参与者，以及原生 Codex / Gemini pipe-exec 参与者。Claude Code profile 仍可通过 `platform_id` 接不同 API / 不同模型。把 profile 写到 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles`，不要覆盖文件里的其他字段：
+
+```json
+{
+  "user": {
+    "cc_agent_profiles": [
+      {
+        "id": "gemini-via-ccr",
+        "label": "Gemini via CCR",
+        "agent": "claude",
+        "platform_id": "ccr",
+        "model": "gemini-2.5-pro",
+        "prompt": "You are the Gemini seat in this roundtable.",
+        "role": "researcher",
+        "enabled": true
+      },
+      {
+        "id": "codex-via-ccswitch",
+        "label": "Codex via CCSwitch",
+        "agent": "claude",
+        "platform_id": "ccswitch",
+        "model": "gpt-5.5",
+        "prompt": "You are the Codex seat in this roundtable.",
+        "role": "participant",
+        "enabled": true
+      },
+      {
+        "id": "native-codex",
+        "label": "Native Codex",
+        "agent": "codex",
+        "model": "gpt-5.5",
+        "prompt": "You are the Codex CLI seat in this roundtable.",
+        "role": "participant",
+        "enabled": true
+      },
+      {
+        "id": "native-gemini",
+        "label": "Native Gemini",
+        "agent": "gemini",
+        "model": "gemini-2.5-pro",
+        "prompt": "You are the Gemini CLI seat in this roundtable.",
+        "role": "researcher",
+        "enabled": true
+      }
+    ]
+  }
+}
+```
+
+`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。`platform_id` 仅用于 Claude Code 参与者，并对应 Settings 里已有的 platform credential / provider id。`model` 会作为该 participant 的 per-run model snapshot；`prompt`、`label`、`role` 会预填 Room 的新 participant 表单。项目路径从 Room 创建时的文件夹选择器继承。
+
+`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. `platform_id` only applies to Claude Code participants and should match an existing platform credential / provider id in Settings. `model` becomes the participant run's per-run model snapshot; `prompt`, `label`, and `role` prefill the Room new participant form. The project path is inherited from the Room-level folder picker.
+
 ### Windows Native Toolchain Support
 
 在 Windows 上，如果你从普通桌面窗口启动应用，Claude / Codex 子进程通常拿不到 Visual Studio Developer Prompt 里的 `cl`、`link`、Windows SDK 等环境。当前版本会在明确需要 native toolchain 的项目中，自动为本地 CLI 子进程补充 MSVC developer environment。
@@ -109,14 +170,14 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 ## 当前限制 / Current Limitations
 
-- Roundtable、Driver/Copilot 和 Research 当前依赖活跃的本地 Claude participant；更完整的 Codex / Gemini / 多 CLI 能力矩阵仍在后续阶段。
+- Claude Code Room 参与者仍依赖活跃 stream session；Codex / Gemini 参与者以单轮 native CLI pipe-exec 方式运行，不是长驻 stream actor。
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
-- Roundtable, Driver/Copilot, and Research currently depend on active local Claude participants; the fuller Codex / Gemini / multi-CLI capability matrix is still planned for a later phase.
+- Claude Code Room participants still depend on active stream sessions; Codex / Gemini participants run as one-shot native CLI pipe-exec seats rather than persistent stream actors.
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
 - Some upstream baseline checks still need cleanup.

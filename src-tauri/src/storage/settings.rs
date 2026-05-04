@@ -511,6 +511,14 @@ pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, St
                 .map_err(|e| format!("Invalid platform_credentials: {}", e))?;
         }
     }
+    if let Some(v) = patch.get("cc_agent_profiles") {
+        if v.is_null() {
+            all.user.cc_agent_profiles = vec![];
+        } else {
+            all.user.cc_agent_profiles = serde_json::from_value(v.clone())
+                .map_err(|e| format!("Invalid cc_agent_profiles: {}", e))?;
+        }
+    }
     if let Some(v) = patch.get("active_platform_id") {
         all.user.active_platform_id = if v.is_null() {
             None
@@ -659,6 +667,7 @@ pub fn update_agent_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::CcAgentProfile;
     use crate::models::{AllSettings, PlatformCredential};
 
     fn make_settings_with_cred(cred: PlatformCredential) -> AllSettings {
@@ -686,6 +695,77 @@ mod tests {
         assert_eq!(
             settings.user.windows_msvc_env_mode,
             WindowsMsvcEnvMode::Auto
+        );
+    }
+
+    #[test]
+    fn user_settings_deserializes_cc_agent_profiles_from_json() {
+        let json = settings_json_with_user_patch(serde_json::json!({
+            "cc_agent_profiles": [
+                {
+                    "id": "gemini-via-ccr",
+                    "label": "Gemini via CCR",
+                    "agent": "claude",
+                    "platform_id": "ccr",
+                    "model": "gemini-2.5-pro",
+                    "prompt": "You are the Gemini seat.",
+                    "role": "researcher"
+                }
+            ]
+        }));
+
+        let settings: AllSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(settings.user.cc_agent_profiles.len(), 1);
+        let profile = &settings.user.cc_agent_profiles[0];
+        assert_eq!(profile.id, "gemini-via-ccr");
+        assert_eq!(profile.label, "Gemini via CCR");
+        assert_eq!(profile.agent, "claude");
+        assert_eq!(profile.platform_id.as_deref(), Some("ccr"));
+        assert_eq!(profile.model.as_deref(), Some("gemini-2.5-pro"));
+        assert!(profile.enabled);
+    }
+
+    #[test]
+    fn update_user_settings_replaces_cc_agent_profiles() {
+        let _guard = crate::storage::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
+        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+
+        let updated = update_user_settings(serde_json::json!({
+            "cc_agent_profiles": [
+                {
+                    "id": "codex-via-cc",
+                    "label": "Codex via CC",
+                    "agent": "codex",
+                    "platform_id": "ccswitch",
+                    "model": "gpt-5.5"
+                }
+            ]
+        }))
+        .unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
+            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+        }
+
+        assert_eq!(
+            updated.cc_agent_profiles,
+            vec![CcAgentProfile {
+                id: "codex-via-cc".to_string(),
+                label: "Codex via CC".to_string(),
+                agent: "codex".to_string(),
+                platform_id: Some("ccswitch".to_string()),
+                model: Some("gpt-5.5".to_string()),
+                prompt: None,
+                cwd: None,
+                role: None,
+                enabled: true,
+            }]
         );
     }
 
