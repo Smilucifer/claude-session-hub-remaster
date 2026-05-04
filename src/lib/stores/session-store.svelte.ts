@@ -1602,6 +1602,7 @@ export class SessionStore {
           dbg("store", "stale after getRunEvents, gen=", gen);
           return;
         }
+        const hasAssistantEvent = events.some((event) => event.type === "assistant");
         let hasHistory = false;
         for (const event of events) {
           const text = String(
@@ -1613,11 +1614,21 @@ export class SessionStore {
           if (event.type === "user") {
             xtermRef.writeText(`\x1b[1;36m> ${text}\x1b[0m\r\n`);
             hasHistory = true;
+          } else if (event.type === "assistant") {
+            xtermRef.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
+            hasHistory = true;
           } else if (event.type === "system") {
             xtermRef.writeText(`\x1b[90m${text}\x1b[0m\r\n`);
+          } else if (event.type === "stderr") {
+            xtermRef.writeText(`\x1b[31m${text}\x1b[0m\r\n`);
+          } else if (event.type === "stdout" && !hasAssistantEvent) {
+            xtermRef.writeText(`\x1b[32m${text}\x1b[0m\r\n`);
+            hasHistory = true;
+          } else if (event.type === "command") {
+            xtermRef.writeText(`\x1b[33m${text}\x1b[0m\r\n`);
           }
         }
-        if (hasHistory && !this.isRunning) {
+        if (hasHistory && !this.isRunning && xtermRef) {
           xtermRef.writeText(`\r\n\x1b[90m--- Session ended ---\x1b[0m\r\n`);
         }
       }

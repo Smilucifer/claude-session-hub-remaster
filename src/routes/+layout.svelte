@@ -17,7 +17,6 @@
   import SetupWizard from "$lib/components/SetupWizard.svelte";
   import AboutModal from "$lib/components/AboutModal.svelte";
   import PermissionsModal from "$lib/components/PermissionsModal.svelte";
-  import MemoPanel from "$lib/components/memo/MemoPanel.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import CliSessionBrowser from "$lib/components/CliSessionBrowser.svelte";
   import UpdateBanner from "$lib/components/UpdateBanner.svelte";
@@ -83,7 +82,6 @@
   let showAbout = $state(false);
   let showCliBrowser = $state(false);
   let permissionsModalOpen = $state(false);
-  let memoPanelOpen = $state(false);
 
   // Team store (shared via context with /teams page)
   const teamStore = new TeamStore();
@@ -437,6 +435,7 @@
     { path: "/chat", label: () => t("nav_chat"), icon: "message" },
     { path: "/explorer", label: () => t("nav_explorer"), icon: "folder" },
     { path: "/plugins", label: () => t("nav_extend"), icon: "zap" },
+    { path: "/memo", label: () => t("memo_title"), icon: "memo" },
     { path: "/memory", label: () => t("nav_memory"), icon: "book" },
     { path: "/rooms", label: () => t("nav_rooms"), icon: "rooms" },
     { path: "/usage", label: () => t("nav_usage"), icon: "chart" },
@@ -782,7 +781,7 @@
     window.addEventListener("ocv:open-permissions", onOpenPermissions);
 
     function onOpenMemo() {
-      memoPanelOpen = true;
+      goto("/memo");
     }
     window.addEventListener("ocv:open-memo", onOpenMemo);
 
@@ -1416,6 +1415,19 @@
                   stroke-linejoin="round"
                   ><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" /></svg
                 >
+              {:else if item.icon === "memo"}
+                <svg
+                  class="h-[18px] w-[18px]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
+                    d="M15 3v5h5"
+                  /><path d="M8 13h8" /><path d="M8 17h5" /></svg
+                >
               {:else if item.icon === "rooms"}
                 <svg
                   class="h-[18px] w-[18px]"
@@ -1471,25 +1483,6 @@
               <span class="sr-only">{item.label()}</span>
             </a>
           {/each}
-          <button
-            type="button"
-            class="relative flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground transition-colors duration-150 hover:bg-sidebar-accent/50"
-            title={t("memo_title")}
-            onclick={() => (memoPanelOpen = true)}
-          >
-            <svg
-              class="h-[18px] w-[18px]"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
-                d="M15 3v5h5"
-              /><path d="M8 13h8" /><path d="M8 17h5" /></svg
-            >
-          </button>
         </nav>
 
         <!-- Rail version + locale + dark mode toggle -->
@@ -2436,8 +2429,6 @@
 <AboutModal bind:open={showAbout} />
 
 <PermissionsModal bind:open={permissionsModalOpen} cwd={projectCwd} />
-
-<MemoPanel bind:open={memoPanelOpen} cwd={projectCwd} />
 
 {#if showCliBrowser}
   <CliSessionBrowser

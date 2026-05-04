@@ -3871,6 +3871,7 @@ describe("SessionStore reducer", () => {
     const mockDeleteSnapshot = snapshotCache.deleteSnapshot as ReturnType<typeof vi.fn>;
     const mockGetRun = api.getRun as ReturnType<typeof vi.fn>;
     const mockGetBusEvents = api.getBusEvents as ReturnType<typeof vi.fn>;
+    const mockGetRunEvents = api.getRunEvents as ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
       mockReadSnapshot.mockReset().mockResolvedValue(null);
@@ -3878,6 +3879,48 @@ describe("SessionStore reducer", () => {
       mockDeleteSnapshot.mockReset().mockResolvedValue(undefined);
       mockGetRun.mockReset();
       mockGetBusEvents.mockReset().mockResolvedValue([]);
+      mockGetRunEvents.mockReset().mockResolvedValue([]);
+    });
+
+    describe("pipe exec terminal replay", () => {
+      it("replays assistant output for completed native CLI runs", async () => {
+        const run = makeRun("run-pipe-1", {
+          status: "completed",
+          agent: "gemini",
+          execution_path: "pipe_exec",
+        });
+        mockGetRun.mockResolvedValue(run);
+        mockGetRunEvents.mockResolvedValue([
+          {
+            id: "ev-1",
+            task_id: "run-pipe-1",
+            seq: 1,
+            type: "user",
+            payload: { text: "review this" },
+            timestamp: new Date().toISOString(),
+          },
+          {
+            id: "ev-2",
+            task_id: "run-pipe-1",
+            seq: 2,
+            type: "assistant",
+            payload: { text: "Looks good." },
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        const terminal = {
+          clear: vi.fn(),
+          writeText: vi.fn(),
+        };
+
+        const testStore = new SessionStore();
+        await testStore.loadRun("run-pipe-1", terminal);
+
+        const output = terminal.writeText.mock.calls.map((call) => call[0]).join("");
+        expect(output).toContain("> review this");
+        expect(output).toContain("Looks good.");
+        expect(output).toContain("--- Session ended ---");
+      });
     });
 
     describe("snapshot hit vs miss deep comparison", () => {

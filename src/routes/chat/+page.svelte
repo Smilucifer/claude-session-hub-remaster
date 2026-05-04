@@ -85,6 +85,7 @@
   import type { RewindCandidate, RewindMarker } from "$lib/utils/rewind";
   import { truncate, cwdDisplayLabel, formatTokenCount } from "$lib/utils/format";
   import { mapSettled } from "$lib/utils/async-utils";
+  import { getPipeExecTerminalReplayKey } from "$lib/utils/pipe-terminal-replay";
   import { uuid } from "$lib/utils/uuid";
   import RewindModal from "$lib/components/RewindModal.svelte";
   import type { ElementSelection } from "$lib/types";
@@ -104,6 +105,7 @@
   let middlewareReady = $state(false);
   let settings = $state<UserSettings | null>(null);
   let xtermRef: XTerminal | undefined = $state();
+  let terminalReplayKey = $state("");
   let promptRef: PromptInput | undefined = $state();
   let sidebarCollapsed = $state(false);
   /** Reactive cwd override for new-chat-in-folder (cleared when a run is loaded) */
@@ -1609,8 +1611,18 @@
 
   // ── Terminal helpers ──
 
+  $effect(() => {
+    const run = store.run;
+    const terminal = xtermRef;
+    const key = getPipeExecTerminalReplayKey(run, store.useStreamSession, Boolean(terminal));
+    if (!key || !terminal) return;
+    if (terminalReplayKey === key) return;
+    terminalReplayKey = key;
+    void store.loadRun(run.id, terminal);
+  });
+
   function handleTermReady(_cols: number, _rows: number) {
-    // Terminal ready — Codex pipe mode is output-only, no setup needed
+    // Replay is driven by the effect above once the terminal exists.
   }
 
   function handleTermResize(_cols: number, _rows: number) {
