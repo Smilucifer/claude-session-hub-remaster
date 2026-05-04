@@ -443,6 +443,10 @@
     { path: "/settings", label: () => t("nav_settings"), icon: "settings" },
   ];
 
+  function navMatches(path: string): boolean {
+    return currentPath === path || currentPath.startsWith(`${path}/`);
+  }
+
   // Load initial data
   async function loadRuns() {
     try {
@@ -1126,7 +1130,7 @@
 
   // Breadcrumb for non-chat pages
   let pageName = $derived.by(() => {
-    const nav = navItems.find((n) => currentPath.startsWith(n.path));
+    const nav = navItems.find((n) => navMatches(n.path));
     if (nav) return nav.label();
     if (currentPath.startsWith("/release-notes")) return t("release_cliChangelog");
     return t("layout_appName");
@@ -1357,7 +1361,7 @@
         <!-- Rail nav icons -->
         <nav class="flex flex-1 flex-col items-center gap-1 py-2">
           {#each navItems as item}
-            {@const isActive = currentPath.startsWith(item.path)}
+            {@const isActive = navMatches(item.path)}
             <a
               href={item.path}
               class="relative flex h-9 w-9 items-center justify-center rounded-md transition-colors duration-150 no-underline

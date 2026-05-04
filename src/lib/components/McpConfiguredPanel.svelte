@@ -5,6 +5,7 @@
   import type { ConfiguredMcpServer } from "$lib/types";
 
   let {
+    app = "claude",
     projectCwd = "",
     visible = false,
     operationLoading = $bindable<string | null>(null),
@@ -15,6 +16,7 @@
       onConfirm: () => void;
     } | null>(null),
   }: {
+    app?: "claude" | "codex" | "gemini";
     projectCwd: string;
     visible?: boolean;
     operationLoading: string | null;
@@ -42,7 +44,7 @@
   async function loadServers() {
     loading = true;
     try {
-      servers = await listConfiguredMcpServers(projectCwd || undefined);
+      servers = await listConfiguredMcpServers(projectCwd || undefined, app);
       dbg("mcp-configured", "loaded", { count: servers.length });
     } catch (e) {
       dbgWarn("mcp-configured", "load error", e);
@@ -54,7 +56,7 @@
 
   async function refreshServers() {
     try {
-      servers = await listConfiguredMcpServers(projectCwd || undefined);
+      servers = await listConfiguredMcpServers(projectCwd || undefined, app);
     } catch (e) {
       dbgWarn("mcp-configured", "refresh error", e);
     }
@@ -67,7 +69,12 @@
       onConfirm: async () => {
         operationLoading = server.name;
         try {
-          const result = await removeMcpServer(server.name, server.scope, projectCwd || undefined);
+          const result = await removeMcpServer(
+            server.name,
+            server.scope,
+            projectCwd || undefined,
+            app,
+          );
           showToast(
             result.success ? t("mcp_removedServer", { name: server.name }) : result.message,
             result.success ? "success" : "error",

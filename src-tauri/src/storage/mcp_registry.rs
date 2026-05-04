@@ -4,6 +4,7 @@ use crate::models::{
     ProviderHealth,
 };
 use crate::process_ext::HideConsole;
+use crate::storage::managed_apps::ManagedCliApp;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -248,6 +249,18 @@ pub async fn search(
 /// - `~/.claude/settings.json` → `mcpServers` → scope="user" (fallback)
 /// - `{cwd}/.mcp.json` → `mcpServers` → scope="project"
 pub fn list_configured(cwd: Option<&str>) -> Vec<ConfiguredMcpServer> {
+    list_configured_for_app(ManagedCliApp::Claude, cwd)
+}
+
+pub fn list_configured_for_app(app: ManagedCliApp, cwd: Option<&str>) -> Vec<ConfiguredMcpServer> {
+    match app {
+        ManagedCliApp::Claude => list_configured_claude(cwd),
+        ManagedCliApp::Codex => list_configured_codex(),
+        ManagedCliApp::Gemini => list_configured_gemini(),
+    }
+}
+
+fn list_configured_claude(cwd: Option<&str>) -> Vec<ConfiguredMcpServer> {
     let mut servers = Vec::new();
     let home = match crate::storage::dirs_next() {
         Some(h) => h,
@@ -357,6 +370,61 @@ pub fn list_configured(cwd: Option<&str>) -> Vec<ConfiguredMcpServer> {
     servers
 }
 
+fn list_configured_codex() -> Vec<ConfiguredMcpServer> {
+    let home = match crate::storage::dirs_next() {
+        Some(h) => h,
+        None => return vec![],
+    };
+    let path = home.join(".codex").join("config.toml");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return vec![],
+    };
+    let doc = match content.parse::<toml_edit::DocumentMut>() {
+        Ok(doc) => doc,
+        Err(e) => {
+            log::warn!("[mcp_registry] failed to parse {}: {}", path.display(), e);
+            return vec![];
+        }
+    };
+    let mut servers = Vec::new();
+    if let Some(table) = doc.get("mcp_servers").and_then(|item| item.as_table()) {
+        for (name, item) in table.iter() {
+            if let Some(server_table) = item.as_table() {
+                let value = codex_table_to_json(server_table);
+                servers.push(parse_mcp_entry(name, &value, "user"));
+            }
+        }
+    }
+    servers
+}
+
+fn list_configured_gemini() -> Vec<ConfiguredMcpServer> {
+    let home = match crate::storage::dirs_next() {
+        Some(h) => h,
+        None => return vec![],
+    };
+    let path = home.join(".gemini").join("settings.json");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return vec![],
+    };
+    let root = match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(root) => root,
+        Err(e) => {
+            log::warn!("[mcp_registry] failed to parse {}: {}", path.display(), e);
+            return vec![];
+        }
+    };
+    let mut servers = Vec::new();
+    if let Some(mcp_servers) = root.get("mcpServers").and_then(|v| v.as_object()) {
+        for (name, config) in mcp_servers {
+            servers.push(parse_mcp_entry(name, config, "user"));
+        }
+    }
+    servers
+}
+
 /// Parse a single MCP server entry from JSON config into ConfiguredMcpServer.
 fn parse_mcp_entry(name: &str, config: &serde_json::Value, scope: &str) -> ConfiguredMcpServer {
     let server_type = config
@@ -425,9 +493,309 @@ fn redact_sensitive_arg(arg: &str) -> String {
     arg.to_string()
 }
 
+fn codex_table_to_json(table: &toml_edit::Table) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    for (key, item) in table.iter() {
+        if key == "http_headers" {
+            if let Some(headers) = toml_item_to_json_object(item) {
+                obj.insert("headers".to_string(), serde_json::Value::Object(headers));
+            }
+            continue;
+        }
+        if let Some(value) = toml_item_to_json(item) {
+            obj.insert(key.to_string(), value);
+        }
+    }
+    serde_json::Value::Object(obj)
+}
+
+fn toml_item_to_json_object(
+    item: &toml_edit::Item,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if let Some(table) = item.as_table() {
+        let mut out = serde_json::Map::new();
+        for (key, child) in table.iter() {
+            if let Some(value) = toml_item_to_json(child) {
+                out.insert(key.to_string(), value);
+            }
+        }
+        return Some(out);
+    }
+    if let Some(value) = item.as_value().and_then(|v| v.as_inline_table()) {
+        let mut out = serde_json::Map::new();
+        for (key, child) in value.iter() {
+            if let Some(s) = child.as_str() {
+                out.insert(key.to_string(), serde_json::Value::String(s.to_string()));
+            }
+        }
+        return Some(out);
+    }
+    None
+}
+
+fn toml_item_to_json(item: &toml_edit::Item) -> Option<serde_json::Value> {
+    let value = item.as_value()?;
+    if let Some(s) = value.as_str() {
+        return Some(serde_json::Value::String(s.to_string()));
+    }
+    if let Some(b) = value.as_bool() {
+        return Some(serde_json::Value::Bool(b));
+    }
+    if let Some(i) = value.as_integer() {
+        return Some(serde_json::json!(i));
+    }
+    if let Some(f) = value.as_float() {
+        return Some(serde_json::json!(f));
+    }
+    if let Some(arr) = value.as_array() {
+        let values = arr
+            .iter()
+            .filter_map(|item| {
+                item.as_str()
+                    .map(|s| serde_json::Value::String(s.to_string()))
+            })
+            .collect();
+        return Some(serde_json::Value::Array(values));
+    }
+    if let Some(inline) = value.as_inline_table() {
+        let mut out = serde_json::Map::new();
+        for (key, child) in inline.iter() {
+            if let Some(s) = child.as_str() {
+                out.insert(key.to_string(), serde_json::Value::String(s.to_string()));
+            }
+        }
+        return Some(serde_json::Value::Object(out));
+    }
+    None
+}
+
+fn json_to_codex_table(spec: &serde_json::Value) -> Result<toml_edit::Table, String> {
+    let obj = spec
+        .as_object()
+        .ok_or_else(|| "MCP server config must be a JSON object".to_string())?;
+    let mut table = toml_edit::Table::new();
+    let server_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
+    table["type"] = toml_edit::value(server_type);
+
+    for key in ["command", "url", "cwd"] {
+        if let Some(value) = obj.get(key).and_then(|v| v.as_str()) {
+            table[key] = toml_edit::value(value);
+        }
+    }
+
+    if let Some(args) = obj.get("args").and_then(|v| v.as_array()) {
+        let mut arr = toml_edit::Array::default();
+        for arg in args.iter().filter_map(|v| v.as_str()) {
+            arr.push(arg);
+        }
+        if !arr.is_empty() {
+            table["args"] = toml_edit::Item::Value(toml_edit::Value::Array(arr));
+        }
+    }
+
+    if let Some(env) = obj.get("env").and_then(|v| v.as_object()) {
+        let mut env_table = toml_edit::Table::new();
+        for (key, value) in env {
+            if let Some(value) = value.as_str() {
+                env_table[key] = toml_edit::value(value);
+            }
+        }
+        if !env_table.is_empty() {
+            table["env"] = toml_edit::Item::Table(env_table);
+        }
+    }
+
+    if let Some(headers) = obj
+        .get("headers")
+        .or_else(|| obj.get("http_headers"))
+        .and_then(|v| v.as_object())
+    {
+        let mut headers_table = toml_edit::Table::new();
+        for (key, value) in headers {
+            if let Some(value) = value.as_str() {
+                headers_table[key] = toml_edit::value(value);
+            }
+        }
+        if !headers_table.is_empty() {
+            table["http_headers"] = toml_edit::Item::Table(headers_table);
+        }
+    }
+
+    if let Some(disabled) = obj.get("disabled").and_then(|v| v.as_bool()) {
+        table["disabled"] = toml_edit::value(disabled);
+    }
+
+    Ok(table)
+}
+
+fn codex_config_path() -> Result<std::path::PathBuf, String> {
+    let home = crate::storage::dirs_next()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+    Ok(home.join(".codex").join("config.toml"))
+}
+
+fn gemini_settings_path() -> Result<std::path::PathBuf, String> {
+    let home = crate::storage::dirs_next()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+    Ok(home.join(".gemini").join("settings.json"))
+}
+
+fn read_codex_doc(path: &std::path::Path) -> Result<toml_edit::DocumentMut, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("Failed to read {}: {}", path.display(), e)),
+    };
+    if content.trim().is_empty() {
+        Ok(toml_edit::DocumentMut::new())
+    } else {
+        content
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+    }
+}
+
+fn write_codex_mcp_server(name: &str, spec: &serde_json::Value) -> Result<(), String> {
+    let path = codex_config_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+    }
+    let mut doc = read_codex_doc(&path)?;
+    if !doc.as_table().contains_key("mcp_servers") {
+        doc["mcp_servers"] = toml_edit::table();
+    }
+    doc["mcp_servers"][name] = toml_edit::Item::Table(json_to_codex_table(spec)?);
+    std::fs::write(&path, doc.to_string())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+fn remove_codex_mcp_server(name: &str) -> Result<(), String> {
+    let path = codex_config_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut doc = read_codex_doc(&path)?;
+    if let Some(table) = doc
+        .get_mut("mcp_servers")
+        .and_then(|item| item.as_table_mut())
+    {
+        table.remove(name);
+    }
+    std::fs::write(&path, doc.to_string())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+fn toggle_codex_server(name: &str, enabled: bool) -> Result<(), String> {
+    let path = codex_config_path()?;
+    let mut doc = read_codex_doc(&path)?;
+    let server = doc
+        .get_mut("mcp_servers")
+        .and_then(|item| item.as_table_mut())
+        .and_then(|table| table.get_mut(name))
+        .and_then(|item| item.as_table_mut())
+        .ok_or_else(|| format!("MCP server '{}' not found", name))?;
+    if enabled {
+        server.remove("disabled");
+    } else {
+        server["disabled"] = toml_edit::value(true);
+    }
+    std::fs::write(&path, doc.to_string())
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+fn read_gemini_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str::<serde_json::Value>(&content)
+            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
+        Err(e) => Err(format!("Failed to read {}: {}", path.display(), e)),
+    }
+}
+
+fn write_gemini_settings(path: &std::path::Path, root: &serde_json::Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+    }
+    let content = serde_json::to_string_pretty(root)
+        .map_err(|e| format!("Failed to serialize Gemini settings: {}", e))?;
+    std::fs::write(path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+fn write_gemini_mcp_server(name: &str, spec: &serde_json::Value) -> Result<(), String> {
+    let path = gemini_settings_path()?;
+    let mut root = read_gemini_settings(&path)?;
+    let root_obj = root
+        .as_object_mut()
+        .ok_or_else(|| "Gemini settings root must be an object".to_string())?;
+    let servers = root_obj
+        .entry("mcpServers".to_string())
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| "Gemini mcpServers must be an object".to_string())?;
+    servers.insert(name.to_string(), spec.clone());
+    write_gemini_settings(&path, &root)
+}
+
+fn remove_gemini_mcp_server(name: &str) -> Result<(), String> {
+    let path = gemini_settings_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_gemini_settings(&path)?;
+    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove(name);
+    }
+    write_gemini_settings(&path, &root)
+}
+
+fn toggle_gemini_server(name: &str, enabled: bool) -> Result<(), String> {
+    let path = gemini_settings_path()?;
+    let mut root = read_gemini_settings(&path)?;
+    let server = root
+        .get_mut("mcpServers")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|servers| servers.get_mut(name))
+        .and_then(|v| v.as_object_mut())
+        .ok_or_else(|| format!("MCP server '{}' not found", name))?;
+    if enabled {
+        server.remove("disabled");
+    } else {
+        server.insert("disabled".to_string(), serde_json::Value::Bool(true));
+    }
+    write_gemini_settings(&path, &root)
+}
+
 /// Add an MCP server via Claude CLI.
 #[allow(clippy::too_many_arguments)]
 pub async fn add_server(
+    name: &str,
+    transport: &str,
+    scope: &str,
+    cwd: Option<&str>,
+    config_json: Option<&str>,
+    url: Option<&str>,
+    env_vars: Option<&HashMap<String, String>>,
+    headers: Option<&HashMap<String, String>>,
+) -> Result<PluginOperationResult, String> {
+    add_server_for_app(
+        ManagedCliApp::Claude,
+        name,
+        transport,
+        scope,
+        cwd,
+        config_json,
+        url,
+        env_vars,
+        headers,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn add_server_for_app(
+    app: ManagedCliApp,
     name: &str,
     transport: &str,
     scope: &str,
@@ -448,6 +816,88 @@ pub async fn add_server(
         ));
     }
 
+    if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
+        return Err(
+            "Codex and Gemini MCP management currently support user scope only".to_string(),
+        );
+    }
+
+    if matches!(app, ManagedCliApp::Claude) {
+        return add_server_claude(
+            name,
+            transport,
+            scope,
+            cwd,
+            config_json,
+            url,
+            env_vars,
+            headers,
+        )
+        .await;
+    }
+
+    let local_name = to_cli_name(name);
+    let mut spec = match transport {
+        "stdio" | "sse" => {
+            let json_str = config_json
+                .ok_or_else(|| "config_json is required for stdio/sse transport".to_string())?;
+            serde_json::from_str::<serde_json::Value>(json_str)
+                .map_err(|e| format!("Invalid config_json: {e}"))?
+        }
+        "http" => {
+            let server_url = url.ok_or_else(|| "url is required for http transport".to_string())?;
+            let mut headers_json = serde_json::Map::new();
+            if let Some(hdrs) = headers {
+                for (k, v) in hdrs {
+                    headers_json.insert(k.clone(), serde_json::Value::String(v.clone()));
+                }
+            }
+            serde_json::json!({
+                "type": "http",
+                "url": server_url,
+                "headers": headers_json,
+            })
+        }
+        _ => return Err(format!("Unsupported transport: {}", transport)),
+    };
+
+    if let Some(env) = env_vars {
+        let env_obj = spec
+            .as_object_mut()
+            .and_then(|obj| {
+                obj.entry("env".to_string())
+                    .or_insert_with(|| serde_json::json!({}))
+                    .as_object_mut()
+            })
+            .ok_or_else(|| "MCP env must be an object".to_string())?;
+        for (k, v) in env {
+            env_obj.insert(k.clone(), serde_json::Value::String(v.clone()));
+        }
+    }
+
+    if matches!(app, ManagedCliApp::Codex) {
+        write_codex_mcp_server(&local_name, &spec)?;
+    } else {
+        write_gemini_mcp_server(&local_name, &spec)?;
+    }
+
+    Ok(PluginOperationResult {
+        success: true,
+        message: format!("Added MCP server '{}'", name),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn add_server_claude(
+    name: &str,
+    transport: &str,
+    scope: &str,
+    cwd: Option<&str>,
+    config_json: Option<&str>,
+    url: Option<&str>,
+    env_vars: Option<&HashMap<String, String>>,
+    headers: Option<&HashMap<String, String>>,
+) -> Result<PluginOperationResult, String> {
     // CLI only accepts [a-zA-Z0-9_-] in names — derive local name from registry format
     // e.g. "ai.kubit/mcp-server" → "mcp-server", "com.letta/memory-mcp" → "memory-mcp"
     let local_name = to_cli_name(name);
@@ -582,6 +1032,15 @@ pub async fn remove_server(
     scope: &str,
     cwd: Option<&str>,
 ) -> Result<PluginOperationResult, String> {
+    remove_server_for_app(ManagedCliApp::Claude, name, scope, cwd).await
+}
+
+pub async fn remove_server_for_app(
+    app: ManagedCliApp,
+    name: &str,
+    scope: &str,
+    cwd: Option<&str>,
+) -> Result<PluginOperationResult, String> {
     validate_name(name)?;
     validate_scope(scope)?;
 
@@ -591,6 +1050,25 @@ pub async fn remove_server(
             "Scope '{}' requires a working directory (cwd)",
             scope
         ));
+    }
+
+    if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
+        return Err(
+            "Codex and Gemini MCP management currently support user scope only".to_string(),
+        );
+    }
+
+    if !matches!(app, ManagedCliApp::Claude) {
+        let local_name = to_cli_name(name);
+        if matches!(app, ManagedCliApp::Codex) {
+            remove_codex_mcp_server(&local_name)?;
+        } else {
+            remove_gemini_mcp_server(&local_name)?;
+        }
+        return Ok(PluginOperationResult {
+            success: true,
+            message: format!("Removed MCP server '{}'", name),
+        });
     }
 
     let _lock = INSTALL_LOCK.lock().await;
@@ -680,6 +1158,36 @@ pub fn toggle_server_config(
     scope: &str,
     cwd: Option<&str>,
 ) -> Result<PluginOperationResult, String> {
+    toggle_server_config_for_app(ManagedCliApp::Claude, name, enabled, scope, cwd)
+}
+
+pub fn toggle_server_config_for_app(
+    app: ManagedCliApp,
+    name: &str,
+    enabled: bool,
+    scope: &str,
+    cwd: Option<&str>,
+) -> Result<PluginOperationResult, String> {
+    if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
+        return Err(
+            "Codex and Gemini MCP management currently support user scope only".to_string(),
+        );
+    }
+
+    if !matches!(app, ManagedCliApp::Claude) {
+        let local_name = to_cli_name(name);
+        if matches!(app, ManagedCliApp::Codex) {
+            toggle_codex_server(&local_name, enabled)?;
+        } else {
+            toggle_gemini_server(&local_name, enabled)?;
+        }
+        let action = if enabled { "Enabled" } else { "Disabled" };
+        return Ok(PluginOperationResult {
+            success: true,
+            message: format!("{} MCP server '{}'", action, name),
+        });
+    }
+
     let home = crate::storage::dirs_next()
         .ok_or_else(|| "Could not determine home directory".to_string())?;
 
@@ -922,6 +1430,36 @@ mod tests {
 
         let entry = parse_mcp_entry("test", &config, "local");
         assert_eq!(entry.server_type, "stdio"); // default
+    }
+
+    #[test]
+    fn test_codex_toml_conversion_uses_official_mcp_servers_shape() {
+        let config = serde_json::json!({
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+            "env": {
+                "API_TOKEN": "secret"
+            }
+        });
+
+        let table = json_to_codex_table(&config).expect("codex table");
+        assert_eq!(table.get("command").and_then(|v| v.as_str()), Some("npx"));
+        assert!(table.get("env").and_then(|v| v.as_table()).is_some());
+
+        let parsed = codex_table_to_json(&table);
+        let entry = parse_mcp_entry("filesystem", &parsed, "user");
+        assert_eq!(entry.name, "filesystem");
+        assert_eq!(entry.server_type, "stdio");
+        assert_eq!(entry.command, Some("npx".to_string()));
+        assert_eq!(
+            entry.args,
+            vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string()
+            ]
+        );
+        assert_eq!(entry.env_keys, vec!["API_TOKEN".to_string()]);
     }
 
     #[test]

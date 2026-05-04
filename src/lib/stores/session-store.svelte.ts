@@ -303,6 +303,8 @@ export class SessionStore {
 
   /** Per-session platform_id — set before first message, locked after. */
   platformId = $state<string | null>(null);
+  /** Per-session saved connection profile id. */
+  connectionProfileId = $state<string | null>(null);
 
   /** True while stop() is in progress — suppresses RunState error display from dying CLI. */
   private _stopping = false;
@@ -1248,7 +1250,7 @@ export class SessionStore {
     this.sessionInitReceived = false;
     this.unknownEventCount = 0;
     this.rawFallbackCount = 0;
-    // NOTE: remoteHostName and platformId are intentionally NOT cleared here —
+    // NOTE: remoteHostName, platformId, and connectionProfileId are intentionally NOT cleared here —
     // they are run-level properties restored from run metadata, not per-session state.
     this._seenMessageIds.clear();
     this._seenToolIds.clear();
@@ -1487,6 +1489,7 @@ export class SessionStore {
       this.agent = this.run.agent;
       this.remoteHostName = this.run.remote_host_name ?? null;
       this.platformId = this.run.platform_id ?? null;
+      this.connectionProfileId = this.run.connection_profile_id ?? null;
       // Suppress isThinking during event replay (prevents "thinking" flash on session switch)
       this._isLoadingReplay = true;
 
@@ -1729,6 +1732,7 @@ export class SessionStore {
         this.model || undefined,
         this.remoteHostName || undefined,
         this.platformId || undefined,
+        this.connectionProfileId || undefined,
         executionPath,
       );
       this.run = run;
@@ -1958,6 +1962,7 @@ export class SessionStore {
       this.run = run;
       this.agent = run.agent;
       this.platformId = run.platform_id ?? null;
+      this.connectionProfileId = run.connection_profile_id ?? null;
       this._clearContentState();
 
       // ★ Phase 3: apply snapshot or events + force invalidate

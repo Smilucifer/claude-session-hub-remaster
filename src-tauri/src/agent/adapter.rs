@@ -1,5 +1,5 @@
 use crate::agent::session_actor::SessionActorHandle;
-use crate::models::{AgentSettings, SessionMode, UserSettings};
+use crate::models::{AgentSettings, ConnectionProfile, SessionMode, UserSettings};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -195,6 +195,80 @@ pub fn build_adapter_settings(
         extra_args,
         yolo_mode,
     }
+}
+
+fn default_api_key_env(agent: &str) -> &'static str {
+    match agent {
+        "codex" => "OPENAI_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
+        _ => "ANTHROPIC_API_KEY",
+    }
+}
+
+fn default_base_url_env(agent: &str) -> &'static str {
+    match agent {
+        "codex" => "OPENAI_BASE_URL",
+        "gemini" => "GEMINI_BASE_URL",
+        _ => "ANTHROPIC_BASE_URL",
+    }
+}
+
+pub fn apply_connection_profile(
+    settings: &mut AdapterSettings,
+    profile: &ConnectionProfile,
+    has_model_override: bool,
+) -> HashMap<String, String> {
+    if !has_model_override {
+        if let Some(model) = profile
+            .model
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            settings.model = Some(model.clone());
+        }
+    }
+    if let Some(command_path) = profile
+        .command_path
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        settings.command_path = Some(command_path.clone());
+    }
+    if let Some(add_dirs) = &profile.add_dirs {
+        settings.add_dirs = add_dirs
+            .iter()
+            .map(|dir| dir.trim().to_string())
+            .filter(|dir| !dir.is_empty())
+            .collect();
+    }
+    if let Some(extra_args) = &profile.extra_args {
+        settings.extra_args = extra_args
+            .iter()
+            .map(|arg| arg.trim().to_string())
+            .filter(|arg| !arg.is_empty())
+            .collect();
+    }
+    if let Some(yolo_mode) = profile.yolo_mode {
+        settings.yolo_mode = Some(yolo_mode);
+    }
+    if let Some(no_session_persistence) = profile.no_session_persistence {
+        settings.no_session_persistence = no_session_persistence;
+    }
+
+    let mut env = profile.env.clone().unwrap_or_default();
+    if let Some(api_key) = profile.api_key.as_ref().filter(|value| !value.is_empty()) {
+        let key = profile
+            .auth_env_var
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_api_key_env(&profile.agent));
+        env.insert(key.to_string(), api_key.clone());
+    }
+    if let Some(base_url) = profile.base_url.as_ref().filter(|value| !value.is_empty()) {
+        env.entry(default_base_url_env(&profile.agent).to_string())
+            .or_insert_with(|| base_url.clone());
+    }
+    env
 }
 
 /// Build CLI args for settings flags (shared between stream and pipe modes).

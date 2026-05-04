@@ -225,6 +225,7 @@
   function handleAgentChange(agent: string) {
     if (store.run) return;
     store.agent = agent;
+    store.connectionProfileId = null;
     store.permissionMode = "";
     store.permissionModeSetByUser = false;
     store.permissionModePersistFailed = false;
@@ -247,6 +248,15 @@
         store.permissionModeSetByUser = true;
       }
     });
+  }
+
+  function handleConnectionProfileChange(profileId: string) {
+    if (store.run) return;
+    store.connectionProfileId = profileId || null;
+    const profile = (settings?.connection_profiles ?? []).find((p) => p.id === profileId);
+    if (!profile) return;
+    if (profile.platform_id) store.platformId = profile.platform_id;
+    if (profile.model) store.model = profile.model;
   }
 
   function normalizeChatAgent(value: string): string {
@@ -4719,6 +4729,8 @@
         authMode={store.authMode}
         platformId={store.platformId ?? "anthropic"}
         platformCredentials={settings?.platform_credentials ?? []}
+        connectionProfiles={settings?.connection_profiles ?? []}
+        connectionProfileId={store.connectionProfileId ?? ""}
         onSend={sendMessage}
         onBtwSend={handleBtwSend}
         onAgentChange={handleAgentChange}
@@ -4731,6 +4743,7 @@
         fastModeState={store.fastModeState}
         onFastModeSwitch={handleFastModeSwitch}
         onPlatformChange={handlePlatformChange}
+        onConnectionProfileChange={handleConnectionProfileChange}
         {authOverview}
         authSourceLabel={store.authSourceLabel}
         authSourceCategory={store.authSourceCategory}

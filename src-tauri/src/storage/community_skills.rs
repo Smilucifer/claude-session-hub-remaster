@@ -1,6 +1,7 @@
 use crate::models::{
     CommunitySkillDetail, CommunitySkillResult, PluginOperationResult, ProviderHealth,
 };
+use crate::storage::managed_apps::ManagedCliApp;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -463,6 +464,16 @@ pub async fn install_skill(
     scope: &str,
     cwd: Option<&str>,
 ) -> Result<PluginOperationResult, String> {
+    install_skill_for_app(ManagedCliApp::Claude, source, skill_id, scope, cwd).await
+}
+
+pub async fn install_skill_for_app(
+    app: ManagedCliApp,
+    source: &str,
+    skill_id: &str,
+    scope: &str,
+    cwd: Option<&str>,
+) -> Result<PluginOperationResult, String> {
     validate_scope(scope)?;
     let slug = to_local_slug(skill_id)?;
 
@@ -537,20 +548,13 @@ pub async fn install_skill(
 
     // Determine target path
     let target_dir = match scope {
-        "user" => {
-            let home = crate::storage::dirs_next()
-                .ok_or_else(|| "Could not determine home directory".to_string())?;
-            home.join(".claude").join("skills").join(&slug)
-        }
+        "user" => app.user_skills_dir()?.join(&slug),
         "project" => {
             let cwd_str = cwd.ok_or("Project scope requires a working directory (cwd)")?;
             if cwd_str.is_empty() {
                 return Err("Project scope requires a non-empty working directory".into());
             }
-            std::path::PathBuf::from(cwd_str)
-                .join(".claude")
-                .join("skills")
-                .join(&slug)
+            app.project_skills_dir(cwd_str)?.join(&slug)
         }
         _ => return Err(format!("Invalid scope: {scope}")),
     };

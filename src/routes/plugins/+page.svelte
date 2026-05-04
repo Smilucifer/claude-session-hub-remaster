@@ -47,6 +47,49 @@
     (sectionCtx?.active ?? "skills") as "skills" | "mcp" | "hooks" | "plugins" | "agents",
   );
 
+  type ManagedApp = "claude" | "codex" | "gemini";
+  const managedApps: Array<{
+    id: ManagedApp;
+    label: string;
+    skillsPath: string;
+    mcpPath: string;
+    pluginsPath: string;
+  }> = [
+    {
+      id: "claude",
+      label: "CC",
+      skillsPath: "~/.claude/skills",
+      mcpPath: "~/.claude.json",
+      pluginsPath: "~/.claude/plugins",
+    },
+    {
+      id: "codex",
+      label: "Codex",
+      skillsPath: "~/.codex/skills",
+      mcpPath: "~/.codex/config.toml",
+      pluginsPath: "~/.codex/plugins",
+    },
+    {
+      id: "gemini",
+      label: "Gemini",
+      skillsPath: "~/.gemini/skills",
+      mcpPath: "~/.gemini/settings.json",
+      pluginsPath: "~/.gemini/plugins",
+    },
+  ];
+  let managedApp = $state<ManagedApp>("claude");
+  let activeManagedApp = $derived(
+    managedApps.find((app) => app.id === managedApp) ?? managedApps[0],
+  );
+
+  function switchManagedApp(app: ManagedApp) {
+    managedApp = app;
+    localStorage.setItem("ocv:extensions-app", app);
+    cancelEditor();
+    selectedSkillPath = null;
+    refreshManagedAppData();
+  }
+
   // Skills section: Discover vs Installed toggle
   let skillsSource = $state<"discover" | "installed">("discover");
 
@@ -214,6 +257,9 @@
   // ── Lifecycle ──
 
   onMount(async () => {
+    const savedApp = localStorage.getItem("ocv:extensions-app") as ManagedApp | null;
+    if (savedApp && managedApps.some((app) => app.id === savedApp)) managedApp = savedApp;
+
     // Initialize from URL params
     const params = new URL(window.location.href).searchParams;
     const urlSection = params.get("section");
@@ -236,10 +282,10 @@
     const warnings: string[] = [];
     try {
       const results = await Promise.allSettled([
-        listMarketplacePlugins(),
-        listInstalledPlugins(),
-        listStandaloneSkills(projectCwd || undefined),
-        listMarketplaces(),
+        listMarketplacePlugins(managedApp),
+        managedApp === "claude" ? listInstalledPlugins() : Promise.resolve([]),
+        listStandaloneSkills(projectCwd || undefined, managedApp),
+        listMarketplaces(managedApp),
       ]);
 
       if (results[0].status === "fulfilled") {
@@ -308,7 +354,7 @@
       dbg("plugins", "project-changed", { old: projectCwd, new: cwd });
       projectCwd = cwd;
       // Re-fetch skills for the new project context
-      listStandaloneSkills(projectCwd || undefined)
+      listStandaloneSkills(projectCwd || undefined, managedApp)
         .then((s) => {
           skills = s;
         })
@@ -375,7 +421,7 @@
     editorDescription = skill.description;
     editorPath = skill.path;
     editorScope = (skill.scope as "user" | "project") ?? "user";
-    getSkillContent(skill.path, projectCwd || undefined)
+    getSkillContent(skill.path, projectCwd || undefined, managedApp)
       .then((raw) => {
         editorContent = raw;
         selectedSkillPath = skill.path;
@@ -409,6 +455,7 @@
         editorContent,
         editorScope,
         projectCwd || undefined,
+        managedApp,
       );
       showToast(t("plugin_createdSkill", { name: skill.name }), "success");
       cancelEditor();
@@ -424,7 +471,7 @@
     editorSaving = true;
     dbg("plugins", "updateSkill", { path: editorPath });
     try {
-      await updateSkill(editorPath, editorContent, projectCwd || undefined);
+      await updateSkill(editorPath, editorContent, projectCwd || undefined, managedApp);
       showToast(t("plugin_skillSaved"), "success");
       cancelEditor();
       await refreshSkills();
@@ -443,7 +490,7 @@
         operationLoading = skill.path;
         dbg("plugins", "deleteSkill", { path: skill.path });
         try {
-          await deleteSkill(skill.path, projectCwd || undefined);
+          await deleteSkill(skill.path, projectCwd || undefined, managedApp);
           showToast(t("plugin_deletedSkill", { name: skill.name }), "success");
           if (selectedSkillPath === skill.path) {
             selectedSkillPath = null;
@@ -461,7 +508,7 @@
 
   async function refreshSkills() {
     try {
-      skills = await listStandaloneSkills(projectCwd || undefined);
+      skills = await listStandaloneSkills(projectCwd || undefined, managedApp);
     } catch (e) {
       dbgWarn("plugins", "refresh skills error", e);
     }
@@ -528,6 +575,7 @@
         skill.skill_id,
         communityScope,
         projectCwd || undefined,
+        managedApp,
       );
       showToast(
         result.success
@@ -563,11 +611,31 @@
   }
 
   async function refreshPluginData() {
-    const results = await Promise.allSettled([listMarketplacePlugins(), listInstalledPlugins()]);
+    const results = await Promise.allSettled([
+      listMarketplacePlugins(managedApp),
+      managedApp === "claude" ? listInstalledPlugins() : Promise.resolve([]),
+    ]);
     if (results[0].status === "fulfilled") plugins = results[0].value;
     else dbgWarn("plugins", "refresh marketplace error", results[0].reason);
     if (results[1].status === "fulfilled") installedPlugins = results[1].value;
     else dbgWarn("plugins", "refresh installed error", results[1].reason);
+  }
+
+  async function refreshManagedAppData() {
+    const results = await Promise.allSettled([
+      listMarketplacePlugins(managedApp),
+      managedApp === "claude" ? listInstalledPlugins() : Promise.resolve([]),
+      listStandaloneSkills(projectCwd || undefined, managedApp),
+      listMarketplaces(managedApp),
+    ]);
+    if (results[0].status === "fulfilled") plugins = results[0].value;
+    else dbgWarn("plugins", "refresh app marketplace error", results[0].reason);
+    if (results[1].status === "fulfilled") installedPlugins = results[1].value;
+    else dbgWarn("plugins", "refresh app installed plugins error", results[1].reason);
+    if (results[2].status === "fulfilled") skills = results[2].value;
+    else dbgWarn("plugins", "refresh app skills error", results[2].reason);
+    if (results[3].status === "fulfilled") marketplaces = results[3].value;
+    else dbgWarn("plugins", "refresh app marketplaces error", results[3].reason);
   }
 
   // ── Plugin operation handlers ──
@@ -829,6 +897,36 @@
         {t("plugin_couldNotLoad", { items: loadWarnings.join(", ") })}
       </div>
     {/if}
+
+    <div class="mb-4 rounded-lg border border-border bg-card p-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="inline-flex rounded-md border border-border bg-background p-0.5">
+          {#each managedApps as app}
+            <button
+              type="button"
+              class="h-8 rounded-sm px-3 text-xs font-medium transition-colors {managedApp ===
+              app.id
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted'}"
+              onclick={() => switchManagedApp(app.id)}
+            >
+              {app.label}
+            </button>
+          {/each}
+        </div>
+        <div class="flex min-w-0 flex-wrap gap-2 text-[11px] text-muted-foreground">
+          <span class="rounded bg-muted px-2 py-1">Skills: {activeManagedApp.skillsPath}</span>
+          <span class="rounded bg-muted px-2 py-1">MCP: {activeManagedApp.mcpPath}</span>
+          <span class="rounded bg-muted px-2 py-1">Plugins: {activeManagedApp.pluginsPath}</span>
+        </div>
+      </div>
+      {#if managedApp !== "claude"}
+        <p class="mt-2 text-xs text-muted-foreground">
+          {activeManagedApp.label} skills and MCP servers are read from and written to the paths
+          shown above. Native Claude plugin marketplace actions are available under CC.
+        </p>
+      {/if}
+    </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
     <!-- Skills Section                                         -->
@@ -1449,6 +1547,7 @@
       <!-- Discover sub-view -->
       <div class:hidden={mcpSource !== "discover"}>
         <McpDiscoverPanel
+          app={managedApp}
           {projectCwd}
           visible={mcpSource === "discover"}
           bind:operationLoading
@@ -1459,6 +1558,7 @@
       <!-- Configured sub-view -->
       <div class:hidden={mcpSource !== "configured"}>
         <McpConfiguredPanel
+          app={managedApp}
           {projectCwd}
           visible={mcpSource === "configured"}
           bind:operationLoading
@@ -1484,6 +1584,16 @@
         <p class="text-xs text-muted-foreground">{t("plugin_pluginsDesc")}</p>
       </div>
 
+      {#if managedApp !== "claude"}
+        <div class="rounded-lg border border-border/50 bg-muted/20 px-4 py-8 text-center">
+          <h3 class="text-sm font-medium text-foreground">{activeManagedApp.label} plugins</h3>
+          <p class="mx-auto mt-2 max-w-md text-xs text-muted-foreground">
+            This app does not expose a Claude-style plugin marketplace. Use the Skills and MCP tabs
+            to manage shared capabilities for {activeManagedApp.label}; the plugin directory is
+            {activeManagedApp.pluginsPath}.
+          </p>
+        </div>
+      {:else}
       <!-- Source toggle -->
       <div class="flex gap-1 rounded-lg border border-border p-0.5 w-fit">
         <button
@@ -1906,6 +2016,7 @@
           </div>
         {/if}
       </div>
+      {/if}
     </div>
     <!-- ═══════════════════════════════════════════════════════ -->
     <!-- Agents Section                                        -->

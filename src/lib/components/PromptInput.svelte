@@ -6,6 +6,7 @@
     AuthOverview,
     CliCommand,
     CliModelInfo,
+    ConnectionProfile,
     DirEntry,
     PlatformCredential,
   } from "$lib/types";
@@ -94,7 +95,10 @@
     authMode = "cli",
     platformId = "anthropic",
     platformCredentials = [],
+    connectionProfiles = [],
+    connectionProfileId = "",
     onPlatformChange,
+    onConnectionProfileChange,
     authOverview = null,
     authSourceLabel = "",
     authSourceCategory = "unknown",
@@ -137,7 +141,10 @@
     authMode?: string;
     platformId?: string;
     platformCredentials?: PlatformCredential[];
+    connectionProfiles?: ConnectionProfile[];
+    connectionProfileId?: string;
     onPlatformChange?: (platformId: string) => void;
+    onConnectionProfileChange?: (profileId: string) => void;
     authOverview?: AuthOverview | null;
     authSourceLabel?: string;
     authSourceCategory?: string;
@@ -173,6 +180,9 @@
         : hasRun
           ? t("prompt_hasRunPlaceholder")
           : t("prompt_newPlaceholder"),
+  );
+  let agentConnectionProfiles = $derived(
+    connectionProfiles.filter((profile) => profile.enabled !== false && profile.agent === agent),
   );
 
   // ── Git branch (fetched from cwd) ──
@@ -2044,6 +2054,20 @@
       <div class="flex items-center gap-1">
         {#if !hasRun && onAgentChange}
           <AgentSelector value={agent} onchange={(a) => onAgentChange?.(a)} />
+        {/if}
+        {#if !hasRun && onConnectionProfileChange && agentConnectionProfiles.length > 0}
+          <select
+            value={connectionProfileId}
+            class="h-6 max-w-[160px] rounded-md border border-border bg-background px-1.5 text-[11px] text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-ring"
+            title="Connection profile"
+            onchange={(e) =>
+              onConnectionProfileChange((e.currentTarget as HTMLSelectElement).value)}
+          >
+            <option value="">Default</option>
+            {#each agentConnectionProfiles as profile}
+              <option value={profile.id}>{profile.label}</option>
+            {/each}
+          </select>
         {/if}
         {#if onPermissionModeChange}
           <button

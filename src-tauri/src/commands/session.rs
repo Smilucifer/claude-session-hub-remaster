@@ -557,6 +557,17 @@ pub(crate) async fn start_session_impl(
     let user_settings = storage::settings::get_user_settings();
     let mut adapter_settings =
         adapter::build_adapter_settings(&agent_settings, &user_settings, meta.model.clone());
+    let connection_profile = storage::settings::find_connection_profile(
+        &user_settings,
+        &meta.agent,
+        meta.connection_profile_id.as_deref(),
+    )?;
+    let profile_env = connection_profile
+        .as_ref()
+        .map(|profile| {
+            adapter::apply_connection_profile(&mut adapter_settings, profile, meta.model.is_some())
+        })
+        .unwrap_or_default();
 
     // 2a. Apply per-session permission_mode override (e.g. ExitPlanMode → acceptEdits).
     //     Session-scoped: does not touch persisted user settings. Must run BEFORE spawn
@@ -577,7 +588,12 @@ pub(crate) async fn start_session_impl(
     let effective_pid = if user_settings.auth_mode == "cli" {
         None
     } else {
-        platform_id.as_deref().or(meta.platform_id.as_deref())
+        platform_id
+            .as_deref()
+            .or(connection_profile
+                .as_ref()
+                .and_then(|p| p.platform_id.as_deref()))
+            .or(meta.platform_id.as_deref())
     };
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
     adapter::clear_model_if_provider_overrides(
@@ -592,6 +608,13 @@ pub(crate) async fn start_session_impl(
         remote.is_some(),
         &meta.cwd,
     );
+    let mut resolved = resolved;
+    if !profile_env.is_empty() {
+        match resolved.extra_env.as_mut() {
+            Some(existing) => existing.extend(profile_env),
+            None => resolved.extra_env = Some(profile_env),
+        }
+    }
     if remote.is_some() {
         log::debug!(
             "[session] remote mode: host={:?}, remote_cwd={:?}, has_key={}",

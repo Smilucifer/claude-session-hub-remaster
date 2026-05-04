@@ -45,6 +45,10 @@ pub async fn dispatch_command(
                 .get("platform_id")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+            let connection_profile_id = params
+                .get("connection_profile_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             let execution_path = params
                 .get("execution_path")
                 .and_then(|v| v.as_str())
@@ -56,6 +60,7 @@ pub async fn dispatch_command(
                 model,
                 remote_host_name,
                 platform_id,
+                connection_profile_id,
                 execution_path,
             )?;
             serde_json::to_value(run).map_err(|e| e.to_string())
@@ -328,16 +333,19 @@ pub async fn dispatch_command(
 
         // ── Plugins / Skills ──
         "list_marketplaces" => {
-            let result = crate::commands::plugins::list_marketplaces()?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::list_marketplaces(app)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "list_marketplace_plugins" => {
-            let result = crate::commands::plugins::list_marketplace_plugins()?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::list_marketplace_plugins(app)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "list_standalone_skills" => {
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result = crate::commands::plugins::list_standalone_skills(cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::list_standalone_skills(cwd, app)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "list_project_commands" => {
@@ -352,7 +360,8 @@ pub async fn dispatch_command(
         "get_skill_content" => {
             let path = extract_str(&params, "path")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result = crate::commands::plugins::get_skill_content(path, cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::get_skill_content(path, cwd, app)?;
             Ok(json!(result))
         }
         "create_skill" => {
@@ -361,21 +370,30 @@ pub async fn dispatch_command(
             let content = extract_str(&params, "content")?;
             let scope = extract_str(&params, "scope")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result =
-                crate::commands::plugins::create_skill(name, description, content, scope, cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::create_skill(
+                name,
+                description,
+                content,
+                scope,
+                cwd,
+                app,
+            )?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "update_skill" => {
             let path = extract_str(&params, "path")?;
             let content = extract_str(&params, "content")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            crate::commands::plugins::update_skill(path, content, cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            crate::commands::plugins::update_skill(path, content, cwd, app)?;
             Ok(json!(true))
         }
         "delete_skill" => {
             let path = extract_str(&params, "path")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            crate::commands::plugins::delete_skill(path, cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            crate::commands::plugins::delete_skill(path, cwd, app)?;
             Ok(json!(true))
         }
         "install_plugin" => {
@@ -456,9 +474,11 @@ pub async fn dispatch_command(
             let skill_id = extract_str(&params, "skill_id")?;
             let scope = extract_str(&params, "scope")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result =
-                crate::commands::plugins::install_community_skill(source, skill_id, scope, cwd)
-                    .await?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::plugins::install_community_skill(
+                source, skill_id, scope, cwd, app,
+            )
+            .await?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
 
@@ -501,7 +521,8 @@ pub async fn dispatch_command(
         // ── MCP ──
         "list_configured_mcp_servers" => {
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result = crate::commands::mcp::list_configured_mcp_servers(cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::mcp::list_configured_mcp_servers(cwd, app)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "add_mcp_server" => {
@@ -509,6 +530,7 @@ pub async fn dispatch_command(
             let transport = extract_str(&params, "transport")?;
             let scope = extract_str(&params, "scope")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
             let config_json = params
                 .get("config_json")
                 .and_then(|v| v.as_str())
@@ -525,6 +547,7 @@ pub async fn dispatch_command(
                 transport,
                 scope,
                 cwd,
+                app,
                 config_json,
                 url,
                 env_vars,
@@ -537,7 +560,8 @@ pub async fn dispatch_command(
             let name = extract_str(&params, "name")?;
             let scope = extract_str(&params, "scope")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result = crate::commands::mcp::remove_mcp_server(name, scope, cwd).await?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result = crate::commands::mcp::remove_mcp_server(name, scope, cwd, app).await?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "toggle_mcp_server_config" => {
@@ -548,7 +572,9 @@ pub async fn dispatch_command(
                 .unwrap_or(true);
             let scope = extract_str(&params, "scope")?;
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(String::from);
-            let result = crate::commands::mcp::toggle_mcp_server_config(name, enabled, scope, cwd)?;
+            let app = params.get("app").and_then(|v| v.as_str()).map(String::from);
+            let result =
+                crate::commands::mcp::toggle_mcp_server_config(name, enabled, scope, cwd, app)?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
         "check_mcp_registry_health" => {

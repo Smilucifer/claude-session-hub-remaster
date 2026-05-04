@@ -1,4 +1,6 @@
-use crate::models::{AgentSettings, AllSettings, UserSettings, WindowsMsvcEnvMode};
+use crate::models::{
+    AgentSettings, AllSettings, ConnectionProfile, UserSettings, WindowsMsvcEnvMode,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -519,6 +521,14 @@ pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, St
                 .map_err(|e| format!("Invalid cc_agent_profiles: {}", e))?;
         }
     }
+    if let Some(v) = patch.get("connection_profiles") {
+        if v.is_null() {
+            all.user.connection_profiles = vec![];
+        } else {
+            all.user.connection_profiles = serde_json::from_value(v.clone())
+                .map_err(|e| format!("Invalid connection_profiles: {}", e))?;
+        }
+    }
     if let Some(v) = patch.get("active_platform_id") {
         all.user.active_platform_id = if v.is_null() {
             None
@@ -549,6 +559,31 @@ pub fn get_agent_settings(agent: &str) -> AgentSettings {
         .get(agent)
         .cloned()
         .unwrap_or_else(|| AgentSettings::default_for(agent))
+}
+
+pub fn find_connection_profile(
+    user: &UserSettings,
+    agent: &str,
+    profile_id: Option<&str>,
+) -> Result<Option<ConnectionProfile>, String> {
+    let Some(id) = profile_id.filter(|id| !id.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let profile = user
+        .connection_profiles
+        .iter()
+        .find(|profile| profile.id == id)
+        .ok_or_else(|| format!("Connection profile '{}' not found", id))?;
+    if !profile.enabled {
+        return Err(format!("Connection profile '{}' is disabled", id));
+    }
+    if profile.agent != agent {
+        return Err(format!(
+            "Connection profile '{}' is for agent '{}', not '{}'",
+            id, profile.agent, agent
+        ));
+    }
+    Ok(Some(profile.clone()))
 }
 
 /// Apply a JSON patch to AgentSettings (pure function, no I/O).
@@ -787,6 +822,42 @@ mod tests {
                 role: None,
                 enabled: true,
             }]
+        );
+    }
+
+    #[test]
+    fn user_settings_deserializes_connection_profiles_from_json() {
+        let json = settings_json_with_user_patch(serde_json::json!({
+            "connection_profiles": [
+                {
+                    "id": "codex-official",
+                    "label": "Codex Official",
+                    "agent": "codex",
+                    "auth_mode": "api",
+                    "api_key": "sk-test",
+                    "auth_env_var": "OPENAI_API_KEY",
+                    "env": { "OPENAI_BASE_URL": "https://api.openai.com/v1" },
+                    "extra_args": ["--search"]
+                }
+            ]
+        }));
+
+        let settings: AllSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(settings.user.connection_profiles.len(), 1);
+        let profile = &settings.user.connection_profiles[0];
+        assert_eq!(profile.id, "codex-official");
+        assert_eq!(profile.agent, "codex");
+        assert_eq!(profile.auth_mode, "api");
+        assert_eq!(profile.api_key.as_deref(), Some("sk-test"));
+        assert_eq!(profile.auth_env_var.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(
+            profile
+                .env
+                .as_ref()
+                .and_then(|env| env.get("OPENAI_BASE_URL"))
+                .map(String::as_str),
+            Some("https://api.openai.com/v1")
         );
     }
 

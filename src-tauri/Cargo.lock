@@ -35,6 +35,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml_edit 0.25.4+spec-1.1.0",
  "tower-http 0.5.2",
  "url",
  "urlencoding",
@@ -5008,6 +5009,7 @@ dependencies = [
  "indexmap 2.13.0",
  "toml_datetime 1.0.0+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 0.7.15",
 ]
 

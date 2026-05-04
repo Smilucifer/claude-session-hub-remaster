@@ -1,16 +1,15 @@
 use crate::models::{MarketplaceInfo, MarketplacePlugin, PluginComponents, StandaloneSkill};
+use crate::storage::managed_apps::ManagedCliApp;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// ~/.claude/plugins/
-fn plugins_dir() -> PathBuf {
-    crate::storage::teams::claude_home_dir().join("plugins")
+fn plugins_dir_for_app(app: ManagedCliApp) -> Result<PathBuf, String> {
+    app.user_plugins_dir()
 }
 
-/// ~/.claude/skills/
-fn skills_dir() -> PathBuf {
-    crate::storage::teams::claude_home_dir().join("skills")
+fn skills_dir_for_app(app: ManagedCliApp) -> Result<PathBuf, String> {
+    app.user_skills_dir()
 }
 
 // ── Internal deserialization types ──
@@ -61,7 +60,18 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
 
 /// List all registered marketplaces from known_marketplaces.json.
 pub fn list_marketplaces() -> Vec<MarketplaceInfo> {
-    let known_path = plugins_dir().join("known_marketplaces.json");
+    list_marketplaces_for_app(ManagedCliApp::Claude)
+}
+
+pub fn list_marketplaces_for_app(app: ManagedCliApp) -> Vec<MarketplaceInfo> {
+    let plugins_dir = match plugins_dir_for_app(app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            log::warn!("[plugins] cannot resolve {} plugins dir: {}", app.id(), e);
+            return vec![];
+        }
+    };
+    let known_path = plugins_dir.join("known_marketplaces.json");
     let entries: HashMap<String, KnownMarketplaceEntry> = match read_json(&known_path) {
         Some(v) => v,
         None => return vec![],
@@ -95,10 +105,17 @@ pub fn list_marketplaces() -> Vec<MarketplaceInfo> {
 
 /// List all plugins across all marketplaces, enriched with install counts and components.
 pub fn list_marketplace_plugins() -> Vec<MarketplacePlugin> {
-    let marketplaces = list_marketplaces();
+    list_marketplace_plugins_for_app(ManagedCliApp::Claude)
+}
+
+pub fn list_marketplace_plugins_for_app(app: ManagedCliApp) -> Vec<MarketplacePlugin> {
+    let marketplaces = list_marketplaces_for_app(app);
 
     // Load install counts
-    let counts_path = plugins_dir().join("install-counts-cache.json");
+    let counts_path = match plugins_dir_for_app(app) {
+        Ok(dir) => dir.join("install-counts-cache.json"),
+        Err(_) => PathBuf::new(),
+    };
     let counts_map: HashMap<String, u64> = read_json::<InstallCountsCache>(&counts_path)
         .map(|cache| {
             cache
@@ -156,7 +173,8 @@ pub fn list_marketplace_plugins() -> Vec<MarketplacePlugin> {
     });
 
     log::debug!(
-        "[plugins] list_marketplace_plugins: {} plugins across {} marketplaces",
+        "[plugins] list_marketplace_plugins: app={}, {} plugins across {} marketplaces",
+        app.id(),
         all_plugins.len(),
         marketplaces.len()
     );
@@ -286,19 +304,27 @@ fn scan_commands_dir(
 /// List standalone skills from ~/.claude/skills/*/SKILL.md
 /// and optionally from {cwd}/.claude/skills/*/SKILL.md.
 pub fn list_standalone_skills(cwd: &str) -> Vec<StandaloneSkill> {
+    list_standalone_skills_for_app(ManagedCliApp::Claude, cwd)
+}
+
+pub fn list_standalone_skills_for_app(app: ManagedCliApp, cwd: &str) -> Vec<StandaloneSkill> {
     let mut skills = Vec::new();
 
-    // User-scope skills (~/.claude/skills/)
-    scan_skills_dir(&skills_dir(), "user", &mut skills);
+    // User-scope skills (~/.{app}/skills/)
+    if let Ok(dir) = skills_dir_for_app(app) {
+        scan_skills_dir(&dir, "user", &mut skills);
+    }
 
-    // Project-scope skills ({cwd}/.claude/skills/)
+    // Project-scope skills ({cwd}/.{app}/skills/)
     if !cwd.is_empty() {
-        let project_dir = PathBuf::from(cwd).join(".claude").join("skills");
-        scan_skills_dir(&project_dir, "project", &mut skills);
+        if let Ok(project_dir) = app.project_skills_dir(cwd) {
+            scan_skills_dir(&project_dir, "project", &mut skills);
+        }
     }
 
     log::debug!(
-        "[plugins] list_standalone_skills: found {} skills",
+        "[plugins] list_standalone_skills: app={}, found {} skills",
+        app.id(),
         skills.len()
     );
     skills
@@ -389,9 +415,17 @@ fn parse_skill_frontmatter(path: &Path) -> (String, String) {
 /// Read skill content with path validation (security: prevent arbitrary file reads).
 /// Validates against ~/.claude/skills/, ~/.claude/plugins/, and optionally {cwd}/.claude/skills/.
 pub fn read_skill_content(path: &str, cwd: &str) -> Result<String, String> {
+    read_skill_content_for_app(ManagedCliApp::Claude, path, cwd)
+}
+
+pub fn read_skill_content_for_app(
+    app: ManagedCliApp,
+    path: &str,
+    cwd: &str,
+) -> Result<String, String> {
     log::debug!("[plugins] read_skill_content: path={}, cwd={}", path, cwd);
 
-    let canonical = validate_skill_path(path, cwd)?;
+    let canonical = validate_skill_path_for_app(app, path, cwd)?;
 
     std::fs::read_to_string(&canonical).map_err(|e| format!("Failed to read file: {}", e))
 }
@@ -542,22 +576,14 @@ pub fn validate_skill_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve the skills base directory for a given scope.
-/// - "user" -> ~/.claude/skills/
-/// - "project" -> {cwd}/.claude/skills/
-fn resolve_skill_dir(scope: &str, cwd: &str) -> Result<PathBuf, String> {
+fn resolve_skill_dir_for_app(
+    app: ManagedCliApp,
+    scope: &str,
+    cwd: &str,
+) -> Result<PathBuf, String> {
     match scope {
-        "user" => Ok(skills_dir()),
-        "project" => {
-            if cwd.is_empty() {
-                return Err("Working directory required for project-scope skills".to_string());
-            }
-            let cwd_path = PathBuf::from(cwd);
-            if !cwd_path.is_dir() {
-                return Err(format!("Working directory does not exist: {}", cwd));
-            }
-            Ok(cwd_path.join(".claude").join("skills"))
-        }
+        "user" => skills_dir_for_app(app),
+        "project" => app.project_skills_dir(cwd),
         _ => Err(format!(
             "Invalid scope '{}': must be 'user' or 'project'",
             scope
@@ -565,15 +591,16 @@ fn resolve_skill_dir(scope: &str, cwd: &str) -> Result<PathBuf, String> {
     }
 }
 
-/// Validate that a skill path is within allowed directories.
-/// Allowed: ~/.claude/skills/, ~/.claude/plugins/, or {cwd}/.claude/skills/.
-/// Returns the canonicalized path.
-fn validate_skill_path(path: &str, cwd: &str) -> Result<PathBuf, String> {
+fn validate_skill_path_for_app(
+    app: ManagedCliApp,
+    path: &str,
+    cwd: &str,
+) -> Result<PathBuf, String> {
     let requested = PathBuf::from(path);
     let canonical =
         std::fs::canonicalize(&requested).map_err(|e| format!("Cannot resolve path: {}", e))?;
 
-    let home = crate::storage::teams::claude_home_dir();
+    let home = app.user_dir()?;
     let allowed_skills = match std::fs::canonicalize(home.join("skills")) {
         Ok(p) => p,
         Err(_) => home.join("skills"),
@@ -590,7 +617,7 @@ fn validate_skill_path(path: &str, cwd: &str) -> Result<PathBuf, String> {
 
     // Check project-scope dir
     if !cwd.is_empty() {
-        let project_skills = PathBuf::from(cwd).join(".claude").join("skills");
+        let project_skills = app.project_skills_dir(cwd)?;
         if let Ok(project_canonical) = std::fs::canonicalize(&project_skills) {
             if canonical.starts_with(&project_canonical) {
                 return Ok(canonical);
@@ -610,9 +637,27 @@ pub fn create_skill(
     scope: &str,
     cwd: &str,
 ) -> Result<StandaloneSkill, String> {
+    create_skill_for_app(
+        ManagedCliApp::Claude,
+        name,
+        description,
+        content,
+        scope,
+        cwd,
+    )
+}
+
+pub fn create_skill_for_app(
+    app: ManagedCliApp,
+    name: &str,
+    description: &str,
+    content: &str,
+    scope: &str,
+    cwd: &str,
+) -> Result<StandaloneSkill, String> {
     validate_skill_name(name)?;
 
-    let base_dir = resolve_skill_dir(scope, cwd)?;
+    let base_dir = resolve_skill_dir_for_app(app, scope, cwd)?;
     let skill_dir = base_dir.join(name);
 
     if skill_dir.exists() {
@@ -654,7 +699,16 @@ pub fn create_skill(
 /// Update the content of an existing skill's SKILL.md file.
 /// Path must be within allowed skill directories.
 pub fn update_skill_content(path: &str, content: &str, cwd: &str) -> Result<(), String> {
-    let canonical = validate_skill_path(path, cwd)?;
+    update_skill_content_for_app(ManagedCliApp::Claude, path, content, cwd)
+}
+
+pub fn update_skill_content_for_app(
+    app: ManagedCliApp,
+    path: &str,
+    content: &str,
+    cwd: &str,
+) -> Result<(), String> {
+    let canonical = validate_skill_path_for_app(app, path, cwd)?;
 
     // Verify it's a SKILL.md file
     if canonical.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
@@ -675,7 +729,11 @@ pub fn update_skill_content(path: &str, content: &str, cwd: &str) -> Result<(), 
 /// Delete a standalone skill by removing its entire directory.
 /// `path` should point to the SKILL.md file; the parent directory is removed.
 pub fn delete_skill(path: &str, cwd: &str) -> Result<(), String> {
-    let canonical = validate_skill_path(path, cwd)?;
+    delete_skill_for_app(ManagedCliApp::Claude, path, cwd)
+}
+
+pub fn delete_skill_for_app(app: ManagedCliApp, path: &str, cwd: &str) -> Result<(), String> {
+    let canonical = validate_skill_path_for_app(app, path, cwd)?;
 
     // Verify it's a SKILL.md file
     if canonical.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
