@@ -441,6 +441,15 @@ pub struct AgentSettings {
     /// Custom agent definitions JSON string (passed to --agents flag).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agents_json: Option<String>,
+    /// Optional executable path/command override for native CLIs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_path: Option<String>,
+    /// Extra launch arguments appended before the prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_args: Option<Vec<String>>,
+    /// Native CLI no-review mode. For Gemini this maps to --yolo; for Codex to its bypass flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_mode: Option<bool>,
     pub updated_at: String,
 }
 
@@ -467,6 +476,9 @@ impl AgentSettings {
             effort: None,
             betas: None,
             agents_json: None,
+            command_path: None,
+            extra_args: None,
+            yolo_mode: None,
             updated_at: now_iso(),
         }
     }

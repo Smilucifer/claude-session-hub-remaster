@@ -36,6 +36,7 @@
   import { IS_MAC } from "$lib/utils/platform";
   import { t } from "$lib/i18n/index.svelte";
   import { formatPasteSize } from "$lib/utils/format";
+  import { getAgentFeatures } from "$lib/utils/agent-features";
   import {
     BINARY_ATTACHMENT_TYPES,
     MAX_ATTACHMENTS,
@@ -387,7 +388,7 @@
   let slashSubSelectedIndex = $state(0);
   let activeSlashCmd: CliCommand | null = $state(null);
 
-  let slashEnabled = $derived(agent === "claude" && !!useStreamSession);
+  let slashEnabled = $derived(getAgentFeatures(agent).slashCommandMenu);
   let slashBtnEl: HTMLButtonElement | undefined = $state();
   let savedInputForSlash = $state("");
 

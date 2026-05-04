@@ -17,12 +17,36 @@ function makeDeps(overrides: Partial<AddDirDeps> = {}): AddDirDeps {
 }
 
 describe("executeAddDir", () => {
-  it("non-claude agent shows unsupported message, does not open dialog", async () => {
+  it("unknown agent shows unsupported message, does not open dialog", async () => {
     const deps = makeDeps();
-    await executeAddDir({ agent: "codex", sessionAlive: false, args: "" }, deps);
+    await executeAddDir({ agent: "unknown-agent", sessionAlive: false, args: "" }, deps);
 
     expect(deps.appendOutput).toHaveBeenCalledWith("[chat_addDirUnsupported]");
     expect(deps.openDirectoryDialog).not.toHaveBeenCalled();
+  });
+
+  it("pre-session codex saves selected directory to codex settings", async () => {
+    const deps = makeDeps({
+      openDirectoryDialog: vi.fn().mockResolvedValue("/codex/dir"),
+      getAgentSettings: vi.fn().mockResolvedValue({ add_dirs: [] }),
+    });
+    await executeAddDir({ agent: "codex", sessionAlive: false, args: "" }, deps);
+
+    expect(deps.updateAgentSettings).toHaveBeenCalledWith("codex", {
+      add_dirs: ["/codex/dir"],
+    });
+  });
+
+  it("pre-session gemini saves selected directory to gemini settings", async () => {
+    const deps = makeDeps({
+      openDirectoryDialog: vi.fn().mockResolvedValue("/gemini/dir"),
+      getAgentSettings: vi.fn().mockResolvedValue({ add_dirs: [] }),
+    });
+    await executeAddDir({ agent: "gemini", sessionAlive: false, args: "" }, deps);
+
+    expect(deps.updateAgentSettings).toHaveBeenCalledWith("gemini", {
+      add_dirs: ["/gemini/dir"],
+    });
   });
 
   it("user cancels dialog — no further action", async () => {

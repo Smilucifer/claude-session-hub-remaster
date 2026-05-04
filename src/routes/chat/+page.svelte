@@ -116,6 +116,7 @@
   let _scrollToInFlight = false;
   let showChatScrollHint = $state(false);
   let agentSettings = $state<AgentSettings | null>(null);
+  let agentSettingsLoadSeq = 0;
   let resuming = $state(false);
   /** Suppress "Session ended" flash during tool approval restart cycle. */
   let approving = $state(false);
@@ -149,6 +150,45 @@
 
   /** Cache of last confirmed-clean Anthropic model, used as final fallback. */
   let lastKnownGoodAnthropicModel: string | undefined;
+
+  async function loadAgentSettingsFor(agent: string) {
+    const seq = ++agentSettingsLoadSeq;
+    try {
+      const loaded = await api.getAgentSettings(agent);
+      if (seq !== agentSettingsLoadSeq) return;
+      agentSettings = loaded;
+
+      if (agent !== "claude") {
+        if (!store.run && !store.model && loaded.model) store.model = loaded.model;
+        return;
+      }
+
+      // Read effort from CLI config (~/.claude/settings.json) — the authoritative source.
+      // NOT from agentSettings.effort (that would cause --effort flag at spawn, which
+      // locks effort in memory and prevents live switching via settings.json).
+      try {
+        const cliCfg = await api.getCliConfig();
+        const cliEffort = cliCfg.effortLevel;
+        currentEffort = typeof cliEffort === "string" && cliEffort ? cliEffort : "";
+      } catch {
+        currentEffort = "";
+      }
+      // One-time migration: clear stale agentSettings.effort to prevent --effort at spawn
+      if (loaded?.effort) {
+        api.updateAgentSettings("claude", { effort: "" }).catch(() => {});
+      }
+    } catch (e) {
+      if (seq !== agentSettingsLoadSeq) return;
+      agentSettings = null;
+      dbgWarn("chat", "failed to load agent settings:", e);
+    }
+  }
+
+  $effect(() => {
+    const agent = store.run?.agent ?? store.agent;
+    if (!agent) return;
+    void loadAgentSettingsFor(agent);
+  });
 
   /** Detect if default_model was contaminated by a third-party platform model.
    *  Returns:
@@ -996,25 +1036,7 @@
     } catch (e) {
       dbgWarn("chat", "failed to load settings:", e);
     }
-    try {
-      agentSettings = await api.getAgentSettings("claude");
-      // Read effort from CLI config (~/.claude/settings.json) — the authoritative source.
-      // NOT from agentSettings.effort (that would cause --effort flag at spawn, which
-      // locks effort in memory and prevents live switching via settings.json).
-      try {
-        const cliCfg = await api.getCliConfig();
-        const cliEffort = cliCfg.effortLevel;
-        currentEffort = typeof cliEffort === "string" && cliEffort ? cliEffort : "";
-      } catch {
-        currentEffort = "";
-      }
-      // One-time migration: clear stale agentSettings.effort to prevent --effort at spawn
-      if (agentSettings?.effort) {
-        api.updateAgentSettings("claude", { effort: "" }).catch(() => {});
-      }
-    } catch (e) {
-      dbgWarn("chat", "failed to load agent settings:", e);
-    }
+    void loadAgentSettingsFor(store.run?.agent ?? store.agent);
     // Initialize permission mode from saved settings (before session_init arrives)
     // Agent plan_mode=true overrides user permission_mode (legacy compat)
     if (!store.permissionModeSetByUser) {
@@ -1970,7 +1992,7 @@
     if (persistFailed) return false;
 
     // Sync legacy plan_mode (fire-and-forget)
-    if (seq === permissionModeChangeSeq) {
+    if (seq === permissionModeChangeSeq && store.agent === "claude") {
       api.updateAgentSettings("claude", { plan_mode: newMode === "plan" }).catch((e) => {
         dbgWarn("chat", "plan_mode sync failed:", e);
       });

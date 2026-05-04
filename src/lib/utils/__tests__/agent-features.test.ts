@@ -11,13 +11,22 @@ describe("getAgentFeatures", () => {
     expect(f.addDirAction).toBe(true);
   });
 
-  it("returns minimal features for codex", () => {
+  it("returns native shortcut features for codex", () => {
     const f = getAgentFeatures("codex");
     expect(f.effortSelector).toBe(false);
     expect(f.planModeToggle).toBe(false);
-    expect(f.permissionModeSwitch).toBe(false);
-    expect(f.slashCommandMenu).toBe(false);
-    expect(f.addDirAction).toBe(false);
+    expect(f.permissionModeSwitch).toBe(true);
+    expect(f.slashCommandMenu).toBe(true);
+    expect(f.addDirAction).toBe(true);
+  });
+
+  it("returns native shortcut features for gemini", () => {
+    const f = getAgentFeatures("gemini");
+    expect(f.effortSelector).toBe(false);
+    expect(f.planModeToggle).toBe(false);
+    expect(f.permissionModeSwitch).toBe(true);
+    expect(f.slashCommandMenu).toBe(true);
+    expect(f.addDirAction).toBe(true);
   });
 
   it("returns minimal features for unknown agent", () => {

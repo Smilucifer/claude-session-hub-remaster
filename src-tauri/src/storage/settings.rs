@@ -645,6 +645,27 @@ fn apply_agent_patch(settings: &mut AgentSettings, patch: &serde_json::Value) {
             v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string())
         };
     }
+    if let Some(v) = patch.get("command_path") {
+        settings.command_path = if v.is_null() {
+            None
+        } else {
+            v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string())
+        };
+    }
+    if let Some(v) = patch.get("extra_args") {
+        settings.extra_args = if v.is_null() {
+            None
+        } else {
+            v.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+        };
+    }
+    if let Some(v) = patch.get("yolo_mode") {
+        settings.yolo_mode = if v.is_null() { None } else { v.as_bool() };
+    }
 }
 
 pub fn update_agent_settings(

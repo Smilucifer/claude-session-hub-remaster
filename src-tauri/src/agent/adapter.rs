@@ -33,6 +33,9 @@ pub struct AdapterSettings {
     pub effort: Option<String>,
     pub betas: Vec<String>,
     pub agents_json: Option<String>,
+    pub command_path: Option<String>,
+    pub extra_args: Vec<String>,
+    pub yolo_mode: Option<bool>,
 }
 
 /// Map OpenCovibe permission mode names to Claude CLI `--permission-mode` values.
@@ -138,6 +141,9 @@ pub fn build_adapter_settings(
     let effort = agent.effort.clone();
     let betas = agent.betas.clone().unwrap_or_default();
     let agents_json = agent.agents_json.clone();
+    let command_path = agent.command_path.clone();
+    let extra_args = agent.extra_args.clone().unwrap_or_default();
+    let yolo_mode = agent.yolo_mode;
 
     // Mutual exclusion: system_prompt takes priority over append_system_prompt
     if system_prompt.is_some() && append_system_prompt.is_some() {
@@ -185,6 +191,9 @@ pub fn build_adapter_settings(
         effort,
         betas,
         agents_json,
+        command_path,
+        extra_args,
+        yolo_mode,
     }
 }
 
@@ -365,6 +374,9 @@ mod tests {
             effort: None,
             betas: vec![],
             agents_json: None,
+            command_path: None,
+            extra_args: vec![],
+            yolo_mode: None,
         }
     }
 

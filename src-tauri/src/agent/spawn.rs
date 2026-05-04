@@ -1,5 +1,24 @@
 use crate::agent::adapter::{self, AdapterSettings};
 
+fn native_command(default_command: &str, settings: &AdapterSettings) -> String {
+    settings
+        .command_path
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(default_command)
+        .to_string()
+}
+
+fn native_yolo_enabled(settings: &AdapterSettings) -> bool {
+    if settings.yolo_mode.unwrap_or(false) {
+        return true;
+    }
+    matches!(
+        settings.permission_mode.as_deref(),
+        Some("bypassPermissions" | "dontAsk" | "yolo" | "auto_all")
+    )
+}
+
 /// Build the command + args for a given agent (pipe-exec mode, not stream session)
 pub fn build_agent_command(
     agent: &str,
@@ -33,17 +52,28 @@ pub fn build_agent_command(
                 "--json".to_string(),
                 "--skip-git-repo-check".to_string(),
             ];
+            if native_yolo_enabled(settings) {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+            }
             if let Some(ref m) = settings.model {
                 if !m.is_empty() {
                     args.push("--model".to_string());
                     args.push(m.to_string());
                 }
             }
+            for dir in &settings.add_dirs {
+                args.push("--add-dir".to_string());
+                args.push(dir.to_string());
+            }
+            if settings.no_session_persistence {
+                args.push("--ephemeral".to_string());
+            }
+            args.extend(settings.extra_args.iter().cloned());
             if !prompt.is_empty() {
                 args.push(prompt.to_string());
             }
             log::debug!("[spawn] codex command: codex {}", args.join(" "));
-            Ok(("codex".to_string(), args))
+            Ok((native_command("codex", settings), args))
         }
         "gemini" => {
             let mut args: Vec<String> = vec![];
@@ -55,12 +85,20 @@ pub fn build_agent_command(
             }
             args.push("--output-format".to_string());
             args.push("text".to_string());
+            if native_yolo_enabled(settings) {
+                args.push("--yolo".to_string());
+            }
+            for dir in &settings.add_dirs {
+                args.push("--include-directories".to_string());
+                args.push(dir.to_string());
+            }
+            args.extend(settings.extra_args.iter().cloned());
             if !prompt.is_empty() {
                 args.push("-p".to_string());
                 args.push(prompt.to_string());
             }
             log::debug!("[spawn] gemini command: gemini {}", args.join(" "));
-            Ok(("gemini".to_string(), args))
+            Ok((native_command("gemini", settings), args))
         }
         _ => Err(format!(
             "Unsupported agent: {}. Supported: claude, codex, gemini",
@@ -93,6 +131,9 @@ mod tests {
             effort: None,
             betas: vec![],
             agents_json: None,
+            command_path: None,
+            extra_args: vec![],
+            yolo_mode: None,
         }
     }
 
@@ -118,5 +159,37 @@ mod tests {
                 "Explain this repo"
             ]
         );
+    }
+
+    #[test]
+    fn builds_codex_yolo_and_add_dir_args() {
+        let mut s = settings(Some("gpt-5.5"));
+        s.add_dirs = vec!["D:/shared".to_string()];
+        s.yolo_mode = Some(true);
+
+        let (command, args) =
+            build_agent_command("codex", "Fix it", &s, true).expect("codex command");
+
+        assert_eq!(command, "codex");
+        assert!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        assert!(args.windows(2).any(|w| w == ["--add-dir", "D:/shared"]));
+        assert!(args.windows(2).any(|w| w == ["--model", "gpt-5.5"]));
+        assert_eq!(args.last().map(String::as_str), Some("Fix it"));
+    }
+
+    #[test]
+    fn builds_gemini_yolo_and_include_directories_args() {
+        let mut s = settings(Some("gemini-2.5-pro"));
+        s.add_dirs = vec!["D:/shared".to_string()];
+        s.yolo_mode = Some(true);
+
+        let (_command, args) =
+            build_agent_command("gemini", "Explain this repo", &s, true).expect("gemini command");
+
+        assert!(args.contains(&"--yolo".to_string()));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--include-directories", "D:/shared"]));
+        assert_eq!(args.last().map(String::as_str), Some("Explain this repo"));
     }
 }

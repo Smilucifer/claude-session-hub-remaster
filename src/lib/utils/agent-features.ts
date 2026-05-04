@@ -18,12 +18,18 @@ const CLAUDE_FEATURES: AgentFeatures = {
 const CODEX_FEATURES: AgentFeatures = {
   effortSelector: false,
   planModeToggle: false,
+  permissionModeSwitch: true,
+  slashCommandMenu: true,
+  addDirAction: true,
+};
+
+const MINIMAL_FEATURES: AgentFeatures = {
+  effortSelector: false,
+  planModeToggle: false,
   permissionModeSwitch: false,
   slashCommandMenu: false,
   addDirAction: false,
 };
-
-const MINIMAL_FEATURES: AgentFeatures = { ...CODEX_FEATURES };
 
 const FEATURES_MAP: Record<string, AgentFeatures> = {
   claude: CLAUDE_FEATURES,

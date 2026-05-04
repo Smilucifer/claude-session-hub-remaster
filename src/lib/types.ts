@@ -385,6 +385,9 @@ export interface AgentSettings {
   effort?: string;
   betas?: string[];
   agents_json?: string;
+  command_path?: string;
+  extra_args?: string[];
+  yolo_mode?: boolean;
   updated_at: string;
 }
 

@@ -233,12 +233,12 @@ pub async fn send_chat_message(
     let run_id_clone = run_id.clone();
     let agent_clone = run.agent.clone();
     let cwd = run.cwd.clone();
-    let inherited_path = std::env::var("PATH").unwrap_or_default();
+    let inherited_path = crate::agent::claude_stream::augmented_path();
     let spawn_env_plan = resolve_spawn_env_plan(
         Path::new(&cwd),
         false,
         user_settings.windows_msvc_env_mode,
-        SpawnPathPolicy::InheritUnlessInjected,
+        SpawnPathPolicy::AlwaysUseAugmentedPath,
         Some(&inherited_path),
     );
     log_pipe_msvc_plan(&spawn_env_plan.status, &spawn_env_plan.warnings);

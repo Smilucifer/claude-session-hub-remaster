@@ -5,6 +5,7 @@
   import { loadCliInfo, KeybindingStore } from "$lib/stores";
   import type {
     UserSettings,
+    AgentSettings,
     WindowsMsvcEnvMode,
     WindowsMsvcEnvStatus,
     CliConfigSettingDef,
@@ -128,6 +129,51 @@
     gemini: null,
   });
   let connectionCliChecking = $state(false);
+  let nativeAgentSettings = $state<Record<ConnectionAgentTab, AgentSettings | null>>({
+    claude: null,
+    codex: null,
+    gemini: null,
+  });
+  let nativeSettingsLoading = $state<Record<ConnectionAgentTab, boolean>>({
+    claude: false,
+    codex: false,
+    gemini: false,
+  });
+  let nativeSettingsSaving = $state<Record<ConnectionAgentTab, boolean>>({
+    claude: false,
+    codex: false,
+    gemini: false,
+  });
+  let nativeCommandPath = $state<Record<ConnectionAgentTab, string>>({
+    claude: "",
+    codex: "",
+    gemini: "",
+  });
+  let nativeModel = $state<Record<ConnectionAgentTab, string>>({
+    claude: "",
+    codex: "",
+    gemini: "",
+  });
+  let nativeExtraArgs = $state<Record<ConnectionAgentTab, string>>({
+    claude: "",
+    codex: "",
+    gemini: "",
+  });
+  let nativeAddDirs = $state<Record<ConnectionAgentTab, string[]>>({
+    claude: [],
+    codex: [],
+    gemini: [],
+  });
+  let nativeYoloMode = $state<Record<ConnectionAgentTab, boolean>>({
+    claude: false,
+    codex: false,
+    gemini: false,
+  });
+  let nativeNoSessionPersistence = $state<Record<ConnectionAgentTab, boolean>>({
+    claude: false,
+    codex: false,
+    gemini: false,
+  });
 
   async function refreshConnectionCliChecks() {
     connectionCliChecking = true;
@@ -145,6 +191,89 @@
       CliCheckResult | null
     >;
     connectionCliChecking = false;
+  }
+
+  $effect(() => {
+    const agent = connectionAgentTab;
+    if (agent !== "claude" && !nativeAgentSettings[agent] && !nativeSettingsLoading[agent]) {
+      void refreshNativeAgentSettings(agent);
+    }
+  });
+
+  function parseLineList(text: string): string[] {
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  }
+
+  function loadNativeAgentDraft(agent: ConnectionAgentTab, settings: AgentSettings) {
+    nativeAgentSettings = { ...nativeAgentSettings, [agent]: settings };
+    nativeCommandPath = { ...nativeCommandPath, [agent]: settings.command_path ?? "" };
+    nativeModel = { ...nativeModel, [agent]: settings.model ?? "" };
+    nativeExtraArgs = {
+      ...nativeExtraArgs,
+      [agent]: (settings.extra_args ?? []).join("\n"),
+    };
+    nativeAddDirs = { ...nativeAddDirs, [agent]: settings.add_dirs ?? [] };
+    nativeYoloMode = { ...nativeYoloMode, [agent]: settings.yolo_mode ?? false };
+    nativeNoSessionPersistence = {
+      ...nativeNoSessionPersistence,
+      [agent]: settings.no_session_persistence ?? false,
+    };
+  }
+
+  async function refreshNativeAgentSettings(agent: ConnectionAgentTab) {
+    if (nativeSettingsLoading[agent]) return;
+    nativeSettingsLoading = { ...nativeSettingsLoading, [agent]: true };
+    try {
+      const settings = await api.getAgentSettings(agent);
+      loadNativeAgentDraft(agent, settings);
+    } catch (e) {
+      dbgWarn("settings", "failed to load native agent settings", { agent, error: e });
+    } finally {
+      nativeSettingsLoading = { ...nativeSettingsLoading, [agent]: false };
+    }
+  }
+
+  async function saveNativeAgentSettings(agent: ConnectionAgentTab) {
+    if (nativeSettingsSaving[agent]) return;
+    nativeSettingsSaving = { ...nativeSettingsSaving, [agent]: true };
+    try {
+      const patch: Record<string, unknown> = {
+        command_path: nativeCommandPath[agent].trim() || null,
+        model: nativeModel[agent].trim() || null,
+        extra_args: parseLineList(nativeExtraArgs[agent]),
+        add_dirs: nativeAddDirs[agent].map((dir) => dir.trim()).filter((dir) => dir.length > 0),
+        yolo_mode: nativeYoloMode[agent],
+        no_session_persistence: nativeNoSessionPersistence[agent],
+      };
+      const settings = await api.updateAgentSettings(agent, patch as Partial<AgentSettings>);
+      loadNativeAgentDraft(agent, settings);
+      generalSaved = true;
+      setTimeout(() => (generalSaved = false), 1500);
+    } catch (e) {
+      dbgWarn("settings", "failed to save native agent settings", { agent, error: e });
+    } finally {
+      nativeSettingsSaving = { ...nativeSettingsSaving, [agent]: false };
+    }
+  }
+
+  function updateNativeAddDir(agent: ConnectionAgentTab, index: number, value: string) {
+    const next = nativeAddDirs[agent].slice();
+    next[index] = value;
+    nativeAddDirs = { ...nativeAddDirs, [agent]: next };
+  }
+
+  function addNativeAddDir(agent: ConnectionAgentTab) {
+    nativeAddDirs = { ...nativeAddDirs, [agent]: [...nativeAddDirs[agent], ""] };
+  }
+
+  function removeNativeAddDir(agent: ConnectionAgentTab, index: number) {
+    nativeAddDirs = {
+      ...nativeAddDirs,
+      [agent]: nativeAddDirs[agent].filter((_, i) => i !== index),
+    };
   }
 
   // Derive merged platform list (static presets + dynamic custom endpoints)
@@ -1212,6 +1341,9 @@
       dbgWarn("settings", "error", e);
     }
     void refreshConnectionCliChecks();
+    void refreshNativeAgentSettings("claude");
+    void refreshNativeAgentSettings("codex");
+    void refreshNativeAgentSettings("gemini");
     // Load auth overview
     api
       .getAuthOverview()
@@ -2689,6 +2821,11 @@
           {:else}
             {@const activeNativeTab = connectionAgentTabs.find((tab) => tab.id === connectionAgentTab)}
             {@const cliCheck = connectionCliChecks[connectionAgentTab]}
+            {@const nativeLoading = nativeSettingsLoading[connectionAgentTab]}
+            {@const nativeSaving = nativeSettingsSaving[connectionAgentTab]}
+            {@const defaultNativeCommand = connectionAgentTab === "codex" ? "codex" : "gemini"}
+            {@const nativeCommandDisplay = nativeCommandPath[connectionAgentTab].trim() ||
+              defaultNativeCommand}
             <div class="space-y-4 rounded-lg border border-border/50 p-4">
               <div class="flex items-start justify-between gap-4">
                 <div>
@@ -2749,6 +2886,234 @@
                   <p class="mt-2 text-xs text-muted-foreground">
                     {t("settings_connection_nativeConfigHint")}
                   </p>
+                </div>
+              </div>
+
+              <div class="space-y-4 rounded-md border border-border/60 bg-muted/10 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                      Launch Settings
+                    </p>
+                    <p class="mt-1 text-xs text-muted-foreground">
+                      These settings are saved per native CLI and used when a new session starts.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                    disabled={nativeLoading || nativeSaving}
+                    onclick={() => void refreshNativeAgentSettings(connectionAgentTab)}
+                  >
+                    {nativeLoading ? t("common_loading") : t("common_refresh")}
+                  </button>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p class="text-sm font-medium mb-1.5">CLI executable</p>
+                    <Input
+                      value={nativeCommandPath[connectionAgentTab]}
+                      placeholder={defaultNativeCommand}
+                      class="font-mono text-xs"
+                      oninput={(e) => {
+                        nativeCommandPath = {
+                          ...nativeCommandPath,
+                          [connectionAgentTab]: (e.currentTarget as HTMLInputElement).value,
+                        };
+                      }}
+                      onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
+                    />
+                    <p class="mt-1 text-xs text-muted-foreground">
+                      Leave empty to use <code>{defaultNativeCommand}</code> from PATH, or set a full
+                      CLI path.
+                    </p>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium mb-1.5">Default model</p>
+                    <Input
+                      value={nativeModel[connectionAgentTab]}
+                      placeholder={connectionAgentTab === "codex" ? "gpt-5.5" : "gemini-2.5-pro"}
+                      class="font-mono text-xs"
+                      oninput={(e) => {
+                        nativeModel = {
+                          ...nativeModel,
+                          [connectionAgentTab]: (e.currentTarget as HTMLInputElement).value,
+                        };
+                      }}
+                      onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
+                    />
+                    <p class="mt-1 text-xs text-muted-foreground">
+                      Empty means the native CLI decides from its own config.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2">
+                  <button
+                    type="button"
+                    class="rounded-md border p-3 text-left transition-colors {nativeYoloMode[
+                      connectionAgentTab
+                    ]
+                      ? 'border-amber-500/40 bg-amber-500/10'
+                      : 'border-border/60 hover:bg-accent'}"
+                    onclick={() => {
+                      nativeYoloMode = {
+                        ...nativeYoloMode,
+                        [connectionAgentTab]: !nativeYoloMode[connectionAgentTab],
+                      };
+                      void saveNativeAgentSettings(connectionAgentTab);
+                    }}
+                  >
+                    <span class="flex items-center gap-2 text-sm font-medium">
+                      <span
+                        class="h-2 w-2 rounded-full {nativeYoloMode[connectionAgentTab]
+                          ? 'bg-amber-500'
+                          : 'bg-muted-foreground/40'}"
+                      ></span>
+                      No-review mode
+                    </span>
+                    <span class="mt-1 block text-xs text-muted-foreground">
+                      {connectionAgentTab === "gemini"
+                        ? "Launches Gemini with --yolo."
+                        : "Launches Codex with its bypass-approvals flag."}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md border p-3 text-left transition-colors {nativeNoSessionPersistence[
+                      connectionAgentTab
+                    ]
+                      ? 'border-primary/40 bg-primary/10'
+                      : 'border-border/60 hover:bg-accent'}"
+                    onclick={() => {
+                      nativeNoSessionPersistence = {
+                        ...nativeNoSessionPersistence,
+                        [connectionAgentTab]: !nativeNoSessionPersistence[connectionAgentTab],
+                      };
+                      void saveNativeAgentSettings(connectionAgentTab);
+                    }}
+                  >
+                    <span class="flex items-center gap-2 text-sm font-medium">
+                      <span
+                        class="h-2 w-2 rounded-full {nativeNoSessionPersistence[
+                          connectionAgentTab
+                        ]
+                          ? 'bg-primary'
+                          : 'bg-muted-foreground/40'}"
+                      ></span>
+                      Ephemeral session
+                    </span>
+                    <span class="mt-1 block text-xs text-muted-foreground">
+                      Avoids resume history where the native CLI supports it.
+                    </span>
+                  </button>
+                </div>
+
+                <div>
+                  <p class="text-sm font-medium mb-1.5">Included directories</p>
+                  <div class="space-y-1.5">
+                    {#each nativeAddDirs[connectionAgentTab] as dir, i}
+                      <div class="flex gap-1.5">
+                        <Input
+                          value={dir}
+                          placeholder="D:\work\shared"
+                          class="flex-1 font-mono text-xs"
+                          oninput={(e) =>
+                            updateNativeAddDir(
+                              connectionAgentTab,
+                              i,
+                              (e.currentTarget as HTMLInputElement).value,
+                            )}
+                          onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
+                        />
+                        <button
+                          type="button"
+                          class="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={t("settings_remote_delete")}
+                          onclick={() => {
+                            removeNativeAddDir(connectionAgentTab, i);
+                            void saveNativeAgentSettings(connectionAgentTab);
+                          }}
+                        >
+                          <svg
+                            class="h-3.5 w-3.5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
+                  <button
+                    type="button"
+                    class="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    onclick={() => addNativeAddDir(connectionAgentTab)}
+                  >
+                    <svg
+                      class="h-3 w-3"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M12 5v14" /><path d="M5 12h14" />
+                    </svg>
+                    Add directory
+                  </button>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    Codex uses <code>--add-dir</code>; Gemini uses <code>--include-directories</code>.
+                  </p>
+                </div>
+
+                <div>
+                  <label for="native-extra-args" class="text-sm font-medium mb-1.5 block"
+                    >Extra arguments</label
+                  >
+                  <textarea
+                    id="native-extra-args"
+                    value={nativeExtraArgs[connectionAgentTab]}
+                    placeholder="One CLI argument per line"
+                    rows="3"
+                    class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                    oninput={(e) => {
+                      nativeExtraArgs = {
+                        ...nativeExtraArgs,
+                        [connectionAgentTab]: (e.currentTarget as HTMLTextAreaElement).value,
+                      };
+                    }}
+                    onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
+                  ></textarea>
+                  <p class="mt-1 text-xs text-muted-foreground">
+                    Appended before the prompt. Use this for native CLI flags not yet modeled above.
+                  </p>
+                </div>
+
+                <div class="rounded-md border border-border/60 bg-background/70 p-3">
+                  <p class="text-xs font-medium">{t("settings_connection_launchCommand")}</p>
+                  <code
+                    class="mt-2 block whitespace-pre-wrap rounded bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-foreground"
+                  >
+                    {nativeCommandDisplay} {connectionAgentTab === "codex"
+                      ? "exec --json --skip-git-repo-check"
+                      : "--output-format text -p <prompt>"}
+                    {nativeYoloMode[connectionAgentTab]
+                      ? connectionAgentTab === "gemini"
+                        ? " --yolo"
+                        : " --dangerously-bypass-approvals-and-sandbox"
+                      : ""}
+                  </code>
+                  {#if nativeSaving}
+                    <p class="mt-2 text-xs text-muted-foreground">{t("common_loading")}</p>
+                  {/if}
                 </div>
               </div>
             </div>
