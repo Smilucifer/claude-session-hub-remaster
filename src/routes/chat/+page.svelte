@@ -28,6 +28,7 @@
     ScreenshotPayload,
     SessionInfoData,
     TimelineEntry,
+    CliCheckResult,
   } from "$lib/types";
   import { PLATFORM_PRESETS, findCredential } from "$lib/utils/platform-presets";
   import { IS_WEBKIT } from "$lib/utils/platform";
@@ -42,7 +43,7 @@
 
   const EMPTY_BATCH_MAP = new Map();
   const EMPTY_BURST_MAP = new Map() as Map<number, ToolBurst>;
-  const CHAT_AGENTS = new Set(["claude", "codex", "gemini"]);
+  const CHAT_AGENTS = new Set(["claude", "codex", "gemini", "deepseek", "glm"]);
   import XTerminal from "$lib/components/XTerminal.svelte";
   import ChatMessage from "$lib/components/ChatMessage.svelte";
   import InlineToolCard from "$lib/components/InlineToolCard.svelte";
@@ -92,6 +93,7 @@
   import { mapSettled } from "$lib/utils/async-utils";
   import { getPipeExecTerminalReplayKey } from "$lib/utils/pipe-terminal-replay";
   import { findLastContinuableRun } from "$lib/utils/continuable-run";
+  import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
   import { uuid } from "$lib/utils/uuid";
   import RewindModal from "$lib/components/RewindModal.svelte";
   import type { ElementSelection } from "$lib/types";
@@ -146,6 +148,11 @@
   let preloadGen = 0;
   /** Local proxy running statuses for AuthSourceBadge. */
   let localProxyStatuses = $state<Record<string, { running: boolean; needsAuth: boolean }>>({});
+  let startupCliChecks = $state<Record<"claude" | "codex" | "gemini", CliCheckResult | null>>({
+    claude: null,
+    codex: null,
+    gemini: null,
+  });
 
   // ── Preview state ──
   let previewInstanceId = $state("");
@@ -225,13 +232,22 @@
   }
 
   function handleAgentChange(agent: string) {
+    handleProviderChange(agent);
+  }
+
+  function handleProviderChange(providerId: string) {
     if (store.run) return;
+    const provider = getPhase7Provider(providerId);
+    const agent = provider.executionAgent;
     store.agent = agent;
+    store.platformId = provider.platformId ?? (provider.id === "claude" ? "anthropic" : null);
     store.connectionProfileId = null;
     store.permissionMode = "";
     store.permissionModeSetByUser = false;
     store.permissionModePersistFailed = false;
-    if (agent !== "claude") {
+    if (provider.mode === "claude_compatible_api") {
+      store.model = provider.defaultModel ?? "";
+    } else if (agent !== "claude") {
       store.model = "";
     } else if (!store.model && settings?.default_model && store.platformId === "anthropic") {
       store.model = settings.default_model;
@@ -250,6 +266,53 @@
         store.permissionModeSetByUser = true;
       }
     });
+  }
+
+  async function refreshStartupCliChecks() {
+    const entries = await Promise.all(
+      (["claude", "codex", "gemini"] as const).map(async (agent) => {
+        try {
+          return [agent, await api.checkAgentCli(agent)] as const;
+        } catch {
+          return [agent, { agent, found: false }] as const;
+        }
+      }),
+    );
+    startupCliChecks = Object.fromEntries(entries) as Record<
+      "claude" | "codex" | "gemini",
+      CliCheckResult | null
+    >;
+  }
+
+  function providerPermissionLabel(providerId: string): string {
+    const provider = getPhase7Provider(providerId);
+    if (provider.defaultPermissionMode === "dangerously_bypass") {
+      return "--dangerously-bypass-approvals-and-sandbox";
+    }
+    if (provider.defaultPermissionMode === "yolo") return "yolo";
+    return "bypass";
+  }
+
+  function providerConfigStatus(providerId: string): string {
+    const provider = getPhase7Provider(providerId);
+    if (provider.mode === "official_cli") {
+      const check = startupCliChecks[provider.executionAgent];
+      if (!check) return "CLI · 检测中";
+      if (!check.found) return "CLI · 未检测到";
+      return `CLI · 已检测${check.version ? ` · ${check.version}` : ""}`;
+    }
+    const cred = provider.platformId
+      ? findCredential(settings?.platform_credentials ?? [], provider.platformId)
+      : undefined;
+    const hasKey = !!cred?.api_key;
+    if (provider.id === "glm") {
+      const model = cred?.models?.[0] ?? provider.defaultModel ?? "";
+      const baseUrl = cred?.base_url ?? provider.defaultBaseUrl ?? "";
+      return `API · ${hasKey ? "已配置 Key" : "未配置 Key"} · ${model || "未配置模型"} · ${
+        baseUrl || "未配置 URL"
+      }`;
+    }
+    return `API · ${hasKey ? "已配置 Key" : "未配置 Key"}`;
   }
 
   function handleConnectionProfileChange(profileId: string) {
@@ -788,16 +851,22 @@
   let welcomeVisible = $derived(
     store.timeline.length === 0 && !store.streamingText && !store.run && store.phase !== "loading",
   );
-  let startupConnectionProfiles = $derived(
+  let activeProviderId = $derived(providerIdForRun(store.agent, store.platformId));
+  let activeProvider = $derived(getPhase7Provider(activeProviderId));
+  let _startupConnectionProfiles = $derived(
     (settings?.connection_profiles ?? []).filter(
       (profile) => profile.enabled !== false && profile.agent === store.agent,
     ),
   );
-  let hasStartupConnectionEntry = $derived(store.agent !== "claude" || !!authOverview);
-  let hasHeroMetaItems = $derived(!!cliVersionInfo?.installed || remoteHosts.length > 0);
+  let hasStartupConnectionEntry = $derived(
+    activeProvider.mode !== "official_cli" || store.agent !== "claude" || !!authOverview,
+  );
+  let hasHeroMetaItems = $derived(
+    activeProvider.id === "claude" && (!!cliVersionInfo?.installed || remoteHosts.length > 0),
+  );
 
   $effect(() => {
-    lastContinuableRun = findLastContinuableRun(continuableRunCandidates, store.agent);
+    lastContinuableRun = findLastContinuableRun(continuableRunCandidates, activeProviderId);
   });
 
   let inputBlockedByPermission = $derived(store.hasPendingPermission || store.hasElicitation);
@@ -1077,6 +1146,7 @@
         .catch(() => {});
       // Detect local proxy statuses for AuthSourceBadge
       checkAllLocalProxies();
+      refreshStartupCliChecks();
     } catch (e) {
       dbgWarn("chat", "failed to load settings:", e);
     }
@@ -3617,7 +3687,7 @@
 {/snippet}
 
 {#snippet startupConnectionEntry()}
-  {#if store.agent === "claude"}
+  {#if activeProvider.id === "claude"}
     <AuthSourceBadge
       {authOverview}
       authSourceLabel={store.authSourceLabel}
@@ -3632,18 +3702,25 @@
       {localProxyStatuses}
       variant="hero"
     />
-  {:else}
-    <select
-      value={store.connectionProfileId ?? ""}
-      class="max-w-[180px] rounded-md border border-border/50 bg-background px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-ring"
-      title={t("chat_connectionProfile")}
-      onchange={(e) => handleConnectionProfileChange((e.currentTarget as HTMLSelectElement).value)}
+    <span
+      class="rounded-md border border-border/50 bg-background px-2 py-1 text-xs text-muted-foreground"
     >
-      <option value="">{t("chat_defaultConnection")}</option>
-      {#each startupConnectionProfiles as profile}
-        <option value={profile.id}>{profile.label}</option>
-      {/each}
-    </select>
+      默认权限 · {providerPermissionLabel(activeProviderId)}
+    </span>
+  {:else if activeProvider.mode === "official_cli"}
+    <span
+      class="rounded-md border border-border/50 bg-background px-2 py-1 text-xs text-muted-foreground"
+    >
+      {providerConfigStatus(activeProviderId)} · {providerPermissionLabel(activeProviderId)}
+    </span>
+  {:else}
+    <span
+      class="rounded-md border border-border/50 bg-background px-2 py-1 text-xs text-muted-foreground"
+    >
+      {providerConfigStatus(activeProviderId)} · CC session · {providerPermissionLabel(
+        activeProviderId,
+      )}
+    </span>
   {/if}
 {/snippet}
 
@@ -4753,6 +4830,7 @@
       <PromptInput
         bind:this={promptRef}
         agent={store.agent}
+        providerId={activeProviderId}
         running={store.isActivelyRunning}
         disabled={inputBlockedByPermission}
         pendingPermission={store.hasInlinePermission}
@@ -4780,6 +4858,7 @@
         onSend={sendMessage}
         onBtwSend={handleBtwSend}
         onAgentChange={handleAgentChange}
+        onProviderChange={handleProviderChange}
         onInterrupt={() => store.interrupt()}
         onModelSwitch={handleModelChange}
         onPermissionModeChange={store.features.permissionModeSwitch

@@ -85,19 +85,19 @@ Currently useful for:
 - Creating a Research Room that fans out one research topic to multiple active participants.
 - Research Room writes a room-local structured `research/artifact.json` artifact for the latest research turn, appends artifact history to `research/artifacts.jsonl`, and surfaces `[fact]`, `[decision]`, and `[lesson]` lines as Arena Memory candidates.
 
-### Codex, Gemini, and Connection Profiles
+### Providers and CLI Authentication
 
-普通聊天入口可以从底部 agent selector 或 Command Palette 切换到 Claude、Codex、Gemini。Claude 使用 stream session；Codex 走原生 `codex exec --skip-git-repo-check` pipe mode；Gemini 走原生 `gemini --output-format text -p` pipe mode。Codex / Gemini 启动页与 Claude 保持一致，只提供继续可用会话和选择接入方式的入口，不再展示示例 prompt。Codex / Gemini 的输出默认按聊天时间线渲染，历史回放会保留多轮 `user -> assistant` 顺序，而不是显示为终端 dump。
+普通聊天入口和会议室入口正在统一为五个 provider：Claude、Codex、Gemini、DeepSeek、GLM。Claude、Codex、Gemini 使用官方 CLI 认证；Codex 启动命令不使用 `exec`，并默认带 `--dangerously-bypass-approvals-and-sandbox`；Gemini 默认使用 yolo approval mode。DeepSeek 和 GLM 作为一等 provider 显示，但执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。
 
-The normal chat entry can switch between Claude, Codex, and Gemini from the bottom agent selector or Command Palette. Claude uses stream sessions; Codex uses native `codex exec --skip-git-repo-check` pipe mode; Gemini uses native `gemini --output-format text -p` pipe mode. Codex / Gemini startup pages now match Claude's entry model: continue a supported previous session or choose a connection profile, without example-prompt shortcuts. Codex / Gemini output renders as the normal chat timeline by default, and history replay preserves multi-turn `user -> assistant` order instead of showing a terminal dump.
+The chat and room entries are being unified around five providers: Claude, Codex, Gemini, DeepSeek, and GLM. Claude, Codex, and Gemini use official CLI authentication. Codex launches without `exec` and defaults to `--dangerously-bypass-approvals-and-sandbox`; Gemini defaults to yolo approval mode. DeepSeek and GLM are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`.
 
-Settings provides separate connection panels for CC / Codex / Gemini. Codex and Gemini use the same CLI Auth / App API Key card pattern as CC, while keeping their native launch settings and No-review mode. Saved connection profiles can use CLI authentication or app-managed API keys, and both normal chat and Room creation can launch from a selected saved connection. Room project paths are selected through the folder picker and then shared by all three fixed Roundtable seats.
+设置页正在简化为五个模型行，不再为 Codex/Gemini 提供自定义 API key、base URL 或保存登录方式。DeepSeek 只需要官方 API key；GLM 支持 API key、base URL 和 model。当前 Phase 7 仍在实现 Codex/Gemini 原生交互适配器；在完成前，不能把“CLI 已启动”视为和 Claude Code 一样的解析后会话渲染。
 
-Settings 为 CC / Codex / Gemini 提供独立连接配置页。Codex 和 Gemini 使用与 CC 一致的 CLI Auth / App API Key 卡片模式，同时保留各自的原生命令设置和 No-review mode。保存的接入方式可以使用 CLI 认证或 App 管理的 API key；普通聊天和 Room 创建都可以从已保存接入方式启动。Room 项目路径通过文件夹选择器选择，并由三个固定 Roundtable seat 共享。
+The settings page is being simplified to five model rows. Codex/Gemini no longer expose custom API key, base URL, or saved login method controls. DeepSeek needs only its official API key; GLM supports API key, base URL, and model. Phase 7 is still implementing the native Codex/Gemini interaction adapter; until that is complete, CLI launch alone is not considered Claude-like parsed conversation rendering.
 
-Rooms can mix Claude Code stream-session participants with native Codex and Gemini pipe-exec participants. Claude Code profiles still support cross-API / cross-model seats through `platform_id`. Add profiles under `user.cc_agent_profiles` in `~/.opencovibe/settings.json`, without replacing the other fields in that file:
+Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. DeepSeek/GLM should keep provider identity separate from the Claude execution agent:
 
-会议室现在可以混用 Claude Code stream session 参与者，以及原生 Codex / Gemini pipe-exec 参与者。Claude Code profile 仍可通过 `platform_id` 接不同 API / 不同模型。把 profile 写到 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles`，不要覆盖文件里的其他字段：
+为了向后兼容，Claude-compatible API profile 仍可保留在 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles` 下。DeepSeek/GLM 应保持 provider identity 和 Claude execution agent 分离：
 
 ```json
 {
@@ -146,9 +146,9 @@ Rooms can mix Claude Code stream-session participants with native Codex and Gemi
 }
 ```
 
-`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。`platform_id` 仅用于 Claude Code 参与者，并对应 Settings 里已有的 platform credential / provider id。`model` 会作为该 participant 的 per-run model snapshot；`prompt`、`label`、`role` 会预填 Room 的新 participant 表单。`connection_profile_id` 可绑定一个保存的接入方式；未指定时使用对应 agent 的默认连接设置。项目路径从 Room 创建时的文件夹选择器继承。
+`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。DeepSeek/GLM 通过 `agent: "claude"` 加 `platform_id` 表达。`model` 只应在用户明确选择模型或 API provider 需要模型时作为 per-run snapshot；不要把官方 CLI provider 的展示默认值强塞进启动参数。
 
-`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. `platform_id` only applies to Claude Code participants and should match an existing platform credential / provider id in Settings. `model` becomes the participant run's per-run model snapshot; `prompt`, `label`, and `role` prefill the Room new participant form. `connection_profile_id` can bind a saved connection profile; omitted values use the agent's default connection settings. The project path is inherited from the Room-level folder picker.
+`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. DeepSeek/GLM are represented as `agent: "claude"` plus `platform_id`. `model` should become a per-run snapshot only when explicitly selected by the user or required by an API provider; do not inject display defaults into official CLI launches.
 
 ### Windows Native Toolchain Support
 
@@ -174,16 +174,16 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 ## 当前限制 / Current Limitations
 
-- Claude Code Room 参与者仍依赖活跃 stream session；Codex / Gemini 参与者以单轮 native CLI pipe-exec 方式运行，不是长驻 stream actor。
-- 继续上次会话目前只展示后端已支持继续的 agent / run；Codex thread 记录已保存，但尚未接入可恢复的交互式 stream actor。
+- Claude Code Room 参与者仍依赖活跃 stream session；Codex / Gemini 原生 interactive CLI 适配器仍在 Phase 7 中实现，完成前不能把其视为 Claude Code 同等的解析后会话渲染。
+- 继续上次会话目前只展示后端已支持继续的 agent / run；Codex/Gemini resume-last 路径已开始接入，但仍需要原生适配器证明 prompt 输入、完成判定、停止和归档语义。
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
-- Claude Code Room participants still depend on active stream sessions; Codex / Gemini participants run as one-shot native CLI pipe-exec seats rather than persistent stream actors.
-- Continue-last-session only appears for agent / run combinations that the backend can actually resume; Codex thread references are stored, but resumable interactive stream actors are not wired yet.
+- Claude Code Room participants still depend on active stream sessions; the Codex/Gemini native interactive adapter is still part of Phase 7 work, so it is not yet Claude-equivalent parsed conversation rendering.
+- Continue-last-session only appears for agent / run combinations that the backend can actually resume; Codex/Gemini resume-last wiring has started, but the native adapter still must prove prompt input, completion detection, stop, and archival semantics.
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
 - Some upstream baseline checks still need cleanup.
@@ -194,11 +194,13 @@ Current limitations:
 
 - Arena Memory 候选提升：项目事实、决策、经验沉淀。
 - Multi-CLI capability matrix。
+- Codex/Gemini native adapter for Claude-like parsed conversation rendering.
 
 Plan:
 
 - Arena Memory promotion for project facts, decisions, and lessons.
 - Multi-CLI capability matrix.
+- Codex/Gemini native adapter for Claude-like parsed conversation rendering.
 
 ## 开发 / Development
 

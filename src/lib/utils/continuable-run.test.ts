@@ -17,7 +17,7 @@ function run(id: string, agent: string, extras: Partial<TaskRun> = {}): TaskRun 
 }
 
 describe("findLastContinuableRun", () => {
-  it("only returns Claude runs with a session id for Claude startup", () => {
+  it("returns Claude runs with a session id for Claude startup", () => {
     const runs = [
       run("codex-latest", "codex", {
         conversation_ref: { kind: "codex_thread", id: "thread-1" },
@@ -29,16 +29,34 @@ describe("findLastContinuableRun", () => {
     expect(findLastContinuableRun(runs, "claude")?.id).toBe("claude-continuable");
   });
 
-  it("does not show another agent's continue entry on native CLI startup pages", () => {
+  it("returns native CLI runs for their own startup pages", () => {
     const runs = [
       run("claude-continuable", "claude", { session_id: "session-1" }),
       run("codex-completed", "codex", {
         conversation_ref: { kind: "codex_thread", id: "thread-1" },
       }),
+      run("gemini-completed", "gemini"),
     ];
 
-    expect(findLastContinuableRun(runs, "codex")).toBeNull();
-    expect(findLastContinuableRun(runs, "gemini")).toBeNull();
+    expect(findLastContinuableRun(runs, "codex")?.id).toBe("codex-completed");
+    expect(findLastContinuableRun(runs, "gemini")?.id).toBe("gemini-completed");
+  });
+
+  it("returns Claude-compatible API runs by provider identity", () => {
+    const runs = [
+      run("claude-continuable", "claude", { session_id: "session-1" }),
+      run("deepseek-continuable", "claude", {
+        session_id: "session-2",
+        platform_id: "deepseek",
+      }),
+      run("glm-continuable", "claude", {
+        session_id: "session-3",
+        platform_id: "zhipu",
+      }),
+    ];
+
+    expect(findLastContinuableRun(runs, "deepseek")?.id).toBe("deepseek-continuable");
+    expect(findLastContinuableRun(runs, "glm")?.id).toBe("glm-continuable");
   });
 
   it("ignores active runs", () => {

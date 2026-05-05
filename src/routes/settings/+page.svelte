@@ -5,30 +5,20 @@
   import { loadCliInfo, KeybindingStore } from "$lib/stores";
   import type {
     UserSettings,
-    AgentSettings,
-    WindowsMsvcEnvMode,
-    WindowsMsvcEnvStatus,
     CliConfigSettingDef,
     RemoteHost,
     RemoteTestResult,
     SshKeyInfo,
     CliCheckResult,
-    ConnectionProfile,
   } from "$lib/types";
   import Card from "$lib/components/Card.svelte";
   import Button from "$lib/components/Button.svelte";
   import Input from "$lib/components/Input.svelte";
   import KeybindingEditor from "$lib/components/KeybindingEditor.svelte";
   import { formatKeyDisplay } from "$lib/stores/keybindings.svelte";
-  import {
-    PLATFORM_PRESETS,
-    buildPlatformList,
-    isCustomPlatform,
-    findCredential,
-    expandModelsToTiers,
-    compressModelsFromTiers,
-  } from "$lib/utils/platform-presets";
-  import type { PlatformPreset, PlatformCredential } from "$lib/types";
+  import { findCredential } from "$lib/utils/platform-presets";
+  import { PHASE7_PROVIDERS, type Phase7ProviderEntry } from "$lib/utils/provider-catalog";
+  import type { PlatformCredential } from "$lib/types";
   import {
     isDebugMode,
     setDebugMode,
@@ -93,127 +83,92 @@
   ];
 
   let settings = $state<UserSettings | null>(null);
-  let authMode = $state("cli");
-  let msvcEnvMode = $state<WindowsMsvcEnvMode>("auto");
-  let msvcEnvStatus = $state<WindowsMsvcEnvStatus | null>(null);
-  let msvcEnvLoading = $state(false);
-  let msvcEnvSaving = $state(false);
-  let anthropicApiKey = $state("");
-  let anthropicBaseUrl = $state("");
   let showApiKey = $state(false);
-  let generalSaved = $state(false);
-  let modelOpus = $state("");
-  let modelSonnet = $state("");
-  let modelHaiku = $state("");
-  let selectedPlatformId = $state<string | null>(null);
   let platformCredentials = $state<PlatformCredential[]>([]);
-  let connectionProfiles = $state<ConnectionProfile[]>([]);
-  let connectionProfileJson = $state<Record<ConnectionAgentTab, string>>({
-    claude: "[]",
-    codex: "[]",
-    gemini: "[]",
-  });
-  let connectionProfileError = $state<Record<ConnectionAgentTab, string>>({
-    claude: "",
-    codex: "",
-    gemini: "",
-  });
-  let platformExtraEnv = $state<Array<{ key: string; value: string }>>([]);
-  // Track whether user manually edited extra_env (per platform ID).
-  // Untouched platforms don't write extra_env, avoiding preset defaults being baked into credentials.
-  let extraEnvTouched = $state<Record<string, boolean>>({});
-
-  // CLI Auth state
-  let authOverview = $state<import("$lib/types").AuthOverview | null>(null);
-  let cliLoginLoading = $state(false);
-  let cliLoginError = $state("");
 
   type ConnectionAgentTab = "claude" | "codex" | "gemini";
   const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
-    { id: "claude", label: "CC", command: "claude" },
-    { id: "codex", label: "Codex", command: "codex exec" },
-    { id: "gemini", label: "Gemini", command: "gemini --output-format text -p" },
+    { id: "claude", label: "Claude", command: "claude" },
+    { id: "codex", label: "Codex", command: "codex" },
+    { id: "gemini", label: "Gemini", command: "gemini" },
   ];
-  let connectionAgentTab = $state<ConnectionAgentTab>("claude");
   let connectionCliChecks = $state<Record<ConnectionAgentTab, CliCheckResult | null>>({
     claude: null,
     codex: null,
     gemini: null,
   });
   let connectionCliChecking = $state(false);
-  let nativeAgentSettings = $state<Record<ConnectionAgentTab, AgentSettings | null>>({
-    claude: null,
-    codex: null,
-    gemini: null,
-  });
-  let nativeSettingsLoading = $state<Record<ConnectionAgentTab, boolean>>({
-    claude: false,
-    codex: false,
-    gemini: false,
-  });
-  let nativeSettingsSaving = $state<Record<ConnectionAgentTab, boolean>>({
-    claude: false,
-    codex: false,
-    gemini: false,
-  });
-  let nativeCommandPath = $state<Record<ConnectionAgentTab, string>>({
-    claude: "",
-    codex: "",
-    gemini: "",
-  });
-  let nativeModel = $state<Record<ConnectionAgentTab, string>>({
-    claude: "",
-    codex: "",
-    gemini: "",
-  });
-  let nativeExtraArgs = $state<Record<ConnectionAgentTab, string>>({
-    claude: "",
-    codex: "",
-    gemini: "",
-  });
-  let nativeAddDirs = $state<Record<ConnectionAgentTab, string[]>>({
-    claude: [],
-    codex: [],
-    gemini: [],
-  });
-  let nativeYoloMode = $state<Record<ConnectionAgentTab, boolean>>({
-    claude: false,
-    codex: false,
-    gemini: false,
-  });
-  let nativeNoSessionPersistence = $state<Record<ConnectionAgentTab, boolean>>({
-    claude: false,
-    codex: false,
-    gemini: false,
-  });
-  let nativeAuthMode = $state<Record<ConnectionAgentTab, "cli" | "api">>({
-    claude: "cli",
-    codex: "cli",
-    gemini: "cli",
-  });
 
-  function nativeAgentLabel(agent: ConnectionAgentTab): string {
-    if (agent === "codex") return "Codex";
-    if (agent === "gemini") return "Gemini";
-    return "CC";
+  function providerCliCheck(provider: Phase7ProviderEntry): CliCheckResult | null {
+    if (provider.mode !== "official_cli") return null;
+    return connectionCliChecks[provider.executionAgent as ConnectionAgentTab];
   }
 
-  function nativeCliConfigPath(agent: ConnectionAgentTab): string {
-    if (agent === "codex") return "~/.codex/config.toml";
-    if (agent === "gemini") return "~/.gemini/settings.json";
-    return "~/.claude/settings.json";
+  function providerCredential(provider: Phase7ProviderEntry): PlatformCredential | undefined {
+    if (!provider.platformId) return undefined;
+    return findCredential(platformCredentials, provider.platformId);
   }
 
-  function savedConnectionProfile(agent: ConnectionAgentTab, mode: "cli" | "api") {
-    return connectionProfiles.find(
-      (profile) =>
-        profile.agent === agent && profile.auth_mode === mode && profile.enabled !== false,
-    );
+  function providerStatusLabel(provider: Phase7ProviderEntry): string {
+    if (provider.mode === "official_cli") {
+      const check = providerCliCheck(provider);
+      if (!check) return "CLI · 检测中";
+      return check.found
+        ? `CLI · 已认证/已安装${check.version ? ` · ${check.version}` : ""}`
+        : "CLI · 未检测到";
+    }
+    const cred = providerCredential(provider);
+    const hasKey = !!cred?.api_key;
+    if (provider.id === "glm") {
+      const model = cred?.models?.[0] ?? provider.defaultModel ?? "";
+      const baseUrl = cred?.base_url ?? provider.defaultBaseUrl ?? "";
+      return `API · ${hasKey ? "已配置 Key" : "未配置 Key"} · ${model || "未配置模型"} · ${baseUrl || "未配置 URL"}`;
+    }
+    return `API · ${hasKey ? "已配置 Key" : "未配置 Key"}`;
   }
 
-  function apiKeyHint(value?: string): string {
-    if (!value) return "";
-    return `...${value.slice(-4)}`;
+  function providerBadgeLabel(provider: Phase7ProviderEntry): string {
+    if (provider.mode === "official_cli") return "订阅";
+    return providerCredential(provider)?.api_key ? "API" : "缺 Key";
+  }
+
+  function providerPermissionLabel(provider: Phase7ProviderEntry): string {
+    if (provider.defaultPermissionMode === "dangerously_bypass") {
+      return "--dangerously-bypass-approvals-and-sandbox";
+    }
+    if (provider.defaultPermissionMode === "yolo") return "yolo";
+    return "bypass";
+  }
+
+  function isBetaLocale(entry: { status: string }): boolean {
+    return entry.status === "beta";
+  }
+
+  function updateApiProviderField(
+    provider: Phase7ProviderEntry,
+    field: "api_key" | "base_url" | "model",
+    value: string,
+  ) {
+    if (!provider.platformId) return;
+    const existing = providerCredential(provider);
+    const next: PlatformCredential = {
+      platform_id: provider.platformId,
+      api_key: existing?.api_key,
+      base_url: existing?.base_url ?? provider.defaultBaseUrl,
+      auth_env_var: existing?.auth_env_var ?? "ANTHROPIC_AUTH_TOKEN",
+      name: existing?.name ?? provider.label,
+      models: existing?.models ?? (provider.defaultModel ? [provider.defaultModel] : undefined),
+      extra_env: existing?.extra_env,
+    };
+    if (field === "api_key") next.api_key = value || undefined;
+    if (field === "base_url") next.base_url = value || provider.defaultBaseUrl || undefined;
+    if (field === "model") next.models = value ? [value] : undefined;
+    const rest = platformCredentials.filter((cred) => cred.platform_id !== provider.platformId);
+    platformCredentials = [...rest, next];
+  }
+
+  function persistApiProviderConfig() {
+    saveGeneralPatch({ platform_credentials: platformCredentials });
   }
 
   async function refreshConnectionCliChecks() {
@@ -233,227 +188,6 @@
     >;
     connectionCliChecking = false;
   }
-
-  $effect(() => {
-    const agent = connectionAgentTab;
-    if (agent !== "claude" && !nativeAgentSettings[agent] && !nativeSettingsLoading[agent]) {
-      void refreshNativeAgentSettings(agent);
-    }
-  });
-
-  function parseLineList(text: string): string[] {
-    return text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  }
-
-  function loadNativeAgentDraft(agent: ConnectionAgentTab, settings: AgentSettings) {
-    nativeAgentSettings = { ...nativeAgentSettings, [agent]: settings };
-    nativeCommandPath = { ...nativeCommandPath, [agent]: settings.command_path ?? "" };
-    nativeModel = { ...nativeModel, [agent]: settings.model ?? "" };
-    nativeExtraArgs = {
-      ...nativeExtraArgs,
-      [agent]: (settings.extra_args ?? []).join("\n"),
-    };
-    nativeAddDirs = { ...nativeAddDirs, [agent]: settings.add_dirs ?? [] };
-    nativeYoloMode = { ...nativeYoloMode, [agent]: settings.yolo_mode ?? false };
-    nativeNoSessionPersistence = {
-      ...nativeNoSessionPersistence,
-      [agent]: settings.no_session_persistence ?? false,
-    };
-  }
-
-  async function refreshNativeAgentSettings(agent: ConnectionAgentTab) {
-    if (nativeSettingsLoading[agent]) return;
-    nativeSettingsLoading = { ...nativeSettingsLoading, [agent]: true };
-    try {
-      const settings = await api.getAgentSettings(agent);
-      loadNativeAgentDraft(agent, settings);
-    } catch (e) {
-      dbgWarn("settings", "failed to load native agent settings", { agent, error: e });
-    } finally {
-      nativeSettingsLoading = { ...nativeSettingsLoading, [agent]: false };
-    }
-  }
-
-  async function saveNativeAgentSettings(agent: ConnectionAgentTab) {
-    if (nativeSettingsSaving[agent]) return;
-    nativeSettingsSaving = { ...nativeSettingsSaving, [agent]: true };
-    try {
-      const patch: Record<string, unknown> = {
-        command_path: nativeCommandPath[agent].trim() || null,
-        model: nativeModel[agent].trim() || null,
-        extra_args: parseLineList(nativeExtraArgs[agent]),
-        add_dirs: nativeAddDirs[agent].map((dir) => dir.trim()).filter((dir) => dir.length > 0),
-        yolo_mode: nativeYoloMode[agent],
-        no_session_persistence: nativeNoSessionPersistence[agent],
-      };
-      const settings = await api.updateAgentSettings(agent, patch as Partial<AgentSettings>);
-      loadNativeAgentDraft(agent, settings);
-      generalSaved = true;
-      setTimeout(() => (generalSaved = false), 1500);
-    } catch (e) {
-      dbgWarn("settings", "failed to save native agent settings", { agent, error: e });
-    } finally {
-      nativeSettingsSaving = { ...nativeSettingsSaving, [agent]: false };
-    }
-  }
-
-  function updateNativeAddDir(agent: ConnectionAgentTab, index: number, value: string) {
-    const next = nativeAddDirs[agent].slice();
-    next[index] = value;
-    nativeAddDirs = { ...nativeAddDirs, [agent]: next };
-  }
-
-  function addNativeAddDir(agent: ConnectionAgentTab) {
-    nativeAddDirs = { ...nativeAddDirs, [agent]: [...nativeAddDirs[agent], ""] };
-  }
-
-  function removeNativeAddDir(agent: ConnectionAgentTab, index: number) {
-    nativeAddDirs = {
-      ...nativeAddDirs,
-      [agent]: nativeAddDirs[agent].filter((_, i) => i !== index),
-    };
-  }
-
-  function syncConnectionProfileJsonDrafts() {
-    connectionProfileJson = {
-      claude: JSON.stringify(
-        connectionProfiles.filter((profile) => profile.agent === "claude"),
-        null,
-        2,
-      ),
-      codex: JSON.stringify(
-        connectionProfiles.filter((profile) => profile.agent === "codex"),
-        null,
-        2,
-      ),
-      gemini: JSON.stringify(
-        connectionProfiles.filter((profile) => profile.agent === "gemini"),
-        null,
-        2,
-      ),
-    };
-    nativeAuthMode = {
-      claude: authMode === "api" ? "api" : "cli",
-      codex: savedConnectionProfile("codex", "api") ? "api" : "cli",
-      gemini: savedConnectionProfile("gemini", "api") ? "api" : "cli",
-    };
-  }
-
-  function defaultAuthEnvVar(agent: ConnectionAgentTab): string {
-    if (agent === "codex") return "OPENAI_API_KEY";
-    if (agent === "gemini") return "GEMINI_API_KEY";
-    return "ANTHROPIC_API_KEY";
-  }
-
-  function makeConnectionProfile(agent: ConnectionAgentTab, authMode: "cli" | "api") {
-    return {
-      id: `${agent}-${authMode}-${crypto.randomUUID()}`,
-      label: authMode === "cli" ? `${agent} CLI auth` : `${agent} API key`,
-      agent,
-      auth_mode: authMode,
-      auth_env_var: authMode === "api" ? defaultAuthEnvVar(agent) : undefined,
-      env: {},
-      extra_args: [],
-      add_dirs: [],
-      enabled: true,
-    } satisfies ConnectionProfile;
-  }
-
-  function addConnectionProfileDraft(agent: ConnectionAgentTab, authMode: "cli" | "api") {
-    let current: ConnectionProfile[] = [];
-    try {
-      const parsed = JSON.parse(connectionProfileJson[agent] || "[]");
-      if (Array.isArray(parsed)) current = parsed as ConnectionProfile[];
-    } catch {
-      current = connectionProfiles.filter((profile) => profile.agent === agent);
-    }
-    connectionProfileJson = {
-      ...connectionProfileJson,
-      [agent]: JSON.stringify([...current, makeConnectionProfile(agent, authMode)], null, 2),
-    };
-    connectionProfileError = { ...connectionProfileError, [agent]: "" };
-  }
-
-  async function saveConnectionProfilesForAgent(agent: ConnectionAgentTab) {
-    try {
-      const parsed = JSON.parse(connectionProfileJson[agent] || "[]");
-      if (!Array.isArray(parsed)) throw new Error("Profile JSON must be an array");
-      const normalized = parsed.map((profile: Partial<ConnectionProfile>, index: number) => ({
-        id: (profile.id || `${agent}-${index}-${crypto.randomUUID()}`).trim(),
-        label: (profile.label || `${agent} profile ${index + 1}`).trim(),
-        agent,
-        auth_mode: profile.auth_mode || "cli",
-        platform_id: profile.platform_id || undefined,
-        command_path: profile.command_path || undefined,
-        model: profile.model || undefined,
-        api_key: profile.api_key || undefined,
-        auth_env_var: profile.auth_env_var || undefined,
-        base_url: profile.base_url || undefined,
-        env: profile.env || {},
-        extra_args: profile.extra_args || [],
-        add_dirs: profile.add_dirs || [],
-        yolo_mode: profile.yolo_mode,
-        no_session_persistence: profile.no_session_persistence,
-        enabled: profile.enabled !== false,
-      }));
-      const next = [
-        ...connectionProfiles.filter((profile) => profile.agent !== agent),
-        ...normalized,
-      ];
-      settings = await api.updateUserSettings({ connection_profiles: next });
-      connectionProfiles = settings.connection_profiles ?? [];
-      syncConnectionProfileJsonDrafts();
-      connectionProfileError = { ...connectionProfileError, [agent]: "" };
-      generalSaved = true;
-      setTimeout(() => (generalSaved = false), 1500);
-    } catch (e) {
-      connectionProfileError = { ...connectionProfileError, [agent]: String(e) };
-    }
-  }
-
-  // Derive merged platform list (static presets + dynamic custom endpoints)
-  let platformList = $derived(buildPlatformList(platformCredentials));
-
-  // Derive selected platform from id (search merged list, not just static presets)
-  let selectedPlatform = $derived<PlatformPreset | null>(
-    selectedPlatformId ? (platformList.find((p) => p.id === selectedPlatformId) ?? null) : null,
-  );
-
-  // Custom endpoint editing state
-  // ── Local proxy detection state ──
-  let localProxyStatus = $state<import("$lib/types").LocalProxyStatus | null>(null);
-  let localProxyChecking = $state(false);
-  let localProxyRequestId = $state(0);
-  let localAdvancedOpen = $state(false);
-  let localProxyStatuses = $state<Record<string, { running: boolean; needsAuth: boolean }>>({});
-
-  // ── API connectivity test state ──
-  let apiTestLoading = $state(false);
-  let apiTestResult = $state<import("$lib/types").ApiTestResult | null>(null);
-  let apiTestRequestId = $state(0);
-  // Derive effective auth env var (tracks platformCredentials + selectedPlatformId)
-  let effectiveAuthEnvVar = $derived(
-    findCredential(platformCredentials, selectedPlatformId ?? "")?.auth_env_var ||
-      selectedPlatform?.auth_env_var ||
-      "ANTHROPIC_API_KEY",
-  );
-  // Clear stale test result AND invalidate in-flight requests when any relevant input changes
-  $effect(() => {
-    void anthropicApiKey;
-    void anthropicBaseUrl;
-    void modelOpus;
-    void modelSonnet;
-    void modelHaiku;
-    void effectiveAuthEnvVar;
-    return () => {
-      apiTestResult = null;
-      apiTestRequestId++; // invalidate in-flight request
-      apiTestLoading = false;
-    };
-  });
 
   // ── Web Server state (desktop-only) ──
   let webToken = $state<string | null>(null);
@@ -1111,386 +845,15 @@
     return () => clearInterval(timer);
   });
 
-  function detectPlatformFromUrl(url: string, activePlatformId?: string): string | null {
-    // If we have a stored active_platform_id, prefer it
-    if (activePlatformId) return activePlatformId;
-    if (!url) return null;
-    const match = PLATFORM_PRESETS.find((p) => p.base_url && url === p.base_url);
-    return match?.id ?? "custom";
-  }
-
-  /** Load display fields (key + URL) from credential store for a given platform. */
-  function loadFieldsFromCredential(platformId: string | null) {
-    apiTestResult = null;
-    if (!platformId) {
-      anthropicApiKey = "";
-      anthropicBaseUrl = "";
-      platformExtraEnv = [];
-      return;
-    }
-    const cred = findCredential(platformCredentials, platformId);
-    const preset = PLATFORM_PRESETS.find((p) => p.id === platformId);
-    anthropicApiKey = cred?.api_key ?? "";
-    // base_url: credential override > preset default > empty
-    anthropicBaseUrl = cred?.base_url ?? preset?.base_url ?? "";
-    // models: credential override > preset default > expand to 3 tiers
-    const models = cred?.models ?? preset?.models;
-    const [o, s, h] = expandModelsToTiers(models);
-    modelOpus = o;
-    modelSonnet = s;
-    modelHaiku = h;
-    // extra_env: credential explicit value (including {}) takes priority; undefined falls back to preset
-    const extraEnv = cred?.extra_env !== undefined ? cred.extra_env : (preset?.extra_env ?? {});
-    platformExtraEnv = Object.entries(extraEnv).map(([key, value]) => ({ key, value }));
-    // Don't set touched on load — touched is only driven by UI edit actions (onblur/delete row)
-    dbg("settings", "loadFieldsFromCredential", {
-      platformId,
-      hasKey: !!anthropicApiKey,
-      url: anthropicBaseUrl,
-      models: [modelOpus, modelSonnet, modelHaiku],
-      extraEnvKeys: Object.keys(extraEnv),
-      extraEnvSource: cred?.extra_env !== undefined ? "credential" : "preset",
-    });
-  }
-
-  /** Save current editing fields into the credentials array. */
-  function saveCurrentToCredential() {
-    if (!selectedPlatformId) return;
-    const preset = PLATFORM_PRESETS.find((p) => p.id === selectedPlatformId);
-    // Compress 3 tier inputs → models array; undefined when all empty (→ backend preset fallback).
-    // Do NOT fall back to preset?.models here — undefined means "use provider defaults",
-    // and baking preset values into credential would prevent future preset updates from taking effect.
-    const modelsToSave = compressModelsFromTiers(modelOpus, modelSonnet, modelHaiku);
-
-    // Convert extra_env array back to Record, filter empty keys, warn on duplicates
-    const extraEnvRecord: Record<string, string> = {};
-    const seenKeys = new Set<string>();
-    for (const { key, value } of platformExtraEnv) {
-      const k = key.trim();
-      if (!k) continue;
-      if (seenKeys.has(k)) {
-        dbgWarn("settings", `duplicate extra_env key "${k}" — last value wins`);
-      }
-      seenKeys.add(k);
-      extraEnvRecord[k] = value;
-    }
-
-    // Only write extra_env when user has touched it; otherwise preserve credential's original value
-    const extraEnvToSave = extraEnvTouched[selectedPlatformId]
-      ? extraEnvRecord // always write (even empty {}), distinct from undefined
-      : undefined; // don't overwrite — keep credential as-is (may be undefined or old value)
-
-    dbg("settings", "saveCurrentToCredential: extra_env", {
-      platform: selectedPlatformId,
-      touched: !!extraEnvTouched[selectedPlatformId],
-      keys: Object.keys(extraEnvRecord),
-    });
-
-    _upsertCredential(selectedPlatformId, {
-      api_key: anthropicApiKey || undefined,
-      // Always save base_url — backend needs it for ANTHROPIC_BASE_URL injection
-      base_url: anthropicBaseUrl || preset?.base_url || undefined,
-      auth_env_var: selectedPlatform?.auth_env_var ?? preset?.auth_env_var,
-      models: modelsToSave,
-      ...(extraEnvToSave !== undefined ? { extra_env: extraEnvToSave } : {}),
-    });
-  }
-
-  /** Sync global fields from current display state and persist everything. */
-  function syncAndSave(platformId: string) {
-    const preset = PLATFORM_PRESETS.find((p) => p.id === platformId);
-    saveGeneralPatch({
-      anthropic_api_key: anthropicApiKey || undefined,
-      anthropic_base_url: anthropicBaseUrl || undefined,
-      auth_env_var: preset?.auth_env_var,
-      active_platform_id: platformId,
-      platform_credentials: platformCredentials,
-    });
-  }
-
-  function markExtraEnvTouched() {
-    if (selectedPlatformId) extraEnvTouched[selectedPlatformId] = true;
-  }
-
-  /**
-   * Parse pasted env text. Supported formats:
-   * - KEY=value lines (with optional `export` prefix, # comments, quoted values)
-   * - JSON object: { "KEY": "value", ... }
-   */
-  function parseEnvText(text: string): Array<{ key: string; value: string }> {
-    const trimmed = text.trim();
-    // Try JSON object first
-    if (trimmed.startsWith("{")) {
-      try {
-        const obj = JSON.parse(trimmed);
-        if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-          const results: Array<{ key: string; value: string }> = [];
-          for (const [key, val] of Object.entries(obj)) {
-            if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-              results.push({ key, value: String(val) });
-            }
-          }
-          if (results.length > 0) return results;
-        }
-      } catch {
-        // Not valid JSON, fall through to line-based parsing
-      }
-    }
-    // Line-based: KEY=value, export KEY=value, # comments
-    const results: Array<{ key: string; value: string }> = [];
-    for (const raw of trimmed.split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      const stripped = line.replace(/^export\s+/, "");
-      const eqIdx = stripped.indexOf("=");
-      if (eqIdx <= 0) continue;
-      const key = stripped.slice(0, eqIdx).trim();
-      let value = stripped.slice(eqIdx + 1).trim();
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-        results.push({ key, value });
-      }
-    }
-    return results;
-  }
-
-  /** Handle paste on env key input: if content looks like KEY=value lines, bulk-add them. */
-  function handleEnvKeyPaste(e: ClipboardEvent, index: number) {
-    const text = e.clipboardData?.getData("text/plain") ?? "";
-    const parsed = parseEnvText(text);
-    if (parsed.length === 0) return; // not env format, let normal paste through
-    e.preventDefault();
-    // Replace current (likely empty) row with first parsed entry, append rest
-    const before = platformExtraEnv.slice(0, index);
-    const after = platformExtraEnv.slice(index + 1);
-    platformExtraEnv = [...before, ...parsed, ...after];
-    markExtraEnvTouched();
-    persistCurrentPlatform();
-    dbg("settings", "env paste parsed", { count: parsed.length, keys: parsed.map((p) => p.key) });
-  }
-
-  /** Unified persist: save current platform fields to credential + sync to settings. */
-  function persistCurrentPlatform() {
-    saveCurrentToCredential();
-    if (selectedPlatformId) syncAndSave(selectedPlatformId);
-  }
-
-  // ── Local proxy detection ──
-
-  async function checkLocalProxy() {
-    if (!selectedPlatform || selectedPlatform.category !== "local" || !selectedPlatformId) return;
-    localProxyChecking = true;
-    localProxyStatus = null;
-    const myRequestId = ++localProxyRequestId;
-    const myPlatformId = selectedPlatformId;
-    const urlToCheck = anthropicBaseUrl;
-    dbg("settings", "checkLocalProxy start", {
-      id: myPlatformId,
-      url: urlToCheck,
-      reqId: myRequestId,
-    });
-    try {
-      const result = await api.detectLocalProxy(myPlatformId, urlToCheck);
-      if (myRequestId !== localProxyRequestId) return;
-      if (myPlatformId !== selectedPlatformId) return;
-      localProxyStatus = result;
-      localProxyStatuses = {
-        ...localProxyStatuses,
-        [myPlatformId]: { running: result.running, needsAuth: result.needsAuth },
-      };
-      dbg("settings", "checkLocalProxy result", result);
-    } catch (e) {
-      if (myRequestId !== localProxyRequestId || myPlatformId !== selectedPlatformId) return;
-      localProxyStatus = {
-        proxyId: myPlatformId,
-        running: false,
-        needsAuth: false,
-        baseUrl: urlToCheck,
-        error: String(e),
-      };
-      localProxyStatuses = {
-        ...localProxyStatuses,
-        [myPlatformId]: { running: false, needsAuth: false },
-      };
-      dbgWarn("settings", "checkLocalProxy error", e);
-    } finally {
-      if (myRequestId === localProxyRequestId) localProxyChecking = false;
-    }
-  }
-
-  async function checkAllLocalProxies() {
-    const localPresets = PLATFORM_PRESETS.filter((p) => p.category === "local");
-    const results = await Promise.allSettled(
-      localPresets.map((p) => {
-        const cred = findCredential(platformCredentials, p.id);
-        const url = cred?.base_url || p.base_url;
-        return api.detectLocalProxy(p.id, url);
-      }),
-    );
-    const statuses: Record<string, { running: boolean; needsAuth: boolean }> = {};
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled") {
-        statuses[localPresets[i].id] = { running: r.value.running, needsAuth: r.value.needsAuth };
-      } else {
-        statuses[localPresets[i].id] = { running: false, needsAuth: false };
-      }
-    });
-    localProxyStatuses = statuses;
-    dbg("settings", "checkAllLocalProxies", statuses);
-  }
-
-  function applyPlatformPreset(preset: PlatformPreset) {
-    // 1. Save current platform's data to credentials (if modified)
-    saveCurrentToCredential();
-    // 2. Switch to new platform
-    selectedPlatformId = preset.id;
-    localAdvancedOpen = false;
-    localProxyStatus = null;
-    // 3. Load new platform's data from credentials
-    loadFieldsFromCredential(preset.id);
-    // 4. Sync global fields + persist
-    syncAndSave(preset.id);
-    // 5. Auto-detect if local proxy
-    if (preset.category === "local") {
-      checkLocalProxy();
-    }
-  }
-
-  /** Upsert a credential in the local platformCredentials array. */
-  function _upsertCredential(platformId: string, fields: Partial<PlatformCredential>) {
-    const idx = platformCredentials.findIndex((c) => c.platform_id === platformId);
-    if (idx >= 0) {
-      platformCredentials[idx] = { ...platformCredentials[idx], ...fields };
-    } else {
-      platformCredentials = [...platformCredentials, { platform_id: platformId, ...fields }];
-    }
-  }
-
-  /** Add a new custom endpoint — creates with defaults and immediately selects it. */
-  function addCustomEndpoint() {
-    const id = `custom-${Date.now()}`;
-    const cred: PlatformCredential = {
-      platform_id: id,
-      name: "Custom",
-      base_url: "",
-      auth_env_var: "ANTHROPIC_AUTH_TOKEN",
-    };
-    platformCredentials = [...platformCredentials, cred];
-    saveGeneralPatch({ platform_credentials: platformCredentials });
-    // Select the newly created endpoint — opens full config form below
-    const preset = buildPlatformList(platformCredentials).find((p) => p.id === id);
-    if (preset) applyPlatformPreset(preset);
-  }
-
-  /** Delete a custom endpoint. */
-  function deleteCustomEndpoint(platformId: string) {
-    // Clear selection first so applyPlatformPreset won't re-save the deleted credential
-    const wasActive = selectedPlatformId === platformId;
-    if (wasActive) selectedPlatformId = null;
-    platformCredentials = platformCredentials.filter((c) => c.platform_id !== platformId);
-    saveGeneralPatch({ platform_credentials: platformCredentials });
-    // If we deleted the active platform, switch to Anthropic
-    if (wasActive) {
-      const anthropic = PLATFORM_PRESETS.find((p) => p.id === "anthropic")!;
-      applyPlatformPreset(anthropic);
-    }
-  }
-
-  function openSetupWizard() {
-    window.dispatchEvent(new CustomEvent("ocv:show-wizard"));
-  }
-
-  async function loadMsvcEnvStatus(cwd?: string) {
-    if (!IS_WINDOWS) return;
-    msvcEnvLoading = true;
-    try {
-      msvcEnvStatus = await api.getWindowsMsvcEnvStatus(cwd);
-    } catch (e) {
-      dbgWarn("settings", "load MSVC env status failed", e);
-      msvcEnvStatus = null;
-    } finally {
-      msvcEnvLoading = false;
-    }
-  }
-
-  async function saveMsvcEnvMode(mode: WindowsMsvcEnvMode) {
-    if (msvcEnvSaving || mode === msvcEnvMode) return;
-    msvcEnvMode = mode;
-    msvcEnvSaving = true;
-    try {
-      settings = await api.updateUserSettings({ windows_msvc_env_mode: mode });
-      await loadMsvcEnvStatus(settings.working_directory);
-      generalSaved = true;
-      setTimeout(() => (generalSaved = false), 1500);
-    } catch (e) {
-      dbgWarn("settings", "save MSVC env mode failed", e);
-      msvcEnvMode = settings?.windows_msvc_env_mode ?? "auto";
-    } finally {
-      msvcEnvSaving = false;
-    }
-  }
-
-  function msvcEnvStateClass(state?: WindowsMsvcEnvStatus["state"]): string {
-    if (state === "injected") return "border-emerald-500/30 bg-emerald-500/5 text-emerald-500";
-    if (state === "warning") return "border-amber-500/30 bg-amber-500/5 text-amber-500";
-    return "border-border bg-muted/30 text-muted-foreground";
-  }
-
-  function msvcEnvModeLabel(mode: WindowsMsvcEnvMode): string {
-    if (mode === "always") return t("settings_msvc_mode_always");
-    if (mode === "off") return t("settings_msvc_mode_off");
-    return t("settings_msvc_mode_auto");
-  }
-
-  function msvcEnvStateLabel(state: WindowsMsvcEnvStatus["state"]): string {
-    if (state === "disabled") return t("settings_msvc_state_disabled");
-    if (state === "non_windows") return t("settings_msvc_state_nonWindows");
-    if (state === "not_needed") return t("settings_msvc_state_notNeeded");
-    if (state === "injected") return t("settings_msvc_state_injected");
-    if (state === "warning") return t("settings_msvc_state_warning");
-    return t("settings_msvc_state_pending");
-  }
-
   onMount(async () => {
     try {
       settings = await api.getUserSettings();
-      authMode = settings.auth_mode ?? "cli";
-      msvcEnvMode = settings.windows_msvc_env_mode ?? "auto";
       remoteHosts = settings.remote_hosts ?? [];
       platformCredentials = settings.platform_credentials ?? [];
-      connectionProfiles = settings.connection_profiles ?? [];
-      syncConnectionProfileJsonDrafts();
-      // Load display fields from credentials (not global fields)
-      if (authMode === "api") {
-        selectedPlatformId = detectPlatformFromUrl(
-          settings.anthropic_base_url ?? "",
-          settings.active_platform_id,
-        );
-        loadFieldsFromCredential(selectedPlatformId);
-      } else {
-        anthropicApiKey = settings.anthropic_api_key ?? "";
-        anthropicBaseUrl = settings.anthropic_base_url ?? "";
-      }
-      void loadMsvcEnvStatus(settings.working_directory);
     } catch (e) {
       dbgWarn("settings", "error", e);
     }
     void refreshConnectionCliChecks();
-    void refreshNativeAgentSettings("claude");
-    void refreshNativeAgentSettings("codex");
-    void refreshNativeAgentSettings("gemini");
-    // Load auth overview
-    api
-      .getAuthOverview()
-      .then((ov) => (authOverview = ov))
-      .catch((e) => {
-        dbgWarn("settings", "failed to load auth overview", e);
-      });
     // Load web server status + token (desktop only)
     if (getTransport().isDesktop()) {
       Promise.all([api.getWebServerStatus(), api.getWebServerToken()])
@@ -1514,11 +877,6 @@
         });
     }
     loadCliInfo();
-    // Auto-detect local proxies
-    checkAllLocalProxies();
-    if (selectedPlatform?.category === "local") {
-      checkLocalProxy();
-    }
     // Detect current username + CLI keybindings source
     import("@tauri-apps/api/path")
       .then(async (p) => {
@@ -1540,8 +898,6 @@
     dbg("settings", "saveGeneralPatch", redactSensitive(patch));
     try {
       settings = await api.updateUserSettings(patch as Partial<UserSettings>);
-      generalSaved = true;
-      setTimeout(() => (generalSaved = false), 1500);
     } catch (e) {
       dbgWarn("settings", "saveGeneralPatch error", e);
     }
@@ -1728,12 +1084,12 @@
                   class="rounded-md border px-3 py-1.5 text-xs transition-all duration-150
                   {currentLocale() === entry.code
                     ? 'bg-primary text-primary-foreground'
-                    : entry.status === 'beta'
+                    : isBetaLocale(entry)
                       ? 'border-muted-foreground/30 text-muted-foreground hover:bg-accent'
                       : 'hover:bg-accent'}"
                   onclick={() => switchLocale(entry.code)}
                 >
-                  {entry.nativeName}{#if entry.status === "beta"}<span
+                  {entry.nativeName}{#if isBetaLocale(entry)}<span
                       class="ml-1 text-[10px] opacity-60">(Beta)</span
                     >{/if}
                 </button>
@@ -2228,1322 +1584,115 @@
 
       <!-- ═══ Connection tab ═══ -->
     {:else if activeTab === "connection"}
-      <div class="space-y-6">
-        <!-- Authentication -->
-        <Card class="p-6 space-y-5">
-          <div class="flex items-center justify-between">
-            <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              {t("settings_general_connection")}
-            </h2>
-            {#if generalSaved}
-              <span class="text-xs text-emerald-500 flex items-center gap-1 animate-fade-in">
-                <svg
-                  class="h-3 w-3"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg
-                >
-                {t("settings_general_saved")}
-              </span>
-            {/if}
+      <div class="space-y-4">
+        <Card class="p-6 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                AI 模型
+              </h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                订阅 CLI 使用官方登录；DeepSeek 和 GLM 通过 Claude Code 兼容 API 配置启动。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={connectionCliChecking}
+              onclick={refreshConnectionCliChecks}
+            >
+              {connectionCliChecking ? "检测中" : "重新检测 CLI"}
+            </Button>
           </div>
 
-          <div class="inline-flex rounded-md border border-border bg-background p-0.5">
-            {#each connectionAgentTabs as tab}
-              <button
-                type="button"
-                class="h-8 px-3 text-xs font-medium rounded-sm transition-colors {connectionAgentTab ===
-                tab.id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted'}"
-                onclick={() => (connectionAgentTab = tab.id)}
+          <div class="divide-y divide-border rounded-md border border-border">
+            {#each PHASE7_PROVIDERS as provider}
+              {@const check = providerCliCheck(provider)}
+              {@const credential = providerCredential(provider)}
+              <div
+                class="grid gap-3 p-4 md:grid-cols-[minmax(160px,1fr)_minmax(220px,2fr)_auto] md:items-center"
               >
-                {tab.label}
-              </button>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium">{provider.label}</span>
+                    <span
+                      class="rounded border px-1.5 py-0.5 text-[10px] font-medium {providerBadgeLabel(
+                        provider,
+                      ) === '缺 Key'
+                        ? 'border-amber-500/40 text-amber-500'
+                        : 'border-emerald-500/40 text-emerald-500'}"
+                    >
+                      {providerBadgeLabel(provider)}
+                    </span>
+                  </div>
+                  <p class="mt-1 truncate text-xs text-muted-foreground">
+                    {providerStatusLabel(provider)}
+                  </p>
+                </div>
+
+                {#if provider.mode === "official_cli"}
+                  <div class="text-xs text-muted-foreground">
+                    <div>启动命令：{provider.executionAgent}</div>
+                    <div>默认权限：{providerPermissionLabel(provider)}</div>
+                    {#if check?.path}
+                      <div class="truncate">路径：{check.path}</div>
+                    {/if}
+                  </div>
+                {:else}
+                  <div
+                    class="grid gap-2 {provider.id === 'glm' ? 'md:grid-cols-3' : 'md:grid-cols-1'}"
+                  >
+                    <Input
+                      type={showApiKey ? "text" : "password"}
+                      placeholder={`${provider.label} API Key`}
+                      value={credential?.api_key ?? ""}
+                      oninput={(event) =>
+                        updateApiProviderField(
+                          provider,
+                          "api_key",
+                          (event.currentTarget as HTMLInputElement).value,
+                        )}
+                      onblur={persistApiProviderConfig}
+                    />
+                    {#if provider.id === "glm"}
+                      <Input
+                        placeholder="Base URL"
+                        value={credential?.base_url ?? provider.defaultBaseUrl ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderField(
+                            provider,
+                            "base_url",
+                            (event.currentTarget as HTMLInputElement).value,
+                          )}
+                        onblur={persistApiProviderConfig}
+                      />
+                      <Input
+                        placeholder="Model"
+                        value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderField(
+                            provider,
+                            "model",
+                            (event.currentTarget as HTMLInputElement).value,
+                          )}
+                        onblur={persistApiProviderConfig}
+                      />
+                    {/if}
+                  </div>
+                {/if}
+
+                <div class="text-right text-[11px] text-muted-foreground">
+                  {provider.mode === "official_cli"
+                    ? check?.found
+                      ? "可用"
+                      : "需登录/安装"
+                    : "CC session"}
+                </div>
+              </div>
             {/each}
           </div>
-
-          {#if connectionAgentTab === "claude"}
-            <!-- Auth Mode selector: 2-way radio -->
-            <div>
-              <span class="text-sm font-medium mb-2 block">{t("settings_auth_modeLabel")}</span>
-              <div class="mt-1 grid grid-cols-2 gap-3">
-                <button
-                  class="flex flex-col items-center gap-2 rounded-lg border p-4 text-sm transition-all duration-150
-                {authMode === 'cli'
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                    : 'hover:bg-accent hover:border-ring/30'}"
-                  onclick={() => {
-                    authMode = "cli";
-                    saveGeneralPatch({
-                      auth_mode: "cli",
-                      anthropic_base_url: null,
-                      active_platform_id: null,
-                      auth_env_var: null,
-                    });
-                    api.removeCliApiKey().catch(() => {});
-                    api
-                      .getAuthOverview()
-                      .then((ov) => (authOverview = ov))
-                      .catch(() => {});
-                  }}
-                >
-                  <div
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10"
-                  >
-                    <svg
-                      class="h-5 w-5 text-emerald-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path
-                        d="M7 11V7a5 5 0 0 1 10 0v4"
-                      />
-                    </svg>
-                  </div>
-                  <span class="font-medium">{t("auth_cliAuth")}</span>
-                  <span class="text-[10px] text-muted-foreground text-center"
-                    >{t("settings_auth_modeCliDesc")}</span
-                  >
-                </button>
-                <button
-                  class="flex flex-col items-center gap-2 rounded-lg border p-4 text-sm transition-all duration-150
-                {authMode === 'api'
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                    : 'hover:bg-accent hover:border-ring/30'}"
-                  onclick={() => {
-                    authMode = "api";
-                    saveGeneralPatch({ auth_mode: "api" });
-                    api
-                      .getAuthOverview()
-                      .then((ov) => (authOverview = ov))
-                      .catch(() => {});
-                  }}
-                >
-                  <div
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-violet-500/10"
-                  >
-                    <svg
-                      class="h-5 w-5 text-violet-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                      />
-                    </svg>
-                  </div>
-                  <span class="font-medium">{t("auth_appApiKey")}</span>
-                  <span class="text-[10px] text-muted-foreground text-center"
-                    >{t("settings_auth_modeAppDesc")}</span
-                  >
-                </button>
-              </div>
-            </div>
-
-            <!-- CLI Auth details (expanded when auth_mode = cli) -->
-            {#if authMode === "cli"}
-              <div class="space-y-4 rounded-lg border border-border/50 p-4">
-                <!-- CLI Login status -->
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_cliLoginTitle")}</h3>
-                  <p class="text-xs text-muted-foreground mb-2">
-                    {t("settings_auth_cliLoginDesc")}
-                  </p>
-                  {#if authOverview?.cli_login_available}
-                    <div class="flex items-center gap-2">
-                      <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
-                      <span class="text-xs text-emerald-500">
-                        {t("auth_loggedIn")}{authOverview.cli_login_account
-                          ? `: ${authOverview.cli_login_account}`
-                          : ""}
-                      </span>
-                    </div>
-                  {:else}
-                    <div class="flex flex-col gap-2">
-                      <div class="flex items-center gap-2">
-                        <span class="h-2 w-2 rounded-full bg-muted-foreground/40"></span>
-                        <span class="text-xs text-muted-foreground">{t("auth_notLoggedIn")}</span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={cliLoginLoading}
-                          onclick={() => {
-                            cliLoginLoading = true;
-                            cliLoginError = "";
-                            api
-                              .runClaudeLogin()
-                              .then((success) => {
-                                if (success) {
-                                  api
-                                    .getAuthOverview()
-                                    .then((ov) => (authOverview = ov))
-                                    .catch(() => {});
-                                } else {
-                                  cliLoginError = t("setup_loginFailed");
-                                }
-                              })
-                              .catch((e) => {
-                                cliLoginError = String(e);
-                              })
-                              .finally(() => {
-                                cliLoginLoading = false;
-                              });
-                          }}
-                        >
-                          {#if cliLoginLoading}
-                            <span class="flex items-center gap-1.5">
-                              <span
-                                class="h-3 w-3 border border-foreground/30 border-t-foreground rounded-full animate-spin"
-                              ></span>
-                              {t("settings_auth_cliLoginBtn")}
-                            </span>
-                          {:else}
-                            {t("settings_auth_cliLoginBtn")}
-                          {/if}
-                        </Button>
-                      </div>
-                      {#if cliLoginError}
-                        <div class="rounded border border-red-500/30 bg-red-500/5 px-2 py-1">
-                          <p class="text-xs text-red-500">{cliLoginError}</p>
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-
-                <!-- CLI API Key (read-only) -->
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_cliApiKeyTitle")}</h3>
-                  {#if authOverview?.cli_has_api_key}
-                    <div class="flex items-center gap-2">
-                      <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
-                      <span class="text-xs text-emerald-500"
-                        >{t("auth_cliKeyHint", { hint: authOverview.cli_api_key_hint ?? "" })}</span
-                      >
-                    </div>
-                    <p class="mt-1 text-[10px] text-muted-foreground/70 italic">
-                      {#if authOverview.cli_api_key_source === "settings"}
-                        {t("settings_auth_cliApiKeySourceSettings")}
-                      {:else if authOverview.cli_api_key_source === "env"}
-                        {t("settings_auth_cliApiKeySourceEnv")}
-                      {:else if authOverview.cli_api_key_source?.startsWith("shell_config:")}
-                        {t("settings_auth_cliApiKeySourceShell", {
-                          path: authOverview.cli_api_key_source.slice(13),
-                        })}
-                      {/if}
-                    </p>
-                  {:else}
-                    <div class="flex items-center gap-2">
-                      <span class="h-2 w-2 rounded-full bg-muted-foreground/40"></span>
-                      <span class="text-xs text-muted-foreground"
-                        >{t("settings_auth_cliApiKeyNotSet")}</span
-                      >
-                    </div>
-                    <p class="mt-1 text-[10px] text-muted-foreground/70 italic">
-                      {t("settings_auth_cliApiKeyEditHint")}
-                    </p>
-                  {/if}
-                </div>
-
-                <!-- Priority hint -->
-                {#if authOverview?.cli_login_available && authOverview?.cli_has_api_key}
-                  <p class="text-[10px] text-muted-foreground/70 italic">
-                    {t("auth_cliPriorityHint")}
-                  </p>
-                {/if}
-              </div>
-            {/if}
-
-            {#if authMode === "api"}
-              <div class="space-y-4 rounded-lg border border-border/50 p-4">
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_appApiKeyTitle")}</h3>
-                  <p class="text-xs text-muted-foreground mb-3">
-                    {t("settings_auth_appApiKeyDesc")}
-                  </p>
-                </div>
-                <!-- Platform selector -->
-                <div>
-                  <span class="text-sm font-medium mb-1.5 block"
-                    >{t("settings_general_platform")}</span
-                  >
-                  <!-- Platform grid (always visible) -->
-                  <div class="grid grid-cols-4 gap-1.5">
-                    {#each platformList.filter((p) => p.id !== "custom") as preset}
-                      <button
-                        class="flex flex-col gap-0 rounded-md p-2 text-left transition-colors relative group
-                      {selectedPlatformId === preset.id
-                          ? 'bg-primary/10 ring-1 ring-primary'
-                          : 'bg-muted/40 hover:bg-muted/70'}"
-                        onclick={() => applyPlatformPreset(preset)}
-                      >
-                        <span class="text-xs font-medium truncate">{preset.name}</span>
-                        <span class="text-[10px] text-muted-foreground truncate"
-                          >{preset.description}</span
-                        >
-                        {#if isCustomPlatform(preset.id)}
-                          <span
-                            role="button"
-                            tabindex="0"
-                            class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all p-0.5 cursor-pointer"
-                            onclick={(e: MouseEvent) => {
-                              e.stopPropagation();
-                              deleteCustomEndpoint(preset.id);
-                            }}
-                            onkeydown={(e: KeyboardEvent) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.stopPropagation();
-                                deleteCustomEndpoint(preset.id);
-                              }
-                            }}
-                            title={t("settings_general_deleteCustom")}
-                          >
-                            <svg
-                              class="h-3 w-3"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg
-                            >
-                          </span>
-                        {/if}
-                        {#if preset.category === "local"}
-                          {@const ps = localProxyStatuses[preset.id]}
-                          <span
-                            class="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full {ps?.running &&
-                            !ps.needsAuth
-                              ? 'bg-green-500'
-                              : ps?.running && ps.needsAuth
-                                ? 'bg-amber-500'
-                                : 'bg-muted-foreground/30'}"
-                            title={ps?.running && !ps.needsAuth
-                              ? t("settings_local_running")
-                              : ps?.running && ps.needsAuth
-                                ? t("settings_local_needsAuth")
-                                : t("settings_local_notDetected")}
-                          ></span>
-                        {:else if findCredential(platformCredentials, preset.id)?.api_key}
-                          <span
-                            class="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-green-500"
-                            title="Key saved"
-                          ></span>
-                        {/if}
-                      </button>
-                    {/each}
-                    <!-- Add Custom -->
-                    <button
-                      class="flex flex-col items-center justify-center gap-1 rounded-md border border-dashed border-muted-foreground/30 p-2 text-muted-foreground hover:border-primary/50 hover:text-foreground hover:bg-muted/40 transition-colors"
-                      onclick={() => addCustomEndpoint()}
-                    >
-                      <svg
-                        class="h-4 w-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"><path d="M12 5v14" /><path d="M5 12h14" /></svg
-                      >
-                      <span class="text-[10px]">{t("settings_general_addCustom")}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {#if selectedPlatform?.category === "local"}
-                  <!-- Local proxy status card -->
-                  <div class="rounded-lg border p-4 space-y-3">
-                    <div class="flex items-center gap-2">
-                      {#if localProxyChecking}
-                        <span class="h-2 w-2 rounded-full bg-amber-400 animate-pulse"></span>
-                        <span class="text-sm">{t("settings_local_checking")}</span>
-                      {:else if localProxyStatus?.running && !localProxyStatus.needsAuth}
-                        <span class="h-2 w-2 rounded-full bg-green-500"></span>
-                        <span class="text-sm font-medium">{t("settings_local_running")}</span>
-                      {:else if localProxyStatus?.running && localProxyStatus.needsAuth}
-                        <span class="h-2 w-2 rounded-full bg-amber-500"></span>
-                        <span class="text-sm font-medium">{t("settings_local_needsAuth")}</span>
-                      {:else}
-                        <span class="h-2 w-2 rounded-full bg-muted-foreground/30"></span>
-                        <span class="text-sm">{t("settings_local_notDetected")}</span>
-                      {/if}
-                      <button
-                        class="ml-auto rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                        onclick={checkLocalProxy}>{t("settings_local_refresh")}</button
-                      >
-                    </div>
-                    <p class="text-xs text-muted-foreground font-mono">{anthropicBaseUrl}</p>
-                    {#if localProxyStatus && !localProxyStatus.running}
-                      <p class="text-xs text-amber-500">
-                        {selectedPlatform.setup_hint
-                          ? t(selectedPlatform.setup_hint)
-                          : t("settings_local_startHint", { name: selectedPlatform.name })}
-                      </p>
-                    {/if}
-                    {#if selectedPlatform.docs_url}
-                      <a
-                        href={selectedPlatform.docs_url}
-                        target="_blank"
-                        class="text-xs text-primary hover:underline"
-                      >
-                        {t("settings_local_viewDocs")} →
-                      </a>
-                    {/if}
-                  </div>
-
-                  <!-- Advanced settings toggle -->
-                  <button
-                    class="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    onclick={() => (localAdvancedOpen = !localAdvancedOpen)}
-                  >
-                    {localAdvancedOpen ? "▾" : "▸"}
-                    {t("settings_local_advanced")}
-                  </button>
-                {/if}
-
-                {#if selectedPlatform?.category !== "local" || localAdvancedOpen}
-                  <!-- Custom endpoint: Name + Auth Type -->
-                  {#if isCustomPlatform(selectedPlatformId ?? "")}
-                    <div class="flex gap-3">
-                      <div class="flex-1">
-                        <label class="text-sm font-medium mb-1.5 block"
-                          >{t("settings_general_customNameLabel")}</label
-                        >
-                        <Input
-                          value={findCredential(platformCredentials, selectedPlatformId ?? "")
-                            ?.name ?? ""}
-                          placeholder={t("settings_general_customNamePlaceholder")}
-                          class="mt-1 text-xs"
-                          onblur={(e) => {
-                            const val = e.currentTarget.value.trim();
-                            if (selectedPlatformId) {
-                              _upsertCredential(selectedPlatformId, { name: val || "Custom" });
-                              saveGeneralPatch({ platform_credentials: platformCredentials });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label class="text-sm font-medium mb-1.5 block"
-                          >{t("settings_general_authType")}</label
-                        >
-                        <div class="mt-1 flex rounded-md border border-input overflow-hidden">
-                          <button
-                            class="px-3 py-1.5 text-xs font-medium transition-colors {(findCredential(
-                              platformCredentials,
-                              selectedPlatformId ?? '',
-                            )?.auth_env_var ?? 'ANTHROPIC_AUTH_TOKEN') === 'ANTHROPIC_AUTH_TOKEN'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'}"
-                            onclick={() => {
-                              if (selectedPlatformId) {
-                                _upsertCredential(selectedPlatformId, {
-                                  auth_env_var: "ANTHROPIC_AUTH_TOKEN",
-                                });
-                                saveGeneralPatch({ platform_credentials: platformCredentials });
-                              }
-                            }}>Bearer</button
-                          >
-                          <button
-                            class="px-3 py-1.5 text-xs font-medium transition-colors border-l border-input {(findCredential(
-                              platformCredentials,
-                              selectedPlatformId ?? '',
-                            )?.auth_env_var ?? 'ANTHROPIC_AUTH_TOKEN') === 'ANTHROPIC_API_KEY'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-accent'}"
-                            onclick={() => {
-                              if (selectedPlatformId) {
-                                _upsertCredential(selectedPlatformId, {
-                                  auth_env_var: "ANTHROPIC_API_KEY",
-                                });
-                                saveGeneralPatch({ platform_credentials: platformCredentials });
-                              }
-                            }}>x-api-key</button
-                          >
-                        </div>
-                      </div>
-                    </div>
-                  {/if}
-
-                  <!-- API Key input -->
-                  <div>
-                    <label class="text-sm font-medium mb-1.5 block" for="api-key"
-                      >{t("settings_general_apiKey")}</label
-                    >
-                    <div class="mt-1 flex gap-2">
-                      <div class="flex-1 relative">
-                        <Input
-                          bind:value={anthropicApiKey}
-                          placeholder={selectedPlatform?.key_placeholder ?? "<your-api-key>"}
-                          type={showApiKey ? "text" : "password"}
-                          class="font-mono text-xs"
-                          onblur={() => persistCurrentPlatform()}
-                        />
-                      </div>
-                      <button
-                        class="rounded-md border px-3 py-2 text-xs text-muted-foreground hover:bg-accent transition-colors"
-                        onclick={() => (showApiKey = !showApiKey)}
-                      >
-                        {showApiKey ? t("settings_general_hide") : t("settings_general_show")}
-                      </button>
-                      {#if selectedPlatform?.category !== "local"}
-                        {@const cred = findCredential(
-                          platformCredentials,
-                          selectedPlatformId ?? "",
-                        )}
-                        {@const authEnvVar =
-                          cred?.auth_env_var ||
-                          selectedPlatform?.auth_env_var ||
-                          "ANTHROPIC_API_KEY"}
-                        {@const [presetOpusTest, presetSonnetTest] = expandModelsToTiers(
-                          selectedPlatform?.models,
-                        )}
-                        {@const testModel =
-                          modelSonnet.trim() ||
-                          modelOpus.trim() ||
-                          presetSonnetTest ||
-                          presetOpusTest ||
-                          ""}
-                        {@const isCustom = isCustomPlatform(selectedPlatformId ?? "")}
-                        {@const noKey = !anthropicApiKey}
-                        {@const noUrl = isCustom && !anthropicBaseUrl.trim()}
-                        {@const disableReason = noKey
-                          ? t("settings_apiTest_noKey")
-                          : noUrl
-                            ? t("settings_apiTest_noUrl")
-                            : ""}
-                        <button
-                          class="rounded-md border px-3 py-2 text-xs transition-colors {disableReason ||
-                          apiTestLoading
-                            ? 'text-muted-foreground/50 cursor-not-allowed'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground'}"
-                          disabled={!!disableReason || apiTestLoading}
-                          title={disableReason || ""}
-                          onclick={async () => {
-                            const myRequestId = ++apiTestRequestId;
-                            const myPlatformId = selectedPlatformId;
-                            apiTestLoading = true;
-                            apiTestResult = null;
-                            dbg("settings", "testApi start", {
-                              platform: myPlatformId,
-                              model: testModel,
-                              authEnvVar,
-                              reqId: myRequestId,
-                            });
-                            try {
-                              const result = await api.testApiConnectivity(
-                                anthropicApiKey,
-                                anthropicBaseUrl,
-                                authEnvVar,
-                                testModel,
-                              );
-                              if (myRequestId !== apiTestRequestId) return;
-                              if (myPlatformId !== selectedPlatformId) return;
-                              apiTestResult = result;
-                              if (result.success) {
-                                dbg("settings", "testApi success", { latencyMs: result.latencyMs });
-                              } else {
-                                dbgWarn("settings", "testApi error", result.error);
-                              }
-                            } catch (e) {
-                              if (
-                                myRequestId !== apiTestRequestId ||
-                                myPlatformId !== selectedPlatformId
-                              )
-                                return;
-                              apiTestResult = {
-                                success: false,
-                                latencyMs: 0,
-                                error: String(e),
-                                partial: false,
-                              };
-                              dbgWarn("settings", "testApi error", e);
-                            } finally {
-                              if (myRequestId === apiTestRequestId) apiTestLoading = false;
-                            }
-                          }}
-                        >
-                          {t("settings_apiTest")}
-                        </button>
-                      {/if}
-                    </div>
-                    <!-- API test result -->
-                    {#if apiTestLoading}
-                      <div class="mt-1.5 flex items-center gap-1.5">
-                        <span class="h-2 w-2 rounded-full bg-amber-400 animate-pulse"></span>
-                        <span class="text-xs text-muted-foreground"
-                          >{t("settings_apiTest_testing")}</span
-                        >
-                      </div>
-                    {:else if apiTestResult?.success && apiTestResult.partial}
-                      <div class="mt-1.5 flex items-center gap-1.5">
-                        <span class="h-2 w-2 rounded-full bg-green-500"></span>
-                        <span class="text-xs text-green-600 dark:text-green-400"
-                          >{t("settings_apiTest_partial", {
-                            latency: String(apiTestResult.latencyMs),
-                          })}</span
-                        >
-                      </div>
-                    {:else if apiTestResult?.success}
-                      <div class="mt-1.5 flex items-center gap-1.5">
-                        <span class="h-2 w-2 rounded-full bg-green-500"></span>
-                        <span class="text-xs text-green-600 dark:text-green-400"
-                          >{t("settings_apiTest_success", {
-                            latency: String(apiTestResult.latencyMs),
-                          })}</span
-                        >
-                      </div>
-                    {:else if apiTestResult && !apiTestResult.success}
-                      <div class="mt-1.5 flex items-center gap-1.5">
-                        <span class="h-2 w-2 rounded-full bg-red-500"></span>
-                        <span class="text-xs text-red-600 dark:text-red-400"
-                          >{apiTestResult.error ?? t("settings_apiTest_failed")}</span
-                        >
-                      </div>
-                    {:else if selectedPlatform?.id === "ollama"}
-                      <p class="mt-1 text-xs text-muted-foreground">{t("setup_noKeyNeeded")}</p>
-                    {:else}
-                      <p class="mt-1 text-xs text-muted-foreground">
-                        {t("settings_general_apiKeyStored")}
-                      </p>
-                    {/if}
-                  </div>
-
-                  <!-- Base URL (only show for custom or direct editing) -->
-                  <div>
-                    <label class="text-sm font-medium mb-1.5 block" for="base-url"
-                      >{t("settings_general_baseUrl")}</label
-                    >
-                    <Input
-                      bind:value={anthropicBaseUrl}
-                      placeholder="https://api.anthropic.com"
-                      class="mt-1 font-mono text-xs"
-                      disabled={selectedPlatformId !== null &&
-                        selectedPlatformId !== "anthropic" &&
-                        selectedPlatform?.category !== "local" &&
-                        !isCustomPlatform(selectedPlatformId ?? "")}
-                      onblur={() => persistCurrentPlatform()}
-                    />
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      {#if selectedPlatform && selectedPlatform.auth_env_var === "ANTHROPIC_AUTH_TOKEN"}
-                        {t("setup_authTypeBearer")}
-                      {:else if selectedPlatform && selectedPlatform.auth_env_var === "ANTHROPIC_API_KEY"}
-                        {t("setup_authTypeApiKey")}
-                      {:else}
-                        {t("settings_general_baseUrlHelp")}
-                      {/if}
-                    </p>
-                  </div>
-
-                  <!-- Models (3-tier: Opus / Sonnet / Haiku) -->
-                  {@const [presetOpus, presetSonnet, presetHaiku] = expandModelsToTiers(
-                    selectedPlatform?.models,
-                  )}
-                  {@const phOpus = presetOpus || t("settings_general_modelsPlaceholder")}
-                  {@const phSonnet = presetSonnet || t("settings_general_modelsPlaceholder")}
-                  {@const phHaiku = presetHaiku || t("settings_general_modelsPlaceholder")}
-                  <div>
-                    <label class="text-sm font-medium mb-1.5 block"
-                      >{t("settings_general_models")}</label
-                    >
-                    <div class="mt-1 space-y-1.5">
-                      <div class="flex items-center gap-2">
-                        <span class="text-xs text-muted-foreground w-24 shrink-0 text-right"
-                          >{t("settings_general_modelOpus")}</span
-                        >
-                        <Input
-                          bind:value={modelOpus}
-                          placeholder={phOpus}
-                          class="flex-1 font-mono text-xs"
-                          onblur={() => persistCurrentPlatform()}
-                        />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span
-                          class="text-xs text-muted-foreground w-24 shrink-0 text-right font-medium"
-                          >{t("settings_general_modelSonnet")}</span
-                        >
-                        <Input
-                          bind:value={modelSonnet}
-                          placeholder={phSonnet}
-                          class="flex-1 font-mono text-xs"
-                          onblur={() => persistCurrentPlatform()}
-                        />
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="text-xs text-muted-foreground w-24 shrink-0 text-right"
-                          >{t("settings_general_modelHaiku")}</span
-                        >
-                        <Input
-                          bind:value={modelHaiku}
-                          placeholder={phHaiku}
-                          class="flex-1 font-mono text-xs"
-                          onblur={() => persistCurrentPlatform()}
-                        />
-                      </div>
-                    </div>
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      {t("settings_general_modelsHelp")}
-                    </p>
-                  </div>
-
-                  <!-- Extra Environment Variables -->
-                  <div>
-                    <label class="text-sm font-medium mb-1.5 block" for="extra-env-section">
-                      {t("settings_general_extraEnv")}
-                    </label>
-                    {#each platformExtraEnv as envVar, i}
-                      <div class="flex gap-1.5 mt-1.5">
-                        <Input
-                          bind:value={envVar.key}
-                          placeholder={t("settings_general_envKeyPlaceholder")}
-                          class="flex-1 font-mono text-xs"
-                          oninput={() => markExtraEnvTouched()}
-                          onblur={() => persistCurrentPlatform()}
-                          onpaste={(e: ClipboardEvent) => handleEnvKeyPaste(e, i)}
-                        />
-                        <Input
-                          bind:value={envVar.value}
-                          placeholder={t("settings_general_envValuePlaceholder")}
-                          class="flex-1 font-mono text-xs"
-                          oninput={() => markExtraEnvTouched()}
-                          onblur={() => persistCurrentPlatform()}
-                        />
-                        <button
-                          class="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          aria-label={t("settings_remote_delete")}
-                          onclick={() => {
-                            platformExtraEnv = platformExtraEnv.filter((_, idx) => idx !== i);
-                            markExtraEnvTouched();
-                            persistCurrentPlatform();
-                          }}
-                        >
-                          <svg
-                            class="h-3.5 w-3.5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    {/each}
-                    <button
-                      class="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      onclick={() => {
-                        platformExtraEnv = [...platformExtraEnv, { key: "", value: "" }];
-                      }}
-                    >
-                      <svg
-                        class="h-3 w-3"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M12 5v14" /><path d="M5 12h14" />
-                      </svg>
-                      {t("settings_general_addEnvVar")}
-                    </button>
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      {t("settings_general_extraEnvHelp")}
-                    </p>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          {:else}
-            {@const activeNativeTab = connectionAgentTabs.find(
-              (tab) => tab.id === connectionAgentTab,
-            )}
-            {@const cliCheck = connectionCliChecks[connectionAgentTab]}
-            {@const nativeLoading = nativeSettingsLoading[connectionAgentTab]}
-            {@const nativeSaving = nativeSettingsSaving[connectionAgentTab]}
-            {@const defaultNativeCommand = connectionAgentTab === "codex" ? "codex" : "gemini"}
-            {@const nativeCommandDisplay =
-              nativeCommandPath[connectionAgentTab].trim() || defaultNativeCommand}
-            {@const nativeCliProfile = savedConnectionProfile(connectionAgentTab, "cli")}
-            {@const nativeApiProfile = savedConnectionProfile(connectionAgentTab, "api")}
-            <div>
-              <span class="text-sm font-medium mb-2 block">{t("settings_auth_modeLabel")}</span>
-              <div class="mt-1 grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  class="flex flex-col items-center gap-2 rounded-lg border p-4 text-sm transition-all duration-150
-                  {nativeAuthMode[connectionAgentTab] === 'cli'
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                    : 'hover:bg-accent hover:border-ring/30'}"
-                  onclick={() =>
-                    (nativeAuthMode = { ...nativeAuthMode, [connectionAgentTab]: "cli" })}
-                >
-                  <div
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10"
-                  >
-                    <svg
-                      class="h-5 w-5 text-emerald-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path
-                        d="M7 11V7a5 5 0 0 1 10 0v4"
-                      />
-                    </svg>
-                  </div>
-                  <span class="font-medium">{t("auth_cliAuth")}</span>
-                  <span class="text-[10px] text-muted-foreground text-center">
-                    {nativeAgentLabel(connectionAgentTab)} CLI manages login or its configured API key.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="flex flex-col items-center gap-2 rounded-lg border p-4 text-sm transition-all duration-150
-                  {nativeAuthMode[connectionAgentTab] === 'api'
-                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                    : 'hover:bg-accent hover:border-ring/30'}"
-                  onclick={() =>
-                    (nativeAuthMode = { ...nativeAuthMode, [connectionAgentTab]: "api" })}
-                >
-                  <div
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-violet-500/10"
-                  >
-                    <svg
-                      class="h-5 w-5 text-violet-400"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                      />
-                    </svg>
-                  </div>
-                  <span class="font-medium">{t("auth_appApiKey")}</span>
-                  <span class="text-[10px] text-muted-foreground text-center">
-                    App injects {defaultAuthEnvVar(connectionAgentTab)} from a saved connection profile.
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {#if nativeAuthMode[connectionAgentTab] === "cli"}
-              <div class="space-y-4 rounded-lg border border-border/50 p-4">
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_cliLoginTitle")}</h3>
-                  <p class="text-xs text-muted-foreground mb-2">
-                    {nativeAgentLabel(connectionAgentTab)} uses its native CLI account and config.
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="h-2 w-2 rounded-full {cliCheck?.found
-                        ? 'bg-emerald-500'
-                        : 'bg-muted-foreground/40'}"
-                    ></span>
-                    <span
-                      class="text-xs {cliCheck?.found
-                        ? 'text-emerald-500'
-                        : 'text-muted-foreground'}"
-                    >
-                      {cliCheck?.found
-                        ? t("settings_connection_cliDetected")
-                        : t("settings_connection_cliMissing")}
-                    </span>
-                  </div>
-                  {#if cliCheck?.path}
-                    <p class="mt-1 break-all font-mono text-[10px] text-muted-foreground/70 italic">
-                      {cliCheck.path}
-                    </p>
-                  {/if}
-                </div>
-
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_cliApiKeyTitle")}</h3>
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="h-2 w-2 rounded-full {nativeCliProfile
-                        ? 'bg-emerald-500'
-                        : 'bg-muted-foreground/40'}"
-                    ></span>
-                    <span
-                      class="text-xs {nativeCliProfile
-                        ? 'text-emerald-500'
-                        : 'text-muted-foreground'}"
-                    >
-                      {nativeCliProfile
-                        ? nativeCliProfile.label
-                        : t("settings_auth_cliApiKeyNotSet")}
-                    </span>
-                  </div>
-                  <p class="mt-1 text-[10px] text-muted-foreground/70 italic">
-                    Edit {nativeCliConfigPath(connectionAgentTab)} or add a CLI profile below.
-                  </p>
-                </div>
-              </div>
-            {:else}
-              <div class="space-y-4 rounded-lg border border-border/50 p-4">
-                <div>
-                  <h3 class="text-sm font-medium mb-1">{t("settings_auth_appApiKeyTitle")}</h3>
-                  <p class="text-xs text-muted-foreground mb-3">
-                    {nativeAgentLabel(connectionAgentTab)} API keys are stored as saved connection profiles
-                    and injected when a session starts.
-                  </p>
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="h-2 w-2 rounded-full {nativeApiProfile?.api_key
-                        ? 'bg-emerald-500'
-                        : 'bg-muted-foreground/40'}"
-                    ></span>
-                    <span
-                      class="text-xs {nativeApiProfile?.api_key
-                        ? 'text-emerald-500'
-                        : 'text-muted-foreground'}"
-                    >
-                      {nativeApiProfile?.api_key
-                        ? `${defaultAuthEnvVar(connectionAgentTab)} ${apiKeyHint(nativeApiProfile.api_key)}`
-                        : t("settings_auth_cliApiKeyNotSet")}
-                    </span>
-                  </div>
-                  {#if nativeApiProfile?.base_url}
-                    <p class="mt-1 break-all font-mono text-[10px] text-muted-foreground/70 italic">
-                      {nativeApiProfile.base_url}
-                    </p>
-                  {/if}
-                </div>
-              </div>
-            {/if}
-
-            <div class="space-y-4 rounded-lg border border-border/50 p-4">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <h3 class="text-sm font-medium">
-                    {connectionAgentTab === "codex" ? "Codex CLI" : "Gemini CLI"}
-                  </h3>
-                  <p class="mt-1 text-xs text-muted-foreground">
-                    {t("settings_connection_nativeDesc")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  class="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                  disabled={connectionCliChecking}
-                  onclick={() => void refreshConnectionCliChecks()}
-                >
-                  {connectionCliChecking ? t("common_loading") : t("common_refresh")}
-                </button>
-              </div>
-
-              <div class="grid gap-3 md:grid-cols-2">
-                <div class="rounded-md border border-border/60 bg-muted/20 p-3">
-                  <div class="mb-2 flex items-center gap-2">
-                    <span
-                      class="h-2 w-2 rounded-full {cliCheck?.found
-                        ? 'bg-emerald-500'
-                        : 'bg-muted-foreground/40'}"
-                    ></span>
-                    <span class="text-xs font-medium">
-                      {cliCheck?.found
-                        ? t("settings_connection_cliDetected")
-                        : t("settings_connection_cliMissing")}
-                    </span>
-                  </div>
-                  {#if cliCheck?.version}
-                    <p class="text-xs text-muted-foreground">
-                      {t("settings_remote_version", { version: cliCheck.version })}
-                    </p>
-                  {/if}
-                  {#if cliCheck?.path}
-                    <p class="mt-1 break-all font-mono text-[11px] text-muted-foreground">
-                      {cliCheck.path}
-                    </p>
-                  {:else}
-                    <p class="text-xs text-muted-foreground">
-                      {t("settings_connection_installHint")}
-                    </p>
-                  {/if}
-                </div>
-
-                <div class="rounded-md border border-border/60 bg-muted/20 p-3">
-                  <p class="text-xs font-medium">{t("settings_connection_launchCommand")}</p>
-                  <code
-                    class="mt-2 block rounded bg-background px-2 py-1.5 font-mono text-[11px] text-foreground"
-                  >
-                    {activeNativeTab?.command}
-                  </code>
-                  <p class="mt-2 text-xs text-muted-foreground">
-                    {t("settings_connection_nativeConfigHint")}
-                  </p>
-                </div>
-              </div>
-
-              <div class="space-y-4 rounded-md border border-border/60 bg-muted/10 p-4">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      Launch Settings
-                    </p>
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      These settings are saved per native CLI and used when a new session starts.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent disabled:opacity-50"
-                    disabled={nativeLoading || nativeSaving}
-                    onclick={() => void refreshNativeAgentSettings(connectionAgentTab)}
-                  >
-                    {nativeLoading ? t("common_loading") : t("common_refresh")}
-                  </button>
-                </div>
-
-                <div class="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <p class="text-sm font-medium mb-1.5">CLI executable</p>
-                    <Input
-                      value={nativeCommandPath[connectionAgentTab]}
-                      placeholder={defaultNativeCommand}
-                      class="font-mono text-xs"
-                      oninput={(e) => {
-                        nativeCommandPath = {
-                          ...nativeCommandPath,
-                          [connectionAgentTab]: (e.currentTarget as HTMLInputElement).value,
-                        };
-                      }}
-                      onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
-                    />
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      Leave empty to use <code>{defaultNativeCommand}</code> from PATH, or set a full
-                      CLI path.
-                    </p>
-                  </div>
-                  <div>
-                    <p class="text-sm font-medium mb-1.5">Default model</p>
-                    <Input
-                      value={nativeModel[connectionAgentTab]}
-                      placeholder={connectionAgentTab === "codex" ? "gpt-5.5" : "gemini-2.5-pro"}
-                      class="font-mono text-xs"
-                      oninput={(e) => {
-                        nativeModel = {
-                          ...nativeModel,
-                          [connectionAgentTab]: (e.currentTarget as HTMLInputElement).value,
-                        };
-                      }}
-                      onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
-                    />
-                    <p class="mt-1 text-xs text-muted-foreground">
-                      Empty means the native CLI decides from its own config.
-                    </p>
-                  </div>
-                </div>
-
-                <div class="grid gap-3 md:grid-cols-2">
-                  <button
-                    type="button"
-                    class="rounded-md border p-3 text-left transition-colors {nativeYoloMode[
-                      connectionAgentTab
-                    ]
-                      ? 'border-amber-500/40 bg-amber-500/10'
-                      : 'border-border/60 hover:bg-accent'}"
-                    onclick={() => {
-                      nativeYoloMode = {
-                        ...nativeYoloMode,
-                        [connectionAgentTab]: !nativeYoloMode[connectionAgentTab],
-                      };
-                      void saveNativeAgentSettings(connectionAgentTab);
-                    }}
-                  >
-                    <span class="flex items-center gap-2 text-sm font-medium">
-                      <span
-                        class="h-2 w-2 rounded-full {nativeYoloMode[connectionAgentTab]
-                          ? 'bg-amber-500'
-                          : 'bg-muted-foreground/40'}"
-                      ></span>
-                      No-review mode
-                    </span>
-                    <span class="mt-1 block text-xs text-muted-foreground">
-                      {connectionAgentTab === "gemini"
-                        ? "Launches Gemini with --yolo."
-                        : "Launches Codex with its bypass-approvals flag."}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-md border p-3 text-left transition-colors {nativeNoSessionPersistence[
-                      connectionAgentTab
-                    ]
-                      ? 'border-primary/40 bg-primary/10'
-                      : 'border-border/60 hover:bg-accent'}"
-                    onclick={() => {
-                      nativeNoSessionPersistence = {
-                        ...nativeNoSessionPersistence,
-                        [connectionAgentTab]: !nativeNoSessionPersistence[connectionAgentTab],
-                      };
-                      void saveNativeAgentSettings(connectionAgentTab);
-                    }}
-                  >
-                    <span class="flex items-center gap-2 text-sm font-medium">
-                      <span
-                        class="h-2 w-2 rounded-full {nativeNoSessionPersistence[connectionAgentTab]
-                          ? 'bg-primary'
-                          : 'bg-muted-foreground/40'}"
-                      ></span>
-                      Ephemeral session
-                    </span>
-                    <span class="mt-1 block text-xs text-muted-foreground">
-                      Avoids resume history where the native CLI supports it.
-                    </span>
-                  </button>
-                </div>
-
-                <div>
-                  <p class="text-sm font-medium mb-1.5">Included directories</p>
-                  <div class="space-y-1.5">
-                    {#each nativeAddDirs[connectionAgentTab] as dir, i}
-                      <div class="flex gap-1.5">
-                        <Input
-                          value={dir}
-                          placeholder="D:\work\shared"
-                          class="flex-1 font-mono text-xs"
-                          oninput={(e) =>
-                            updateNativeAddDir(
-                              connectionAgentTab,
-                              i,
-                              (e.currentTarget as HTMLInputElement).value,
-                            )}
-                          onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
-                        />
-                        <button
-                          type="button"
-                          class="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          aria-label={t("settings_remote_delete")}
-                          onclick={() => {
-                            removeNativeAddDir(connectionAgentTab, i);
-                            void saveNativeAgentSettings(connectionAgentTab);
-                          }}
-                        >
-                          <svg
-                            class="h-3.5 w-3.5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    {/each}
-                  </div>
-                  <button
-                    type="button"
-                    class="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    onclick={() => addNativeAddDir(connectionAgentTab)}
-                  >
-                    <svg
-                      class="h-3 w-3"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path d="M12 5v14" /><path d="M5 12h14" />
-                    </svg>
-                    Add directory
-                  </button>
-                  <p class="mt-1 text-xs text-muted-foreground">
-                    Codex uses <code>--add-dir</code>; Gemini uses
-                    <code>--include-directories</code>.
-                  </p>
-                </div>
-
-                <div>
-                  <label for="native-extra-args" class="text-sm font-medium mb-1.5 block"
-                    >Extra arguments</label
-                  >
-                  <textarea
-                    id="native-extra-args"
-                    value={nativeExtraArgs[connectionAgentTab]}
-                    placeholder="One CLI argument per line"
-                    rows="3"
-                    class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
-                    oninput={(e) => {
-                      nativeExtraArgs = {
-                        ...nativeExtraArgs,
-                        [connectionAgentTab]: (e.currentTarget as HTMLTextAreaElement).value,
-                      };
-                    }}
-                    onblur={() => void saveNativeAgentSettings(connectionAgentTab)}
-                  ></textarea>
-                  <p class="mt-1 text-xs text-muted-foreground">
-                    Appended before the prompt. Use this for native CLI flags not yet modeled above.
-                  </p>
-                </div>
-
-                <div class="rounded-md border border-border/60 bg-background/70 p-3">
-                  <p class="text-xs font-medium">{t("settings_connection_launchCommand")}</p>
-                  <code
-                    class="mt-2 block whitespace-pre-wrap rounded bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-foreground"
-                  >
-                    {nativeCommandDisplay}
-                    {connectionAgentTab === "codex"
-                      ? "exec --skip-git-repo-check"
-                      : "--output-format text -p <prompt>"}
-                    {nativeYoloMode[connectionAgentTab]
-                      ? connectionAgentTab === "gemini"
-                        ? " --yolo"
-                        : " --dangerously-bypass-approvals-and-sandbox"
-                      : ""}
-                  </code>
-                  {#if nativeSaving}
-                    <p class="mt-2 text-xs text-muted-foreground">{t("common_loading")}</p>
-                  {/if}
-                </div>
-              </div>
-            </div>
-          {/if}
-
-          <div class="space-y-3 rounded-lg border border-border/50 p-4">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 class="text-sm font-medium">Saved Login Methods</h3>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  JSON profiles for the active CLI. New chats and roundtables can launch from these
-                  saved connections.
-                </p>
-              </div>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent"
-                  onclick={() => addConnectionProfileDraft(connectionAgentTab, "cli")}
-                >
-                  Add CLI
-                </button>
-                <button
-                  type="button"
-                  class="h-8 rounded-md border border-border px-3 text-xs transition-colors hover:bg-accent"
-                  onclick={() => addConnectionProfileDraft(connectionAgentTab, "api")}
-                >
-                  Add API
-                </button>
-                <button
-                  type="button"
-                  class="h-8 rounded-md bg-primary px-3 text-xs text-primary-foreground disabled:opacity-50"
-                  onclick={() => void saveConnectionProfilesForAgent(connectionAgentTab)}
-                >
-                  Save JSON
-                </button>
-              </div>
-            </div>
-            <textarea
-              value={connectionProfileJson[connectionAgentTab]}
-              rows="9"
-              spellcheck="false"
-              class="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
-              oninput={(e) => {
-                connectionProfileJson = {
-                  ...connectionProfileJson,
-                  [connectionAgentTab]: (e.currentTarget as HTMLTextAreaElement).value,
-                };
-                connectionProfileError = { ...connectionProfileError, [connectionAgentTab]: "" };
-              }}
-            ></textarea>
-            {#if connectionProfileError[connectionAgentTab]}
-              <p class="text-xs text-destructive">{connectionProfileError[connectionAgentTab]}</p>
-            {/if}
-          </div>
         </Card>
-
-        {#if IS_WINDOWS}
-          <Card class="p-6 space-y-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  {t("settings_msvc_title")}
-                </h2>
-                <p class="mt-1 text-xs text-muted-foreground">{t("settings_msvc_desc")}</p>
-              </div>
-              {#if msvcEnvLoading}
-                <span class="text-xs text-muted-foreground">{t("settings_msvc_checking")}</span>
-              {/if}
-            </div>
-
-            <div class="grid grid-cols-3 gap-2">
-              {#each ["auto", "always", "off"] as WindowsMsvcEnvMode[] as mode}
-                <button
-                  class="rounded-md border px-3 py-2 text-sm transition-colors disabled:opacity-60 {msvcEnvMode ===
-                  mode
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-accent'}"
-                  disabled={msvcEnvSaving}
-                  onclick={() => saveMsvcEnvMode(mode)}
-                >
-                  {msvcEnvModeLabel(mode)}
-                </button>
-              {/each}
-            </div>
-
-            {#if msvcEnvStatus}
-              <div class="rounded-md border px-3 py-2 {msvcEnvStateClass(msvcEnvStatus.state)}">
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                  <span class="font-medium">{msvcEnvStateLabel(msvcEnvStatus.state)}</span>
-                  {#if msvcEnvStatus.source_path}
-                    <span class="font-mono text-[11px] opacity-80">{msvcEnvStatus.source_path}</span
-                    >
-                  {/if}
-                  {#if msvcEnvStatus.arch}
-                    <span class="text-[11px] opacity-80">{msvcEnvStatus.arch}</span>
-                  {/if}
-                </div>
-                {#if msvcEnvStatus.message}
-                  <p class="mt-1 text-xs opacity-90">{msvcEnvStatus.message}</p>
-                {/if}
-                {#if msvcEnvStatus.next_action}
-                  <p class="mt-1 text-xs opacity-80">{msvcEnvStatus.next_action}</p>
-                {/if}
-              </div>
-            {/if}
-          </Card>
-        {/if}
-
-        <!-- Setup Wizard button -->
-        <div class="flex items-center justify-between rounded-lg border border-border p-4">
-          <div>
-            <p class="text-sm font-medium">{t("settings_general_setupWizard")}</p>
-            <p class="text-xs text-muted-foreground">{t("settings_general_setupWizardDesc")}</p>
-          </div>
-          <button
-            class="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            onclick={openSetupWizard}>{t("settings_general_runWizard")}</button
-          >
-        </div>
       </div>
-
-      <!-- ═══ CLI Config tab ═══ -->
     {:else if activeTab === "cli-config"}
       {#if cliConfigLoading && !cliConfigLoaded}
         <div class="flex items-center justify-center py-12">

@@ -508,6 +508,21 @@ fn resolve_auth_env_for_platform(
     resolve_auth_env(remote, settings)
 }
 
+fn is_phase7_claude_compatible_api_platform(platform_id: &str) -> bool {
+    matches!(platform_id, "deepseek" | "zhipu" | "zhipu-intl")
+}
+
+fn effective_platform_for_auth_mode<'a>(
+    auth_mode: &str,
+    requested: Option<&'a str>,
+) -> Option<&'a str> {
+    match (auth_mode, requested) {
+        ("cli", Some(pid)) if is_phase7_claude_compatible_api_platform(pid) => Some(pid),
+        ("cli", _) => None,
+        (_, pid) => pid,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_session_impl(
     emitter: &Arc<BroadcastEmitter>,
@@ -583,18 +598,16 @@ pub(crate) async fn start_session_impl(
 
     // 2b. Resolve remote host from RunMeta (audit #2: single truth source)
     let remote = resolve_remote_host(&meta)?;
-    // Use per-session platform_id: prefer IPC param, fallback to RunMeta's saved platform_id
-    // CLI Auth mode: ignore platform_id — CLI manages its own connection
-    let effective_pid = if user_settings.auth_mode == "cli" {
-        None
-    } else {
-        platform_id
-            .as_deref()
-            .or(connection_profile
-                .as_ref()
-                .and_then(|p| p.platform_id.as_deref()))
-            .or(meta.platform_id.as_deref())
-    };
+    // Use per-session platform_id: prefer IPC param, fallback to RunMeta's saved platform_id.
+    // Subscription Claude CLI ignores platform routing, but Claude-compatible API providers
+    // selected from the Phase 7 provider picker must still inject their API env/config.
+    let requested_pid = platform_id
+        .as_deref()
+        .or(connection_profile
+            .as_ref()
+            .and_then(|p| p.platform_id.as_deref()))
+        .or(meta.platform_id.as_deref());
+    let effective_pid = effective_platform_for_auth_mode(&user_settings.auth_mode, requested_pid);
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
     adapter::clear_model_if_provider_overrides(
         &mut adapter_settings,
@@ -1097,12 +1110,8 @@ pub(crate) async fn fork_session_impl(
     let user_settings = storage::settings::get_user_settings();
     let mut adapter = adapter::build_adapter_settings(&agent_settings, &user_settings, None);
     let remote = resolve_remote_host(&source)?;
-    // CLI Auth mode: ignore platform_id — CLI manages its own connection
-    let effective_pid = if user_settings.auth_mode == "cli" {
-        None
-    } else {
-        source.platform_id.as_deref()
-    };
+    let effective_pid =
+        effective_platform_for_auth_mode(&user_settings.auth_mode, source.platform_id.as_deref());
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
     adapter::clear_model_if_provider_overrides(
         &mut adapter,
@@ -1247,12 +1256,8 @@ pub(crate) async fn approve_session_tool_impl(
     let refreshed_agent = storage::settings::get_agent_settings(&meta.agent);
     let user = storage::settings::get_user_settings();
     let mut adapter = adapter::build_adapter_settings(&refreshed_agent, &user, None);
-    // CLI Auth mode: ignore platform_id — CLI manages its own connection
-    let effective_pid = if user.auth_mode == "cli" {
-        None
-    } else {
-        meta.platform_id.as_deref()
-    };
+    let effective_pid =
+        effective_platform_for_auth_mode(&user.auth_mode, meta.platform_id.as_deref());
     let resolved = resolve_auth_env_for_platform(&remote, &user, effective_pid);
     adapter::clear_model_if_provider_overrides(
         &mut adapter,
@@ -1953,11 +1958,8 @@ pub async fn side_question(
     // 2. Resolve auth
     let user_settings = storage::settings::get_user_settings();
     let remote = resolve_remote_host(&source)?;
-    let effective_pid = if user_settings.auth_mode == "cli" {
-        None
-    } else {
-        source.platform_id.as_deref()
-    };
+    let effective_pid =
+        effective_platform_for_auth_mode(&user_settings.auth_mode, source.platform_id.as_deref());
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
     let resolved = augment_with_shell_auth(
         resolved,
@@ -2433,6 +2435,35 @@ mod tests {
         assert_eq!(
             resolved.models.as_deref(),
             Some(vec!["claude-sonnet-4-6".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn phase7_api_platforms_survive_cli_auth_mode() {
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("deepseek")),
+            Some("deepseek")
+        );
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("zhipu")),
+            Some("zhipu")
+        );
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("zhipu-intl")),
+            Some("zhipu-intl")
+        );
+    }
+
+    #[test]
+    fn subscription_cli_auth_ignores_non_api_platforms() {
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("anthropic")),
+            None
+        );
+        assert_eq!(effective_platform_for_auth_mode("cli", None), None);
+        assert_eq!(
+            effective_platform_for_auth_mode("api", Some("anthropic")),
+            Some("anthropic")
         );
     }
 

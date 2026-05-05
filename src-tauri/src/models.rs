@@ -28,6 +28,7 @@ pub struct MemoryFileCandidate {
     pub path: String,
     pub label: String,
     pub scope: String, // "project" | "global" | "memory"
+    pub provider: Option<String>,
     pub exists: bool,
 }
 

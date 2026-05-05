@@ -325,13 +325,15 @@ export async function sendChatMessage(
   message: string,
   attachments?: Attachment[],
   model?: string,
+  resumeLatest?: boolean,
 ): Promise<void> {
   dbg("api", "sendChatMessage", {
     runId,
     msgLen: message.length,
     attachments: attachments?.length ?? 0,
+    resumeLatest: !!resumeLatest,
   });
-  return invoke("send_chat_message", { runId, message, attachments, model });
+  return invoke("send_chat_message", { runId, message, attachments, model, resumeLatest });
 }
 
 // CLI sync
@@ -897,7 +899,10 @@ export async function listStandaloneSkills(
   app?: ManagedCliApp,
 ): Promise<StandaloneSkill[]> {
   dbg("api", "listStandaloneSkills", { cwd, app });
-  return invoke<StandaloneSkill[]>("list_standalone_skills", { cwd: cwd ?? null, app: app ?? null });
+  return invoke<StandaloneSkill[]>("list_standalone_skills", {
+    cwd: cwd ?? null,
+    app: app ?? null,
+  });
 }
 
 export async function getSkillContent(

@@ -2,6 +2,7 @@ export interface MemoryFileCandidate {
   path: string;
   label: string;
   scope: "project" | "global" | "memory";
+  provider?: "claude" | "codex" | "gemini";
   exists: boolean;
 }
 

@@ -1,4 +1,5 @@
 use crate::agent::adapter;
+use crate::agent::native_pty;
 use crate::agent::pipe_parser::{CodexStdoutParser, PipeStdoutParser};
 use crate::agent::windows_msvc_env::SpawnEnvPlan;
 use crate::models::{ChatDelta, ChatDone, RunEventType};
@@ -133,12 +134,27 @@ pub async fn run_agent(
     let display_command = format_started_command(&command, &args);
     let process_command = resolve_process_command(&command);
     let (process_command, args) = resolve_spawn_invocation(process_command, args);
+    let native_transcript_mode = agent == "codex" || agent == "gemini";
     if process_command != command {
         log::debug!(
             "[stream] resolved command for spawn: {} -> {}",
             command,
             process_command
         );
+    }
+
+    if native_transcript_mode {
+        return native_pty::run_native_pty_agent(
+            app,
+            run_id,
+            process_command,
+            args,
+            cwd,
+            agent,
+            spawn_env_plan,
+            display_command,
+        )
+        .await;
     }
 
     let emit_run_event = |rt: RunEventType, payload: serde_json::Value| {
@@ -213,7 +229,6 @@ pub async fn run_agent(
     let run_id_err = run_id.clone();
     let app_out = app.clone();
     let agent_clone = agent.clone();
-
     // Stdout reader
     let stdout_handle = tokio::spawn(async move {
         let mut assistant_text = String::new();
@@ -342,25 +357,28 @@ pub async fn run_agent(
         stderr_text
     });
 
-    // Wait for stdout/stderr to close (= process exited or pipes broken).
-    // This completes without holding the ProcessMap lock.
-    let assistant_text = stdout_handle.await.unwrap_or_default();
-    let _stderr_text = stderr_handle.await.unwrap_or_default();
+    let (assistant_text, exit_code) = {
+        // Wait for stdout/stderr to close (= process exited or pipes broken).
+        // This completes without holding the ProcessMap lock.
+        let assistant_text = stdout_handle.await.unwrap_or_default();
+        let _stderr_text = stderr_handle.await.unwrap_or_default();
 
-    // Short lock: remove child from map, then wait() outside the lock.
-    // If stop_process already removed+killed the child, we get None → exit_code -1.
-    let removed_child = {
-        let mut map = process_map.lock().await;
-        map.remove(&run_id)
-    };
-    let exit_code = if let Some(mut child) = removed_child {
-        match child.wait().await {
-            Ok(status) => status.code().unwrap_or(1),
-            Err(_) => 1,
-        }
-    } else {
-        // Was killed by stop_run
-        -1
+        // Short lock: remove child from map, then wait() outside the lock.
+        // If stop_process already removed+killed the child, we get None → exit_code -1.
+        let removed_child = {
+            let mut map = process_map.lock().await;
+            map.remove(&run_id)
+        };
+        let exit_code = if let Some(mut child) = removed_child {
+            match child.wait().await {
+                Ok(status) => status.code().unwrap_or(1),
+                Err(_) => 1,
+            }
+        } else {
+            // Was killed by stop_run
+            -1
+        };
+        (assistant_text, exit_code)
     };
 
     // Save assistant event
@@ -425,6 +443,10 @@ pub async fn run_agent(
 
 pub async fn stop_process(process_map: &ProcessMap, run_id: &str) -> bool {
     log::debug!("[stream] stop_process: run_id={}", run_id);
+    if native_pty::stop_native_pty_process(run_id) {
+        log::debug!("[stream] stop_process: killed native pty run_id={}", run_id);
+        return true;
+    }
     // Short lock: remove child, then kill+wait outside the lock.
     let removed = {
         let mut map = process_map.lock().await;
@@ -448,18 +470,17 @@ mod tests {
     #[test]
     fn display_command_quotes_prompt_arguments_without_losing_boundaries() {
         let args = vec![
-            "exec".to_string(),
-            "--skip-git-repo-check".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "--no-alt-screen".to_string(),
             "--model".to_string(),
             "gpt-5.5".to_string(),
-            "--dangerously-bypass-approvals-and-sandbox".to_string(),
             "你好".to_string(),
             "hello world".to_string(),
         ];
 
         assert_eq!(
             format_started_command("codex", &args),
-            "codex exec --skip-git-repo-check --model gpt-5.5 --dangerously-bypass-approvals-and-sandbox \"你好\" \"hello world\""
+            "codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen --model gpt-5.5 \"你好\" \"hello world\""
         );
     }
 

@@ -13,21 +13,21 @@ describe("native permission mapping", () => {
     expect(isNativeAgent("claude")).toBe(false);
   });
 
-  it("maps no-review modes to native yolo", () => {
+  it("maps native permission selections to forced elevated policy", () => {
     expect(permissionModeToNativeYolo("bypassPermissions")).toBe(true);
     expect(permissionModeToNativeYolo("dontAsk")).toBe(true);
-    expect(permissionModeToNativeYolo("default")).toBe(false);
+    expect(permissionModeToNativeYolo("default")).toBe(true);
     expect(permissionModeToNativeYolo("acceptEdits")).toBe(false);
   });
 
-  it("maps native yolo state back to the prompt permission mode", () => {
+  it("maps stored native yolo state back to visible forced bypass mode", () => {
     expect(nativeYoloToPermissionMode(true)).toBe("bypassPermissions");
-    expect(nativeYoloToPermissionMode(false)).toBe("default");
-    expect(nativeYoloToPermissionMode(null)).toBe("default");
+    expect(nativeYoloToPermissionMode(false)).toBe("bypassPermissions");
+    expect(nativeYoloToPermissionMode(null)).toBe("bypassPermissions");
   });
 
-  it("hides unsupported native permission modes", () => {
-    expect(isPermissionModeVisibleForAgent("codex", "default")).toBe(true);
+  it("shows only forced bypass for native agents", () => {
+    expect(isPermissionModeVisibleForAgent("codex", "default")).toBe(false);
     expect(isPermissionModeVisibleForAgent("codex", "bypassPermissions")).toBe(true);
     expect(isPermissionModeVisibleForAgent("codex", "acceptEdits")).toBe(false);
     expect(isPermissionModeVisibleForAgent("gemini", "plan")).toBe(false);

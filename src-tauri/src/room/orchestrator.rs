@@ -27,6 +27,9 @@ static ROOM_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>
     Lazy::new(|| Mutex::new(HashMap::new()));
 static RUN_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+const MAX_DEBATE_OPINION_CHARS: usize = 5_000;
+const MAX_DEBATE_OPINION_KEEP: usize = 2_000;
+const MAX_SUMMARY_PER_VIEW_CHARS: usize = 3_000;
 
 #[derive(Clone)]
 struct RoundtableTarget {
@@ -91,7 +94,8 @@ pub async fn run_roundtable_turn_with_runtime(
     let (mode, user_input, prompt, targets, is_private) = match command {
         RoundtableCommand::Fanout { input } => {
             let targets = active_targets(&room.participants, sessions).await;
-            (RoomTurnMode::Fanout, input.clone(), input, targets, false)
+            let prompt = build_fanout_prompt(public_turns.len() as u64 + 1, &input, None);
+            (RoomTurnMode::Fanout, input, prompt, targets, false)
         }
         RoundtableCommand::Debate { input } => {
             let targets = active_targets(&room.participants, sessions).await;
@@ -700,34 +704,81 @@ pub fn build_debate_prompt(
     previous_turns: &[RoomTurn],
     participants: &[RoomParticipant],
 ) -> String {
-    let mut body = String::from(
-        "Debate the room's previous answers. Challenge assumptions, compare tradeoffs, and respond with your own position.",
-    );
-    let instruction = instruction.trim();
-    if !instruction.is_empty() {
-        body.push_str("\n\nFocus:\n");
-        body.push_str(instruction);
-    }
-    body.push_str("\n\nPrevious peer responses:\n");
-
-    for turn in previous_turns
+    let turn_num = previous_turns
         .iter()
         .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
-    {
-        for response in turn
-            .responses
-            .iter()
-            .filter(|response| response.participant_id != target.id)
-        {
-            let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(": ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
+        .count() as u64
+        + 1;
+    let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · @debate]\n");
+    let instruction = instruction.trim();
+    if !instruction.is_empty() {
+        body.push_str("\n## 用户在本轮补充的新信息\n");
+        body.push_str(instruction);
+        body.push('\n');
+    }
+    body.push_str("\n## 另两家上一轮观点\n");
+
+    let Some(last_turn) = previous_turns
+        .iter()
+        .rev()
+        .find(|turn| matches!(turn.mode, RoomTurnMode::Fanout | RoomTurnMode::Debate))
+    else {
+        body.push_str("(无另两家上轮记录)\n");
+        body.push_str("\n## 你的任务\n请基于用户问题发表新观点。\n");
+        return body;
+    };
+
+    let mut appended = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    for response in &last_turn.responses {
+        seen.insert(response.participant_id.as_str());
+        if response.participant_id == target.id {
+            continue;
         }
+        let label = participant_label(participants, &response.participant_id);
+        append_roundtable_view(
+            &mut body,
+            &label,
+            response.preview.as_deref(),
+            &response.status,
+            response.error.as_deref(),
+            MAX_DEBATE_OPINION_CHARS,
+            DebateViewStyle::MiddleEllipsis,
+        );
+        appended += 1;
+    }
+    for participant_id in &last_turn.target_participant_ids {
+        if participant_id == &target.id || seen.contains(participant_id.as_str()) {
+            continue;
+        }
+        let label = participant_label(participants, participant_id);
+        body.push_str("\n### ");
+        body.push_str(&label);
+        body.push_str(" 的观点\n");
+        body.push('（');
+        body.push_str(&label);
+        body.push_str(" 本轮因故未参与，请勿引用）\n");
+        appended += 1;
+    }
+    if appended == 0 {
+        body.push_str("(无另两家上轮记录)\n");
     }
 
+    body.push_str("\n## 你的任务\n");
+    body.push_str("请基于另两家观点 + 用户补充信息，发表新观点：可以继承、可以反驳，但要明示引用对方哪一点。\n");
+    body
+}
+
+pub fn build_fanout_prompt(turn_num: u64, user_input: &str, data_pack: Option<&str>) -> String {
+    let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · 默认提问]\n");
+    if let Some(data_pack) = data_pack.map(str::trim).filter(|value| !value.is_empty()) {
+        body.push_str("\n## 数据接入\n");
+        body.push_str(data_pack);
+        body.push('\n');
+    }
+    body.push_str("\n## 用户问题\n");
+    body.push_str(user_input.trim());
+    body.push_str("\n\n请独立回答（你看不到另两家观点，本色发挥即可）。");
     body
 }
 
@@ -735,29 +786,107 @@ pub fn build_summary_prompt(
     previous_turns: &[RoomTurn],
     participants: &[RoomParticipant],
 ) -> String {
-    let mut body = String::from(
-        "Summarize the public room discussion. Capture the main points, disagreements, decisions, and useful next steps.",
-    );
-    body.push_str("\n\nPublic room history:\n");
-
-    for turn in previous_turns
+    let public_turns = previous_turns
         .iter()
         .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
-    {
+        .collect::<Vec<_>>();
+    let turn_num = public_turns.len() as u64 + 1;
+    let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · @summary]\n\n");
+    body.push_str("## 你的任务\n");
+    body.push_str("请直接基于圆桌上下文给出最终意见，不需要逐轮复述。\n\n");
+    body.push_str("输出格式建议：\n");
+    body.push_str("  1) 结论先行（推荐 / 不推荐 / 中性 / 观望，附简短理由）\n");
+    body.push_str("  2) 三方共识与关键分歧\n");
+    body.push_str("  3) 具体行动建议（按讨论话题自适应）\n");
+    body.push_str("\nPublic room history:\n");
+
+    for turn in public_turns {
         body.push_str("\nUser: ");
         body.push_str(&turn.user_input);
         body.push('\n');
         for response in &turn.responses {
             let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(": ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
+            append_roundtable_view(
+                &mut body,
+                &label,
+                response.preview.as_deref(),
+                &response.status,
+                response.error.as_deref(),
+                MAX_SUMMARY_PER_VIEW_CHARS,
+                DebateViewStyle::TailEllipsis,
+            );
         }
     }
 
     body
+}
+
+enum DebateViewStyle {
+    MiddleEllipsis,
+    TailEllipsis,
+}
+
+fn append_roundtable_view(
+    body: &mut String,
+    label: &str,
+    preview: Option<&str>,
+    status: &str,
+    error: Option<&str>,
+    max_chars: usize,
+    style: DebateViewStyle,
+) {
+    body.push_str("\n### ");
+    body.push_str(label);
+    body.push_str(" 的观点\n");
+    if is_error_status(status) {
+        body.push('（');
+        body.push_str(label);
+        body.push_str(" 本轮发生错误未输出，请勿引用");
+        if let Some(error) = error.map(str::trim).filter(|value| !value.is_empty()) {
+            body.push_str("：");
+            body.push_str(error);
+        }
+        body.push_str("）\n");
+        return;
+    }
+
+    let text = preview.unwrap_or("(无输出)");
+    body.push_str(&truncate_roundtable_text(text, max_chars, style));
+    body.push('\n');
+}
+
+fn is_error_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "failed" | "error" | "errored"
+    )
+}
+
+fn truncate_roundtable_text(text: &str, max_chars: usize, style: DebateViewStyle) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    match style {
+        DebateViewStyle::MiddleEllipsis => {
+            let head = text
+                .chars()
+                .take(MAX_DEBATE_OPINION_KEEP)
+                .collect::<String>();
+            let tail = text
+                .chars()
+                .rev()
+                .take(MAX_DEBATE_OPINION_KEEP)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<String>();
+            format!("{head}\n\n…[中段已省略以控制 prompt 长度]…\n\n{tail}")
+        }
+        DebateViewStyle::TailEllipsis => {
+            let head = text.chars().take(max_chars).collect::<String>();
+            format!("{head}…[已截断]")
+        }
+    }
 }
 
 pub fn build_driver_review_prompt(
@@ -1506,12 +1635,97 @@ mod tests {
     }
 
     #[test]
+    fn fanout_prompt_uses_roundtable_header_and_independent_instruction() {
+        let prompt = build_fanout_prompt(2, "Compare the APIs", None);
+
+        assert!(prompt.contains("第 2 轮"));
+        assert!(prompt.contains("## 用户问题"));
+        assert!(prompt.contains("Compare the APIs"));
+        assert!(prompt.contains("请独立回答"));
+    }
+
+    #[test]
+    fn debate_prompt_marks_absent_and_errored_peers_and_truncates_long_outputs() {
+        let mut turn = public_turn();
+        turn.target_participant_ids = vec![
+            "p1".to_string(),
+            "p2".to_string(),
+            "p3".to_string(),
+            "p4".to_string(),
+        ];
+        turn.responses[1].preview = Some("x".repeat(5_200));
+        turn.responses.push(RoomResponseRef {
+            participant_id: "p3".to_string(),
+            run_id: "run-p3".to_string(),
+            event_seq_start: 7,
+            event_seq_end: 7,
+            preview: None,
+            status: "failed".to_string(),
+            error: Some("tool crashed".to_string()),
+        });
+
+        let prompt = build_debate_prompt(
+            &participant("p1", "Alice"),
+            "",
+            &[turn],
+            &[
+                participant("p1", "Alice"),
+                participant("p2", "Bob"),
+                participant("p3", "Cara"),
+                participant("p4", "Dana"),
+            ],
+        );
+
+        assert!(prompt.contains("## 另两家上一轮观点"));
+        assert!(prompt.contains("Bob 的观点"));
+        assert!(prompt.contains("中段已省略以控制 prompt 长度"));
+        assert!(prompt.contains("Cara 本轮发生错误未输出"));
+        assert!(prompt.contains("Dana 本轮因故未参与"));
+        assert!(!prompt.contains("Alice answer"));
+    }
+
+    #[test]
+    fn debate_prompt_uses_latest_fanout_or_debate_turn_not_summary() {
+        let fanout = public_turn();
+        let summary = RoomTurn {
+            id: "turn-summary".to_string(),
+            idx: 2,
+            mode: RoomTurnMode::Summary,
+            user_input: "@summary @Alice".to_string(),
+            target_participant_ids: vec!["p1".to_string()],
+            responses: vec![RoomResponseRef {
+                participant_id: "p1".to_string(),
+                run_id: "run-p1".to_string(),
+                event_seq_start: 7,
+                event_seq_end: 8,
+                preview: Some("Alice summary should not be debated".to_string()),
+                status: "complete".to_string(),
+                error: None,
+            }],
+            started_at: "2026-04-30T00:00:02Z".to_string(),
+            completed_at: Some("2026-04-30T00:00:03Z".to_string()),
+        };
+
+        let prompt = build_debate_prompt(
+            &participant("p1", "Alice"),
+            "",
+            &[fanout, summary],
+            &[participant("p1", "Alice"), participant("p2", "Bob")],
+        );
+
+        assert!(prompt.contains("Bob answer"));
+        assert!(!prompt.contains("Alice summary should not be debated"));
+    }
+
+    #[test]
     fn summary_prompt_includes_public_history() {
         let prompt = build_summary_prompt(&[public_turn()], &[participant("p1", "Alice")]);
 
         assert!(prompt.contains("Which API should we use?"));
         assert!(prompt.contains("Alice"));
         assert!(prompt.contains("Alice answer"));
+        assert!(prompt.contains("结论先行"));
+        assert!(prompt.contains("三方共识与关键分歧"));
     }
 
     #[test]

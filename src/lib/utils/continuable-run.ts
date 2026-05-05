@@ -1,18 +1,22 @@
 import type { TaskRun } from "$lib/types";
+import { providerIdForRun } from "./provider-catalog";
 
 const FINISHED_STATUSES = new Set(["completed", "stopped", "failed"]);
 
-export function findLastContinuableRun(runs: TaskRun[], agent: string): TaskRun | null {
-  const normalizedAgent = agent.trim().toLowerCase();
+export function findLastContinuableRun(runs: TaskRun[], providerId: string): TaskRun | null {
+  const normalizedProvider = providerId.trim().toLowerCase();
   return (
     runs.find((run) => {
-      if (run.agent !== normalizedAgent) return false;
+      if (providerIdForRun(run.agent, run.platform_id) !== normalizedProvider) return false;
       if (!FINISHED_STATUSES.has(run.status)) return false;
 
-      // The current continue path is backed by Claude session_id resume.
-      // Codex thread refs are captured for history, but are not wired to
-      // resumeSession yet, so showing a continue button would fail.
-      return normalizedAgent === "claude" && !!run.session_id;
+      if (normalizedProvider === "codex") {
+        return run.conversation_ref?.kind === "codex_thread";
+      }
+      if (normalizedProvider === "gemini") {
+        return run.agent === "gemini";
+      }
+      return run.agent === "claude" && !!run.session_id;
     }) ?? null
   );
 }

@@ -1,22 +1,18 @@
 const NATIVE_AGENTS = new Set(["codex", "gemini"]);
-const NATIVE_NO_REVIEW_MODES = new Set([
-  "bypassPermissions",
-  "dontAsk",
-  "yolo",
-  "auto_all",
-]);
-const NATIVE_VISIBLE_MODES = new Set(["default", "bypassPermissions"]);
+const NATIVE_NO_REVIEW_MODES = new Set(["bypassPermissions", "dontAsk", "yolo", "auto_all"]);
+const NATIVE_VISIBLE_MODES = new Set(["bypassPermissions"]);
 
 export function isNativeAgent(agent: string): boolean {
   return NATIVE_AGENTS.has(agent);
 }
 
 export function permissionModeToNativeYolo(mode: string): boolean {
-  return NATIVE_NO_REVIEW_MODES.has(mode);
+  return NATIVE_NO_REVIEW_MODES.has(mode) || mode === "default";
 }
 
 export function nativeYoloToPermissionMode(yoloMode?: boolean | null): string {
-  return yoloMode ? "bypassPermissions" : "default";
+  void yoloMode;
+  return "bypassPermissions";
 }
 
 export function isPermissionModeVisibleForAgent(agent: string, mode: string): boolean {

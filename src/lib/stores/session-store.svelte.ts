@@ -1859,10 +1859,14 @@ export class SessionStore {
       } else {
         this._setPhase("running");
         this._pushOptimisticUser(text, attachments);
+        const resumeLatest = this._pendingNativeResumeLatest;
+        this._pendingNativeResumeLatest = false;
         await api.sendChatMessage(
           this.run.id,
           text,
           attachments.length > 0 ? attachments : undefined,
+          undefined,
+          resumeLatest,
         );
       }
     } catch (e) {
@@ -1942,6 +1946,7 @@ export class SessionStore {
   // ── Resume ──
 
   private _resumeGuard = new OpGuard();
+  private _pendingNativeResumeLatest = false;
 
   /** Whether a resume/continue/fork operation is currently in progress. */
   get resumeInFlight(): boolean {
@@ -2073,6 +2078,9 @@ export class SessionStore {
 
       if (mode === "fork") {
         targetRunId = await this._handleFork(runId);
+      } else if (!isStream) {
+        this._pendingNativeResumeLatest = run.agent === "codex" || run.agent === "gemini";
+        this._setPhase("idle");
       } else {
         const sessionId = run.session_id;
         const backendAtt = attachments ? (mapAttachments(attachments) ?? undefined) : undefined;
@@ -2099,7 +2107,7 @@ export class SessionStore {
 
       // Timeout guard: if CLI never emits session_init, the UI would spin forever.
       // Fork skips this — connectSession() handles its own spawn timeout.
-      if (mode !== "fork") {
+      if (mode !== "fork" && isStream) {
         this._startSpawnTimeout(targetRunId);
         if (initialMessage && !this.isKnownSlashCommand(initialMessage)) {
           this._startResponseTimeout(targetRunId);

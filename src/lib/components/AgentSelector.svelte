@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { PHASE7_PROVIDERS } from "$lib/utils/provider-catalog";
+
   let {
     value = $bindable("claude"),
     class: className = "",
@@ -11,11 +13,7 @@
 
   let open = $state(false);
 
-  const agents = [
-    { id: "claude", label: "Claude" },
-    { id: "codex", label: "Codex" },
-    { id: "gemini", label: "Gemini" },
-  ];
+  const agents = PHASE7_PROVIDERS.map((provider) => ({ id: provider.id, label: provider.label }));
 
   let currentLabel = $derived(agents.find((a) => a.id === value)?.label ?? "Claude");
 

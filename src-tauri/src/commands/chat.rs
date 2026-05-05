@@ -1,4 +1,4 @@
-use crate::agent::spawn::build_agent_command;
+use crate::agent::spawn::{build_agent_command, build_agent_resume_command};
 use crate::agent::stream::{run_agent, ProcessMap};
 use crate::agent::windows_msvc_env::{
     merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan, MsvcEnvStatus, MsvcEnvWarning,
@@ -91,6 +91,7 @@ pub async fn send_chat_message(
     message: String,
     attachments: Option<Vec<Attachment>>,
     model: Option<String>,
+    resume_latest: Option<bool>,
 ) -> Result<(), String> {
     log::debug!(
         "[chat] send_chat_message: run_id={}, msg_len={}, attachments={}",
@@ -236,12 +237,16 @@ pub async fn send_chat_message(
     };
 
     // Build command
-    let (command, args) = build_agent_command(
-        &run.agent,
-        &full_prompt,
-        &adapter_settings,
-        true, // print mode
-    )?;
+    let (command, args) = if resume_latest.unwrap_or(false) {
+        build_agent_resume_command(&run.agent, &full_prompt, &adapter_settings)?
+    } else {
+        build_agent_command(
+            &run.agent,
+            &full_prompt,
+            &adapter_settings,
+            true, // print mode
+        )?
+    };
 
     // Spawn agent in background
     let pm = process_map.inner().clone();

@@ -330,6 +330,48 @@ describe("RoomStore", () => {
     expect(store.room?.participants[0].participant.agent).toBe("codex");
   });
 
+  it("does not inject catalog display defaults as models for official CLI participants", async () => {
+    const updated = detail("r1", "Room");
+    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+
+    store.selectedRoomId = "r1";
+    await store.createParticipant("claude", "Review this", "D:/work");
+
+    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+      "r1",
+      "claude",
+      "Review this",
+      "D:/work",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  it("uses provider default model only for Claude-compatible API participants", async () => {
+    const updated = detail("r1", "Room");
+    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+
+    store.selectedRoomId = "r1";
+    await store.createParticipant("glm", "Review this", "D:/work");
+
+    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+      "r1",
+      "claude",
+      "Review this",
+      "D:/work",
+      "glm-4.7",
+      "zhipu",
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it("sends a roundtable message and updates the selected room timeline", async () => {
     const updated = detail("r1", "Room");
     updated.turns = [
@@ -351,6 +393,26 @@ describe("RoomStore", () => {
 
     expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "Compare options");
     expect(store.room?.turns).toHaveLength(1);
+  });
+
+  it("sends a one-click debate command with optional focus", async () => {
+    const updated = detail("r1", "Room");
+    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+
+    store.selectedRoomId = "r1";
+    await store.sendDebate("focus on risks");
+
+    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "@debate focus on risks");
+  });
+
+  it("sends a one-click summary command for the selected participant", async () => {
+    const updated = detail("r1", "Room");
+    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+
+    store.selectedRoomId = "r1";
+    await store.sendSummary("Claude");
+
+    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "@summary @Claude");
   });
 
   it("ignores stale roundtable send responses after switching rooms", async () => {

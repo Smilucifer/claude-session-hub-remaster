@@ -1,15 +1,28 @@
 import * as api from "$lib/api";
 import type { RoomDetail, RoomKind, RoomSummary } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
+import {
+  getPhase7Provider,
+  type Phase7ProviderEntry,
+  type Phase7ProviderId,
+} from "$lib/utils/provider-catalog";
 
 export interface RoundtableSeatDraft {
-  agent: "claude" | "codex" | "gemini";
+  agent: Phase7ProviderId;
   prompt: string;
   model?: string;
   platformId?: string;
   connectionProfileId?: string;
   label?: string;
   role?: string;
+}
+
+function launchModelForProvider(
+  provider: Phase7ProviderEntry,
+  explicitModel?: string,
+): string | undefined {
+  if (explicitModel) return explicitModel;
+  return provider.mode === "claude_compatible_api" ? provider.defaultModel : undefined;
 }
 
 export class RoomStore {
@@ -98,13 +111,14 @@ export class RoomStore {
       this.selectedRoomId = room.id;
       this.room = room;
       for (const seat of seats) {
+        const provider = getPhase7Provider(seat.agent);
         this.room = await api.createRoomParticipant(
           room.id,
-          seat.agent,
+          provider.executionAgent,
           seat.prompt,
           cwd,
-          seat.model,
-          seat.platformId,
+          launchModelForProvider(provider, seat.model),
+          seat.platformId || provider.platformId,
           seat.connectionProfileId,
           seat.label,
           seat.role,
@@ -170,7 +184,7 @@ export class RoomStore {
   }
 
   async createParticipant(
-    agent: "claude" | "codex" | "gemini",
+    agent: Phase7ProviderId,
     prompt: string,
     cwd: string,
     model?: string,
@@ -183,13 +197,14 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
+      const provider = getPhase7Provider(agent);
       this.room = await api.createRoomParticipant(
         this.selectedRoomId,
-        agent,
+        provider.executionAgent,
         prompt,
         cwd,
-        model,
-        platformId,
+        launchModelForProvider(provider, model),
+        platformId || provider.platformId,
         connectionProfileId,
         label,
         role,
@@ -240,6 +255,17 @@ export class RoomStore {
     } finally {
       this.saving = false;
     }
+  }
+
+  async sendDebate(focus = ""): Promise<void> {
+    const trimmed = focus.trim();
+    await this.sendMessage(trimmed ? `@debate ${trimmed}` : "@debate");
+  }
+
+  async sendSummary(target: string): Promise<void> {
+    const trimmed = target.trim().replace(/^@+/, "");
+    if (!trimmed) return;
+    await this.sendMessage(`@summary @${trimmed}`);
   }
 
   async deleteRoom(id: string): Promise<void> {

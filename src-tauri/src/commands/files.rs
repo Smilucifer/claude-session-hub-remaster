@@ -23,7 +23,7 @@ fn canonicalize_for_prefix(path: &std::path::Path) -> PathBuf {
 ///
 /// Allowed directories:
 /// - `~/.opencovibe/` (data dir)
-/// - `~/.claude/` (Claude config dir)
+/// - `~/.claude/`, `~/.codex/`, `~/.gemini/` (official CLI config dirs)
 /// - The global `working_directory` from user settings (if set)
 /// - Any per-agent `working_directory` from agent settings
 /// - The caller-provided `extra_allowed` directory (e.g. frontend project cwd)
@@ -92,14 +92,22 @@ pub(crate) fn validate_file_path(
     let data_dir = crate::storage::data_dir();
     let home = crate::storage::home_dir().unwrap_or_default();
     let claude_dir = PathBuf::from(&home).join(".claude");
+    let codex_dir = PathBuf::from(&home).join(".codex");
+    let gemini_dir = PathBuf::from(&home).join(".gemini");
 
     // Canonicalize allowed directories for reliable comparison on Windows
     // (fs::canonicalize normalizes case; raw paths from home_dir() may differ)
     let data_dir_c = canonicalize_for_prefix(&data_dir);
     let claude_dir_c = canonicalize_for_prefix(&claude_dir);
+    let codex_dir_c = canonicalize_for_prefix(&codex_dir);
+    let gemini_dir_c = canonicalize_for_prefix(&gemini_dir);
 
-    // Allow: ~/.opencovibe/*, ~/.claude/*
-    if canonical.starts_with(&data_dir_c) || canonical.starts_with(&claude_dir_c) {
+    // Allow: ~/.opencovibe/* and official CLI config dirs.
+    if canonical.starts_with(&data_dir_c)
+        || canonical.starts_with(&claude_dir_c)
+        || canonical.starts_with(&codex_dir_c)
+        || canonical.starts_with(&gemini_dir_c)
+    {
         log::debug!("[files] path allowed (config dir): {}", canonical.display());
         return Ok(canonical);
     }
@@ -319,6 +327,7 @@ fn scan_md_inner(
                 path: p.display().to_string(),
                 label,
                 scope: "memory".to_string(),
+                provider: Some("claude".to_string()),
                 exists: true,
             });
         }
@@ -329,26 +338,88 @@ fn scan_md_inner(
 pub fn list_memory_files(
     cwd: Option<String>,
 ) -> Result<Vec<crate::models::MemoryFileCandidate>, String> {
+    struct ProjectMemorySpec {
+        provider: &'static str,
+        label_prefix: &'static str,
+        path: &'static str,
+    }
+    struct GlobalMemorySpec {
+        provider: &'static str,
+        label_prefix: &'static str,
+        dir: &'static str,
+        file: &'static str,
+    }
     let project_names = [
-        "CLAUDE.md",
-        ".claude/CLAUDE.md",
-        "CLAUDE.local.md",
-        ".claude/CLAUDE.local.md",
+        ProjectMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            path: "CLAUDE.md",
+        },
+        ProjectMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            path: ".claude/CLAUDE.md",
+        },
+        ProjectMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            path: "CLAUDE.local.md",
+        },
+        ProjectMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            path: ".claude/CLAUDE.local.md",
+        },
+        ProjectMemorySpec {
+            provider: "codex",
+            label_prefix: "Codex",
+            path: "AGENTS.md",
+        },
+        ProjectMemorySpec {
+            provider: "gemini",
+            label_prefix: "Gemini",
+            path: "GEMINI.md",
+        },
     ];
-    let global_names = ["CLAUDE.md", "CLAUDE.local.md"];
+    let global_names = [
+        GlobalMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            dir: ".claude",
+            file: "CLAUDE.md",
+        },
+        GlobalMemorySpec {
+            provider: "claude",
+            label_prefix: "Claude",
+            dir: ".claude",
+            file: "CLAUDE.local.md",
+        },
+        GlobalMemorySpec {
+            provider: "codex",
+            label_prefix: "Codex",
+            dir: ".codex",
+            file: "AGENTS.md",
+        },
+        GlobalMemorySpec {
+            provider: "gemini",
+            label_prefix: "Gemini",
+            dir: ".gemini",
+            file: "GEMINI.md",
+        },
+    ];
 
     let mut files = Vec::new();
 
     // Global scope — only if home is available
     match crate::storage::home_dir() {
         Some(home) if !home.is_empty() => {
-            let claude_dir = std::path::Path::new(&home).join(".claude");
-            for name in &global_names {
-                let p = claude_dir.join(name);
+            for spec in &global_names {
+                let p = std::path::Path::new(&home).join(spec.dir).join(spec.file);
                 files.push(crate::models::MemoryFileCandidate {
                     path: p.display().to_string(),
-                    label: name.to_string(),
+                    label: format!("{} · {}", spec.label_prefix, spec.file),
                     scope: "global".to_string(),
+                    provider: Some(spec.provider.to_string()),
                     exists: p.exists(),
                 });
             }
@@ -363,12 +434,13 @@ pub fn list_memory_files(
     // Project scope
     if let Some(ref cwd) = cwd {
         let cwd_path = std::path::Path::new(cwd);
-        for name in &project_names {
-            let p = cwd_path.join(name);
+        for spec in &project_names {
+            let p = cwd_path.join(spec.path);
             files.push(crate::models::MemoryFileCandidate {
                 path: p.display().to_string(),
-                label: name.to_string(),
+                label: format!("{} · {}", spec.label_prefix, spec.path),
                 scope: "project".to_string(),
+                provider: Some(spec.provider.to_string()),
                 exists: p.exists(),
             });
         }
@@ -491,9 +563,16 @@ mod tests {
         let files = result.unwrap();
 
         let project_files: Vec<_> = files.iter().filter(|f| f.scope == "project").collect();
-        assert_eq!(project_files.len(), 4);
+        assert_eq!(project_files.len(), 6);
         assert!(project_files[0].exists);
-        assert_eq!(project_files[0].label, "CLAUDE.md");
+        assert_eq!(project_files[0].label, "Claude · CLAUDE.md");
+        assert_eq!(project_files[0].provider.as_deref(), Some("claude"));
+        assert!(project_files.iter().any(|file| {
+            file.label == "Codex · AGENTS.md" && file.provider.as_deref() == Some("codex")
+        }));
+        assert!(project_files.iter().any(|file| {
+            file.label == "Gemini · GEMINI.md" && file.provider.as_deref() == Some("gemini")
+        }));
         assert!(!project_files[1].exists);
     }
 
@@ -503,6 +582,8 @@ mod tests {
         assert!(result.is_ok());
         let files = result.unwrap();
         assert!(files.iter().all(|f| f.scope == "global"));
+        assert!(files.iter().any(|file| file.label == "Codex · AGENTS.md"));
+        assert!(files.iter().any(|file| file.label == "Gemini · GEMINI.md"));
     }
 
     #[test]
@@ -520,7 +601,9 @@ mod tests {
         assert_eq!(files[0].label, "MEMORY.md");
         assert_eq!(files[1].label, "alpha.md");
         assert_eq!(files[2].label, "plans/feat.md");
-        assert!(files.iter().all(|f| f.exists && f.scope == "memory"));
+        assert!(files
+            .iter()
+            .all(|f| f.exists && f.scope == "memory" && f.provider.as_deref() == Some("claude")));
     }
 
     #[test]

@@ -72,6 +72,7 @@
 
   let {
     agent = "claude",
+    providerId = "",
     disabled = false,
     hasRun = false,
     running = false,
@@ -85,6 +86,7 @@
     permissionMode = "",
     onSend,
     onAgentChange,
+    onProviderChange,
     onInterrupt,
     onModelSwitch,
     onPermissionModeChange,
@@ -118,6 +120,7 @@
     runId = "",
   }: {
     agent?: string;
+    providerId?: string;
     disabled?: boolean;
     hasRun?: boolean;
     running?: boolean;
@@ -131,6 +134,7 @@
     permissionMode?: string;
     onSend: (text: string, attachments: Attachment[]) => void;
     onAgentChange?: (agent: string) => void;
+    onProviderChange?: (providerId: string) => void;
     onInterrupt?: () => void;
     onModelSwitch?: (model: string) => void;
     onPermissionModeChange?: (mode: string) => void;
@@ -2053,7 +2057,10 @@
       <!-- Left: agent selector + permission mode -->
       <div class="flex items-center gap-1">
         {#if !hasRun && onAgentChange}
-          <AgentSelector value={agent} onchange={(a) => onAgentChange?.(a)} />
+          <AgentSelector
+            value={providerId || agent}
+            onchange={(a) => (onProviderChange ?? onAgentChange)?.(a)}
+          />
         {/if}
         {#if !hasRun && onConnectionProfileChange && agentConnectionProfiles.length > 0}
           <select

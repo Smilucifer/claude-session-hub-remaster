@@ -12,6 +12,7 @@
     UserSettings,
   } from "$lib/types";
   import { truncate } from "$lib/utils/format";
+  import { PHASE7_PROVIDERS, getPhase7Provider } from "$lib/utils/provider-catalog";
   import {
     canSendRoomMessage,
     roomParticipantBadge,
@@ -52,6 +53,7 @@
   let seatForms = $state<SeatForm[]>(defaultSeatForms());
   let memoDraft = $state("");
   let roundtableMessage = $state("");
+  let summaryParticipantId = $state("");
   let deletingRoomId = $state("");
 
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
@@ -68,6 +70,28 @@
       ? canSendRoomMessage(store.room.kind, roomParticipantCount, roundtableMessage)
       : false,
   );
+  let completedPublicTurnCount = $derived(
+    (store.room?.turns ?? []).filter((turn) => turn.mode !== "private" && turn.completed_at).length,
+  );
+  let completedDebatableTurnCount = $derived(
+    (store.room?.turns ?? []).filter(
+      (turn) => (turn.mode === "fanout" || turn.mode === "debate") && turn.completed_at,
+    ).length,
+  );
+  let summaryParticipants = $derived(store.room?.participants ?? []);
+  let canUseRoundtableActions = $derived(
+    Boolean(store.room && store.room.kind === "roundtable" && !store.saving),
+  );
+  let canDebate = $derived(canUseRoundtableActions && completedDebatableTurnCount > 0);
+  let canSummary = $derived(
+    canUseRoundtableActions && completedPublicTurnCount > 0 && Boolean(summaryParticipantId),
+  );
+
+  $effect(() => {
+    if (!summaryParticipants.some((item) => item.participant.id === summaryParticipantId)) {
+      summaryParticipantId = summaryParticipants[0]?.participant.id ?? "";
+    }
+  });
 
   onMount(async () => {
     await Promise.all([store.loadRooms(), loadSettings()]);
@@ -154,6 +178,17 @@
     if (!canSendRoomMessage(store.room.kind, roomParticipantCount, message)) return;
     await store.sendMessage(message);
     roundtableMessage = "";
+  }
+
+  async function handleDebate() {
+    if (!canDebate) return;
+    await store.sendDebate(roundtableMessage);
+    roundtableMessage = "";
+  }
+
+  async function handleSummary() {
+    if (!canSummary) return;
+    await store.sendSummary(summaryParticipantId);
   }
 
   async function handleDeleteRoom(id: string) {
@@ -287,6 +322,7 @@
   }
 
   function connectionProfilesForAgent(agent: SeatAgent): ConnectionProfile[] {
+    if (agent === "deepseek" || agent === "glm") return [];
     return connectionProfiles.filter((profile) => profile.agent === agent);
   }
 
@@ -297,9 +333,7 @@
   }
 
   function displayAgentLabel(agent: SeatAgent): string {
-    if (agent === "codex") return "Codex";
-    if (agent === "gemini") return "Gemini";
-    return "Claude";
+    return getPhase7Provider(agent).label;
   }
 
   function defaultSeatLabel(index: number, agent: SeatAgent): string {
@@ -678,6 +712,43 @@
       </div>
 
       <div class="border-t border-border p-3">
+        {#if store.room.kind === "roundtable"}
+          <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <span class="text-muted-foreground">
+              {t("room_roundtableToolbarStatus", {
+                count: String(completedPublicTurnCount),
+              })}
+            </span>
+            <button
+              class="rounded-md border border-border px-2.5 py-1.5 hover:bg-accent disabled:opacity-50"
+              disabled={!canDebate}
+              title={t("room_debateTitle")}
+              onclick={handleDebate}
+            >
+              {t("room_debate")}
+            </button>
+            <button
+              class="rounded-md border border-border bg-amber-500/10 px-2.5 py-1.5 hover:bg-amber-500/15 disabled:opacity-50"
+              disabled={!canSummary}
+              title={t("room_summaryTitle")}
+              onclick={handleSummary}
+            >
+              {t("room_summary")}
+            </button>
+            <label class="flex items-center gap-1 text-muted-foreground">
+              <span>{t("room_summaryTarget")}</span>
+              <select
+                class="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:opacity-50"
+                bind:value={summaryParticipantId}
+                disabled={store.saving || summaryParticipants.length === 0}
+              >
+                {#each summaryParticipants as participant}
+                  <option value={participant.participant.id}>{participant.participant.label}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+        {/if}
         <div class="flex gap-2">
           <textarea
             class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
@@ -796,13 +867,18 @@
                     class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                     value={seat.agent}
                     onchange={(event) => {
-                      updateSeat(index, "agent", event.currentTarget.value as SeatAgent);
+                      const agent = event.currentTarget.value as SeatAgent;
+                      const provider = getPhase7Provider(agent);
+                      updateSeat(index, "agent", agent);
                       updateSeat(index, "connectionProfileId", "");
+                      updateSeat(index, "platformId", provider.platformId ?? "");
+                      updateSeat(index, "model", provider.defaultModel ?? "");
+                      updateSeat(index, "label", defaultSeatLabel(index, agent));
                     }}
                   >
-                    <option value="claude">Claude Code</option>
-                    <option value="codex">Codex CLI</option>
-                    <option value="gemini">Gemini CLI</option>
+                    {#each PHASE7_PROVIDERS as provider}
+                      <option value={provider.id}>{provider.label}</option>
+                    {/each}
                   </select>
                 </label>
                 <label class="block text-xs font-medium text-muted-foreground">
