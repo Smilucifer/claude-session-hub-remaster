@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import { getPhase7Provider, PHASE7_PROVIDERS, providerIdForRun } from "./provider-catalog";
 
 describe("Phase 7 provider catalog", () => {
-  it("exposes the five visible providers in product order", () => {
+  it("exposes the visible providers in product order", () => {
     expect(PHASE7_PROVIDERS.map((provider) => provider.label)).toEqual([
       "Claude",
       "Codex",
       "Gemini",
       "DeepSeek",
       "GLM",
+      "QWEN",
+      "KIMI",
     ]);
   });
 
@@ -17,6 +19,7 @@ describe("Phase 7 provider catalog", () => {
       mode: "claude_compatible_api",
       executionAgent: "claude",
       platformId: "deepseek",
+      defaultModel: "deepseek-v4-pro",
       requiredConfig: ["api_key"],
       defaultPermissionMode: "bypass",
     });
@@ -27,11 +30,45 @@ describe("Phase 7 provider catalog", () => {
       requiredConfig: ["api_key", "base_url", "model"],
       defaultPermissionMode: "bypass",
     });
+    expect(getPhase7Provider("qwen")).toMatchObject({
+      mode: "claude_compatible_api",
+      executionAgent: "claude",
+      platformId: "bailian",
+      defaultModel: "qwen3.5-plus",
+      requiredConfig: ["api_key", "base_url", "model"],
+      defaultPermissionMode: "bypass",
+    });
+    expect(getPhase7Provider("kimi")).toMatchObject({
+      mode: "claude_compatible_api",
+      executionAgent: "claude",
+      platformId: "kimi",
+      defaultModel: "kimi-k2.5",
+      requiredConfig: ["api_key", "base_url", "model"],
+      defaultPermissionMode: "bypass",
+    });
+  });
+
+  it("assigns required settings fields for fixed and parameterized API providers", () => {
+    expect(getPhase7Provider("deepseek")).toMatchObject({
+      requiredConfig: ["api_key"],
+      defaultModel: "deepseek-v4-pro",
+    });
+    expect(getPhase7Provider("glm")).toMatchObject({
+      requiredConfig: ["api_key", "base_url", "model"],
+    });
+    expect(getPhase7Provider("qwen")).toMatchObject({
+      requiredConfig: ["api_key", "base_url", "model"],
+    });
+    expect(getPhase7Provider("kimi")).toMatchObject({
+      requiredConfig: ["api_key", "base_url", "model"],
+    });
   });
 
   it("maps run execution identity back to visible provider identity", () => {
     expect(providerIdForRun("claude", "deepseek")).toBe("deepseek");
     expect(providerIdForRun("claude", "zhipu")).toBe("glm");
+    expect(providerIdForRun("claude", "bailian")).toBe("qwen");
+    expect(providerIdForRun("claude", "kimi")).toBe("kimi");
     expect(providerIdForRun("codex")).toBe("codex");
     expect(providerIdForRun("gemini")).toBe("gemini");
     expect(providerIdForRun("claude")).toBe("claude");

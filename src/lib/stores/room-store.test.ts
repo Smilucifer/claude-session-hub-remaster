@@ -372,6 +372,39 @@ describe("RoomStore", () => {
     );
   });
 
+  it("uses parameterized provider defaults for QWEN and KIMI participants", async () => {
+    const updated = detail("r1", "Room");
+    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+
+    store.selectedRoomId = "r1";
+    await store.createParticipant("qwen", "Review this", "D:/work");
+    expect(api.createRoomParticipant).toHaveBeenLastCalledWith(
+      "r1",
+      "claude",
+      "Review this",
+      "D:/work",
+      "qwen3.5-plus",
+      "bailian",
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    await store.createParticipant("kimi", "Review this", "D:/work");
+    expect(api.createRoomParticipant).toHaveBeenLastCalledWith(
+      "r1",
+      "claude",
+      "Review this",
+      "D:/work",
+      "kimi-k2.5",
+      "kimi",
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it("sends a roundtable message and updates the selected room timeline", async () => {
     const updated = detail("r1", "Room");
     updated.turns = [

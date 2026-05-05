@@ -53,10 +53,20 @@ describe("findLastContinuableRun", () => {
         session_id: "session-3",
         platform_id: "zhipu",
       }),
+      run("qwen-continuable", "claude", {
+        session_id: "session-4",
+        platform_id: "bailian",
+      }),
+      run("kimi-continuable", "claude", {
+        session_id: "session-5",
+        platform_id: "kimi",
+      }),
     ];
 
     expect(findLastContinuableRun(runs, "deepseek")?.id).toBe("deepseek-continuable");
     expect(findLastContinuableRun(runs, "glm")?.id).toBe("glm-continuable");
+    expect(findLastContinuableRun(runs, "qwen")?.id).toBe("qwen-continuable");
+    expect(findLastContinuableRun(runs, "kimi")?.id).toBe("kimi-continuable");
   });
 
   it("ignores active runs", () => {

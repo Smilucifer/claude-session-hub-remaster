@@ -1,6 +1,13 @@
 export type ProviderMode = "official_cli" | "claude_compatible_api";
 export type ExecutionAgent = "claude" | "codex" | "gemini";
-export type Phase7ProviderId = "claude" | "codex" | "gemini" | "deepseek" | "glm";
+export type Phase7ProviderId =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "deepseek"
+  | "glm"
+  | "qwen"
+  | "kimi";
 
 export interface Phase7ProviderEntry {
   id: Phase7ProviderId;
@@ -48,7 +55,7 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     mode: "claude_compatible_api",
     executionAgent: "claude",
     platformId: "deepseek",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-v4-pro",
     defaultBaseUrl: "https://api.deepseek.com/anthropic",
     requiredConfig: ["api_key"],
     defaultPermissionMode: "bypass",
@@ -64,6 +71,28 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     requiredConfig: ["api_key", "base_url", "model"],
     defaultPermissionMode: "bypass",
   },
+  {
+    id: "qwen",
+    label: "QWEN",
+    mode: "claude_compatible_api",
+    executionAgent: "claude",
+    platformId: "bailian",
+    defaultModel: "qwen3.5-plus",
+    defaultBaseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    requiredConfig: ["api_key", "base_url", "model"],
+    defaultPermissionMode: "bypass",
+  },
+  {
+    id: "kimi",
+    label: "KIMI",
+    mode: "claude_compatible_api",
+    executionAgent: "claude",
+    platformId: "kimi",
+    defaultModel: "kimi-k2.5",
+    defaultBaseUrl: "https://api.moonshot.cn/anthropic",
+    requiredConfig: ["api_key", "base_url", "model"],
+    defaultPermissionMode: "bypass",
+  },
 ];
 
 export function getPhase7Provider(id: string): Phase7ProviderEntry {
@@ -73,6 +102,8 @@ export function getPhase7Provider(id: string): Phase7ProviderEntry {
 export function providerIdForRun(agent: string, platformId?: string | null): Phase7ProviderId {
   if (platformId === "deepseek") return "deepseek";
   if (platformId === "zhipu" || platformId === "zhipu-intl") return "glm";
+  if (platformId === "bailian") return "qwen";
+  if (platformId === "kimi") return "kimi";
   if (agent === "codex" || agent === "gemini") return agent;
   return "claude";
 }

@@ -7,7 +7,8 @@ use crate::agent::windows_msvc_env::{
     SpawnPathPolicy,
 };
 use crate::models::{
-    BusEvent, RemoteHost, RunMeta, RunStatus, SessionMode, UserSettings, WindowsMsvcEnvMode,
+    BusEvent, PlatformCredential, RemoteHost, RunMeta, RunStatus, SessionMode, UserSettings,
+    WindowsMsvcEnvMode,
 };
 use crate::process_ext::HideConsole;
 use crate::storage;
@@ -129,6 +130,18 @@ struct ResolvedAuth {
     /// Full models array from credential/preset (tier mapping applied at injection time).
     models: Option<Vec<String>>,
     extra_env: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ProviderLaunchConfig {
+    env: std::collections::HashMap<String, String>,
+    include_co_authored_by: Option<bool>,
+    thinking: Option<bool>,
+    permissions_default_mode: Option<String>,
+    skip_dangerous_mode_permission_prompt: Option<bool>,
+    enabled_plugins: Option<std::collections::HashMap<String, bool>>,
+    auto_updates_channel: Option<String>,
+    language: Option<String>,
 }
 
 /// Resolve models array into (env_key, env_value) pairs for CLI injection.
@@ -509,7 +522,146 @@ fn resolve_auth_env_for_platform(
 }
 
 fn is_phase7_claude_compatible_api_platform(platform_id: &str) -> bool {
-    matches!(platform_id, "deepseek" | "zhipu" | "zhipu-intl")
+    matches!(
+        platform_id,
+        "deepseek" | "zhipu" | "zhipu-intl" | "bailian" | "kimi"
+    )
+}
+
+fn build_deepseek_launch_config(cred: &PlatformCredential) -> Result<ProviderLaunchConfig, String> {
+    let api_key = cred
+        .api_key
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "DeepSeek API key is not configured".to_string())?;
+
+    Ok(ProviderLaunchConfig {
+        env: std::collections::HashMap::from([
+            (
+                "ANTHROPIC_BASE_URL".to_string(),
+                "https://api.deepseek.com/anthropic".to_string(),
+            ),
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
+            (
+                "ANTHROPIC_MODEL".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ),
+            (
+                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ),
+            (
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ),
+            (
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+                "deepseek-v4-pro".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_EFFORT_LEVEL".to_string(),
+                "max".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+                "400000".to_string(),
+            ),
+        ]),
+        include_co_authored_by: Some(false),
+        thinking: Some(false),
+        permissions_default_mode: Some("bypassPermissions".to_string()),
+        skip_dangerous_mode_permission_prompt: Some(true),
+        enabled_plugins: Some(std::collections::HashMap::from([(
+            "superpowers@claude-plugins-official".to_string(),
+            true,
+        )])),
+        auto_updates_channel: Some("latest".to_string()),
+        language: Some("简体中文".to_string()),
+    })
+}
+
+fn build_parameterized_provider_launch_config(
+    cred: &PlatformCredential,
+) -> Result<ProviderLaunchConfig, String> {
+    let api_key = cred
+        .api_key
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{} API key is not configured", cred.platform_id))?;
+    let base_url = cred
+        .base_url
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{} base URL is not configured", cred.platform_id))?;
+    let model = cred
+        .models
+        .as_ref()
+        .and_then(|models| models.first())
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| format!("{} model is not configured", cred.platform_id))?;
+
+    Ok(ProviderLaunchConfig {
+        env: std::collections::HashMap::from([
+            ("ANTHROPIC_BASE_URL".to_string(), base_url),
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
+            ("ANTHROPIC_MODEL".to_string(), model.clone()),
+            (
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                model.clone(),
+            ),
+            (
+                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                model.clone(),
+            ),
+            ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model),
+        ]),
+        permissions_default_mode: Some("bypassPermissions".to_string()),
+        enabled_plugins: Some(std::collections::HashMap::from([(
+            "superpowers@claude-plugins-official".to_string(),
+            true,
+        )])),
+        auto_updates_channel: Some("latest".to_string()),
+        language: Some("简体中文".to_string()),
+        ..ProviderLaunchConfig::default()
+    })
+}
+
+fn build_provider_launch_config(
+    settings: &UserSettings,
+    platform_id: &str,
+) -> Result<Option<ProviderLaunchConfig>, String> {
+    let Some(cred) = settings
+        .platform_credentials
+        .iter()
+        .find(|cred| cred.platform_id == platform_id)
+    else {
+        return Ok(None);
+    };
+
+    match platform_id {
+        "deepseek" => Ok(Some(build_deepseek_launch_config(cred)?)),
+        "zhipu" | "zhipu-intl" | "bailian" | "kimi" => {
+            Ok(Some(build_parameterized_provider_launch_config(cred)?))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn effective_platform_for_auth_mode<'a>(
@@ -608,20 +760,29 @@ pub(crate) async fn start_session_impl(
             .and_then(|p| p.platform_id.as_deref()))
         .or(meta.platform_id.as_deref());
     let effective_pid = effective_platform_for_auth_mode(&user_settings.auth_mode, requested_pid);
+    let provider_launch_config = match effective_pid {
+        Some(pid) => build_provider_launch_config(&user_settings, pid)?,
+        None => None,
+    };
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
+    let mut resolved = augment_with_shell_auth(
+        resolved,
+        &user_settings.auth_mode,
+        remote.is_some(),
+        &meta.cwd,
+    );
+    if let Some(config) = provider_launch_config.as_ref() {
+        let extra_env = resolved.extra_env.get_or_insert_with(std::collections::HashMap::new);
+        for (key, value) in &config.env {
+            extra_env.insert(key.clone(), value.clone());
+        }
+    }
     adapter::clear_model_if_provider_overrides(
         &mut adapter_settings,
         &meta.model,
         &agent_settings.model,
         &resolved.models,
     );
-    let resolved = augment_with_shell_auth(
-        resolved,
-        &user_settings.auth_mode,
-        remote.is_some(),
-        &meta.cwd,
-    );
-    let mut resolved = resolved;
     if !profile_env.is_empty() {
         match resolved.extra_env.as_mut() {
             Some(existing) => existing.extend(profile_env),
@@ -2452,6 +2613,84 @@ mod tests {
             effective_platform_for_auth_mode("cli", Some("zhipu-intl")),
             Some("zhipu-intl")
         );
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("bailian")),
+            Some("bailian")
+        );
+        assert_eq!(
+            effective_platform_for_auth_mode("cli", Some("kimi")),
+            Some("kimi")
+        );
+    }
+
+    #[test]
+    fn build_deepseek_launch_config_uses_fixed_template() {
+        let mut settings = default_user_settings();
+        settings.platform_credentials.push(make_cred(
+            "deepseek",
+            Some("sk-deepseek"),
+            Some("https://api.deepseek.com/anthropic"),
+            Some("ANTHROPIC_AUTH_TOKEN"),
+        ));
+
+        let config = build_provider_launch_config(&settings, "deepseek")
+            .expect("deepseek config should build")
+            .expect("deepseek config should exist");
+
+        assert_eq!(
+            config.env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-deepseek")
+        );
+        assert_eq!(
+            config.env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("deepseek-v4-pro")
+        );
+        assert_eq!(
+            config
+                .env
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .map(String::as_str),
+            Some("deepseek-v4-flash")
+        );
+        assert_eq!(
+            config.permissions_default_mode.as_deref(),
+            Some("bypassPermissions")
+        );
+        assert_eq!(config.language.as_deref(), Some("简体中文"));
+    }
+
+    #[test]
+    fn build_parameterized_launch_config_uses_saved_values() {
+        let mut settings = default_user_settings();
+        let mut cred = make_cred(
+            "bailian",
+            Some("sk-qwen"),
+            Some("https://custom.qwen.example/anthropic"),
+            Some("ANTHROPIC_AUTH_TOKEN"),
+        );
+        cred.models = Some(vec!["qwen3.5-plus".to_string()]);
+        settings.platform_credentials.push(cred);
+
+        let config = build_provider_launch_config(&settings, "bailian")
+            .expect("qwen config should build")
+            .expect("qwen config should exist");
+
+        assert_eq!(
+            config.env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://custom.qwen.example/anthropic")
+        );
+        assert_eq!(
+            config.env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("qwen3.5-plus")
+        );
+        assert_eq!(
+            config
+                .env
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .map(String::as_str),
+            Some("qwen3.5-plus")
+        );
+        assert_eq!(config.language.as_deref(), Some("简体中文"));
     }
 
     #[test]

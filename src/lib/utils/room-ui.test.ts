@@ -38,6 +38,8 @@ describe("room UI helpers", () => {
   it("shows visible provider identity instead of only execution identity", () => {
     expect(roomParticipantProviderLabel("claude", "deepseek")).toBe("DeepSeek");
     expect(roomParticipantProviderLabel("claude", "zhipu")).toBe("GLM");
+    expect(roomParticipantProviderLabel("claude", "bailian")).toBe("QWEN");
+    expect(roomParticipantProviderLabel("claude", "kimi")).toBe("KIMI");
     expect(roomParticipantProviderLabel("codex")).toBe("Codex");
     expect(roomParticipantProviderLabel("gemini")).toBe("Gemini");
   });

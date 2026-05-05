@@ -76,7 +76,10 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
     match pid {
         "deepseek" => Some(ProviderDefaults {
             base_url: Some("https://api.deepseek.com/anthropic"),
-            models: Some(vec!["deepseek-chat".to_string()]),
+            models: Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ]),
             extra_env: Some(HashMap::from([(
                 "API_TIMEOUT_MS".to_string(),
                 "600000".to_string(),
@@ -269,6 +272,22 @@ fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
                     changed = true;
                 }
             }
+        }
+
+        if cred.platform_id == "deepseek"
+            && cred
+                .models
+                .as_ref()
+                .is_some_and(|models| models.iter().any(|model| model == "deepseek-chat"))
+        {
+            log::info!(
+                "[storage/settings] migrating deepseek model from deepseek-chat to deepseek-v4-pro"
+            );
+            cred.models = Some(vec![
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string(),
+            ]);
+            changed = true;
         }
 
         // Populate base_url, models, and extra_env from known provider defaults if missing.
@@ -1040,6 +1059,30 @@ mod tests {
             settings.user.platform_credentials[0].base_url.as_deref(),
             Some("http://localhost:11434"),
             "empty base_url should be filled from defaults"
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_deepseek_chat_model_to_v4_pro() {
+        let cred = PlatformCredential {
+            platform_id: "deepseek".to_string(),
+            api_key: Some("sk-test".to_string()),
+            base_url: Some("https://api.deepseek.com/anthropic".to_string()),
+            auth_env_var: None,
+            name: None,
+            models: Some(vec!["deepseek-chat".to_string()]),
+            extra_env: None,
+        };
+        let mut settings = make_settings_with_cred(cred);
+        let changed = migrate_platform_credentials(&mut settings);
+
+        assert!(changed, "migration should rewrite legacy DeepSeek models");
+        assert_eq!(
+            settings.user.platform_credentials[0].models.as_ref(),
+            Some(&vec![
+                "deepseek-v4-pro".to_string(),
+                "deepseek-v4-flash".to_string()
+            ])
         );
     }
 

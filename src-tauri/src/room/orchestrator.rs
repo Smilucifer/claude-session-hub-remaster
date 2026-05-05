@@ -2086,6 +2086,85 @@ mod tests {
     }
 
     #[test]
+    fn actor_turn_propagates_stopped_and_failed_terminal_statuses() {
+        with_temp_data_dir(|| {
+            create_run("run-p1");
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                for (status, expected_status, expected_error, exit_code) in [
+                    (
+                        RunStatus::Stopped,
+                        "stopped",
+                        Some("Stopped by user".to_string()),
+                        -1,
+                    ),
+                    (
+                        RunStatus::Failed,
+                        "failed",
+                        Some("Timed out waiting for Codex transcript completion".to_string()),
+                        1,
+                    ),
+                ] {
+                    crate::storage::runs::update_status(
+                        "run-p1",
+                        status.clone(),
+                        Some(exit_code),
+                        expected_error.clone(),
+                    )
+                    .unwrap();
+
+                    let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+                    sessions
+                        .lock()
+                        .await
+                        .insert("run-p1".to_string(), actor_handle("run-p1", tx));
+                    let run = crate::storage::runs::get_run("run-p1").unwrap();
+                    let cmd_tx = sessions
+                        .lock()
+                        .await
+                        .get("run-p1")
+                        .expect("session handle")
+                        .cmd_tx
+                        .clone();
+                    let participant = participant("p1", "Alice");
+
+                    let send_task = tokio::spawn({
+                        let participant = participant.clone();
+                        async move {
+                            execute_actor_turn(&participant, &run, "check status", cmd_tx).await
+                        }
+                    });
+                    let prompt = receive_text(&mut rx).await;
+                    let response = send_task.await.unwrap();
+
+                    assert_eq!(prompt, "check status");
+                    assert_eq!(response.status, expected_status);
+                    assert_eq!(response.error, expected_error);
+                }
+            });
+        });
+    }
+
+    #[test]
+    fn failed_response_marks_room_response_failed_with_error() {
+        let participant = participant("p1", "Alice");
+        let response = failed_response(&participant, 7, "Timed out waiting for Codex transcript completion");
+
+        assert_eq!(response.participant_id, participant.id);
+        assert_eq!(response.run_id, participant.run_id);
+        assert_eq!(response.event_seq_start, 7);
+        assert_eq!(response.event_seq_end, 6);
+        assert_eq!(response.status, "failed");
+        assert_eq!(
+            response.error,
+            Some("Timed out waiting for Codex transcript completion".to_string())
+        );
+        assert_eq!(response.preview, None);
+    }
+
+    #[test]
     fn summary_routes_to_exactly_one_target() {
         with_temp_data_dir(|| {
             let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();

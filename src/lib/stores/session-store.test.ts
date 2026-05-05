@@ -4013,6 +4013,46 @@ describe("SessionStore reducer", () => {
         ).toBe("Hello world");
       });
 
+      it("does not mark native CLI chat done with error as completed", () => {
+        const testStore = new SessionStore();
+        testStore.run = makeRun("run-pipe-fail", {
+          status: "running",
+          agent: "gemini",
+          execution_path: "pipe_exec",
+        });
+        mockGetRun.mockResolvedValue(
+          makeRun("run-pipe-fail", { status: "failed", error_message: "Transcript parse failed" }),
+        );
+        testStore.phase = "running";
+
+        testStore.handleChatDelta("partial", undefined);
+        testStore.handleChatDone({ ok: false, code: 1, error: "Transcript parse failed" });
+
+        expect(testStore.phase).toBe("failed");
+        expect(testStore.error).toBe("Transcript parse failed");
+        expect(testStore.streamingText).toBe("partial");
+        expect(testStore.timeline).toHaveLength(0);
+      });
+
+      it("marks native CLI chat done with stop-like error as stopped", () => {
+        const testStore = new SessionStore();
+        testStore.run = makeRun("run-pipe-stop", {
+          status: "running",
+          agent: "codex",
+          execution_path: "pipe_exec",
+        });
+        mockGetRun.mockResolvedValue(makeRun("run-pipe-stop", { status: "stopped" }));
+        testStore.phase = "running";
+
+        testStore.handleChatDelta("partial", undefined);
+        testStore.handleChatDone({ ok: false, code: -1, error: "Stopped" });
+
+        expect(testStore.phase).toBe("stopped");
+        expect(testStore.error).toBe("Stopped");
+        expect(testStore.streamingText).toBe("partial");
+        expect(testStore.timeline).toHaveLength(0);
+      });
+
       it("does not replay native CLI terminal stdout as chat text", async () => {
         const run = makeRun("run-pipe-stdout", {
           status: "running",

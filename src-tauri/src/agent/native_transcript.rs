@@ -527,6 +527,35 @@ mod tests {
     }
 
     #[test]
+    fn codex_parser_tracks_each_new_completion_across_multiple_baseline_advances() {
+        let turn1 = concat!(
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"first\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"answer-1\"}}\n"
+        );
+        let turn2 = concat!(
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"second\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"answer-2\"}}\n"
+        );
+        let turn3 = concat!(
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"third\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"answer-3a\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"answer-3b\"}}\n"
+        );
+
+        let raw_turn1 = turn1;
+        let raw_turn2 = format!("{turn1}{turn2}");
+        let raw_turn3 = format!("{turn1}{turn2}{turn3}");
+
+        let baseline_1 = 0;
+        let baseline_2 = turn1.len() as u64;
+        let baseline_3 = (turn1.len() + turn2.len()) as u64;
+
+        assert_eq!(parse_codex_turn_after(raw_turn1, baseline_1).as_deref(), Some("answer-1"));
+        assert_eq!(parse_codex_turn_after(&raw_turn2, baseline_2).as_deref(), Some("answer-2"));
+        assert_eq!(parse_codex_turn_after(&raw_turn3, baseline_3).as_deref(), Some("answer-3b"));
+    }
+
+    #[test]
     fn gemini_parser_prefers_latest_finalized_completion_after_baseline_in_reused_session() {
         let raw = concat!(
             "{\"type\":\"gemini\",\"content\":\"old\",\"tokens\":{\"total\":10}}\n",
@@ -537,6 +566,35 @@ mod tests {
         let baseline = raw.find("{\"type\":\"user\",\"content\"").unwrap() as u64;
 
         assert_eq!(parse_gemini_turn_after(raw, baseline).as_deref(), Some("new-2"));
+    }
+
+    #[test]
+    fn gemini_parser_tracks_each_new_completion_across_multiple_baseline_advances() {
+        let turn1 = concat!(
+            "{\"type\":\"user\",\"content\":[{\"text\":\"first\"}]}\n",
+            "{\"type\":\"gemini\",\"content\":\"answer-1\",\"tokens\":{\"total\":10}}\n"
+        );
+        let turn2 = concat!(
+            "{\"type\":\"user\",\"content\":[{\"text\":\"second\"}]}\n",
+            "{\"type\":\"message_update\",\"content\":\"answer-2\",\"status\":\"finalized\"}\n"
+        );
+        let turn3 = concat!(
+            "{\"type\":\"user\",\"content\":[{\"text\":\"third\"}]}\n",
+            "{\"type\":\"message_update\",\"content\":\"answer-3a\",\"status\":\"finalized\"}\n",
+            "{\"type\":\"result\",\"response\":\"answer-3b\"}\n"
+        );
+
+        let raw_turn1 = turn1;
+        let raw_turn2 = format!("{turn1}{turn2}");
+        let raw_turn3 = format!("{turn1}{turn2}{turn3}");
+
+        let baseline_1 = 0;
+        let baseline_2 = turn1.len() as u64;
+        let baseline_3 = (turn1.len() + turn2.len()) as u64;
+
+        assert_eq!(parse_gemini_turn_after(raw_turn1, baseline_1).as_deref(), Some("answer-1"));
+        assert_eq!(parse_gemini_turn_after(&raw_turn2, baseline_2).as_deref(), Some("answer-2"));
+        assert_eq!(parse_gemini_turn_after(&raw_turn3, baseline_3).as_deref(), Some("answer-3b"));
     }
 
     #[test]

@@ -2333,10 +2333,22 @@ export class SessionStore {
   }
 
   /** Handle chat-done event (pipe mode). */
-  handleChatDone(_done: { ok: boolean; code: number; error?: string }): void {
+  handleChatDone(done: { ok: boolean; code: number; error?: string }): void {
     if (!this.run) return;
 
     if (!this.useStreamSession) {
+      if (!done.ok) {
+        this.error = done.error ?? "";
+        this._setPhase(done.code === -1 ? "stopped" : "failed");
+        api
+          .getRun(this.run.id)
+          .then((r) => {
+            this.run = r;
+          })
+          .catch((e) => dbgWarn("store", "getRun after pipe-exec done failed:", e));
+        return;
+      }
+
       const content = this.streamingText.trim();
       if (content) {
         const entryId = uuid();
@@ -2353,6 +2365,7 @@ export class SessionStore {
         ];
         this.streamingText = "";
       }
+      this.error = "";
       this._setPhase("completed");
       api
         .getRun(this.run.id)

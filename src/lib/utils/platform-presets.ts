@@ -19,7 +19,7 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
     description: "DeepSeek API",
     key_placeholder: "your-deepseek-key",
     category: "provider",
-    models: ["deepseek-chat"],
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
     extra_env: { API_TIMEOUT_MS: "600000" },
     docs_url: "https://api-docs.deepseek.com/guides/anthropic_api",
   },

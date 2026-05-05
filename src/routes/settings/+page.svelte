@@ -151,6 +151,36 @@
     return entry.status === "beta";
   }
 
+  function providerFieldRules(provider: Phase7ProviderEntry) {
+    if (provider.mode === "official_cli") {
+      return {
+        showApiKey: false,
+        showBaseUrl: false,
+        showModel: false,
+        modelOptions: null as string[] | null,
+        gridClass: "md:grid-cols-1",
+      };
+    }
+
+    if (provider.id === "deepseek") {
+      return {
+        showApiKey: true,
+        showBaseUrl: false,
+        showModel: true,
+        modelOptions: ["deepseek-v4-pro", "deepseek-v4-flash"],
+        gridClass: "md:grid-cols-2",
+      };
+    }
+
+    return {
+      showApiKey: true,
+      showBaseUrl: true,
+      showModel: true,
+      modelOptions: null as string[] | null,
+      gridClass: "md:grid-cols-3",
+    };
+  }
+
   function updateApiProviderField(
     provider: Phase7ProviderEntry,
     field: "api_key" | "base_url" | "model",
@@ -1735,22 +1765,23 @@
                     {/if}
                   </div>
                 {:else}
-                  <div
-                    class="grid gap-2 {provider.id === 'glm' ? 'md:grid-cols-3' : 'md:grid-cols-1'}"
-                  >
-                    <Input
-                      type={showApiKey ? "text" : "password"}
-                      placeholder={`${provider.label} API Key`}
-                      value={credential?.api_key ?? ""}
-                      oninput={(event) =>
-                        updateApiProviderField(
-                          provider,
-                          "api_key",
-                          (event.currentTarget as HTMLInputElement).value,
-                        )}
-                      onblur={persistApiProviderConfig}
-                    />
-                    {#if provider.id === "glm"}
+                  {@const fieldRules = providerFieldRules(provider)}
+                  <div class="grid gap-2 {fieldRules.gridClass}">
+                    {#if fieldRules.showApiKey}
+                      <Input
+                        type={showApiKey ? "text" : "password"}
+                        placeholder={`${provider.label} API Key`}
+                        value={credential?.api_key ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderField(
+                            provider,
+                            "api_key",
+                            (event.currentTarget as HTMLInputElement).value,
+                          )}
+                        onblur={persistApiProviderConfig}
+                      />
+                    {/if}
+                    {#if fieldRules.showBaseUrl}
                       <Input
                         placeholder="Base URL"
                         value={credential?.base_url ?? provider.defaultBaseUrl ?? ""}
@@ -1762,17 +1793,37 @@
                           )}
                         onblur={persistApiProviderConfig}
                       />
-                      <Input
-                        placeholder="Model"
-                        value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
-                        oninput={(event) =>
-                          updateApiProviderField(
-                            provider,
-                            "model",
-                            (event.currentTarget as HTMLInputElement).value,
-                          )}
-                        onblur={persistApiProviderConfig}
-                      />
+                    {/if}
+                    {#if fieldRules.showModel}
+                      {#if fieldRules.modelOptions}
+                        <select
+                          class="h-9 rounded-md border border-border bg-background px-3 text-sm"
+                          value={credential?.models?.[0] ?? provider.defaultModel ?? fieldRules.modelOptions[0]}
+                          oninput={(event) =>
+                            updateApiProviderField(
+                              provider,
+                              "model",
+                              (event.currentTarget as HTMLSelectElement).value,
+                            )}
+                          onblur={persistApiProviderConfig}
+                        >
+                          {#each fieldRules.modelOptions as model}
+                            <option value={model}>{model}</option>
+                          {/each}
+                        </select>
+                      {:else}
+                        <Input
+                          placeholder="Model"
+                          value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
+                          oninput={(event) =>
+                            updateApiProviderField(
+                              provider,
+                              "model",
+                              (event.currentTarget as HTMLInputElement).value,
+                            )}
+                          onblur={persistApiProviderConfig}
+                        />
+                      {/if}
                     {/if}
                   </div>
                 {/if}
