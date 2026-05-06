@@ -143,7 +143,25 @@ fn build_parameterized_env(
         ("ANTHROPIC_MODEL".to_string(), model.clone()),
         ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), model.clone()),
         ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), model.clone()),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model.clone()),
+        ("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), model),
+        (
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
+            "1".to_string(),
+        ),
+        (
+            "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK".to_string(),
+            "1".to_string(),
+        ),
+        ("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "max".to_string()),
+        (
+            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
+            "true".to_string(),
+        ),
+        (
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            "400000".to_string(),
+        ),
     ]))
 }
 
@@ -224,6 +242,23 @@ mod tests {
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://coding.dashscope.aliyuncs.com/apps/anthropic")
+        );
+        // CLAUDE_CODE_* stability vars (parity with build_deepseek_env)
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("qwen3.5-plus")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str),
+            Some("max")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS").map(String::as_str),
+            Some("true")
         );
     }
 
