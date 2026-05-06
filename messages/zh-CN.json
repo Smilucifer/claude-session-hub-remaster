@@ -984,11 +984,9 @@
   "toolActivity_tabContext": "上下文",
   "toolActivity_tabFiles": "文件",
   "toolActivity_tabInfo": "信息",
-  "toolActivity_tabRunningTasks": "运行中",
   "toolActivity_tabTasks": "任务",
 
   "bgTask_empty": "暂无后台任务",
-  "bgTask_runningEmpty": "暂无运行中的后台任务",
   "filesPanel_noFiles": "暂无文件操作",
   "filesPanel_notLocatable": "无法定位到对应工具调用",
 
@@ -1223,7 +1221,6 @@
   "bgTask_title": "后台任务（{count}）",
   "bgTask_active": "{count} 个运行中",
   "bgTask_activeTitle": "{count} 个后台任务运行中",
-  "bgTask_runningTitle": "{count} 个运行中的后台任务",
 
   "screenshot_notSupported": "截图功能仅支持 macOS",
   "screenshot_captured": "截图已捕获",

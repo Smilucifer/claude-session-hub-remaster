@@ -7,6 +7,7 @@ pub mod native_pty;
 pub mod native_transcript;
 pub mod notify;
 pub mod pipe_parser;
+pub mod provider_claude_config;
 pub mod session_actor;
 pub mod spawn;
 pub mod spawn_locks;

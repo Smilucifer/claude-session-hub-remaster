@@ -2,10 +2,12 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import * as api from "$lib/api";
-  import type { UsageOverview, DailyAggregate } from "$lib/types";
+  import type { UsageOverview, DailyAggregate, BalanceHelperSettings, UserSettings } from "$lib/types";
   import { formatCost, formatTokenCount } from "$lib/utils/format";
   import { dbg, dbgWarn } from "$lib/utils/debug";
   import Card from "$lib/components/Card.svelte";
+  import Button from "$lib/components/Button.svelte";
+  import Input from "$lib/components/Input.svelte";
   import HeatmapCalendar from "$lib/components/HeatmapCalendar.svelte";
   import StackedModelChart from "$lib/components/StackedModelChart.svelte";
   import { t } from "$lib/i18n/index.svelte";
@@ -29,6 +31,108 @@
 
   /** Whether cache clear + rescan is in progress. */
   let refreshing = $state(false);
+
+  // ── Balance state ──
+  let balanceHelper = $state<BalanceHelperSettings | null>(null);
+  let balanceRefreshing = $state(false);
+  let balanceRefreshError = $state<string | null>(null);
+  let packySessionInput = $state("");
+  let packyTdcItokenInput = $state("");
+  let packyUserIdInput = $state("");
+  let showPackyCredentials = $state(false);
+  let balanceSaving = $state(false);
+
+  function balanceStatusText(source: string): {
+    label: string;
+    balance: string;
+    sub: string;
+    dotClass: string;
+  } {
+    const entry = balanceHelper?.cache?.[source];
+    if (!entry)
+      return {
+        label: t("settings_balance_notChecked"),
+        balance: "—",
+        sub: "",
+        dotClass: "bg-amber-400",
+      };
+    if (entry.status === "ok") {
+      return {
+        label: entry.balance_text ?? t("settings_balance_ok"),
+        balance: entry.balance_text ?? "—",
+        sub: entry.refreshed_at,
+        dotClass: "bg-emerald-400",
+      };
+    }
+    return {
+      label: t("settings_balance_failed"),
+      balance: "—",
+      sub: entry.error ?? "",
+      dotClass: "bg-red-400",
+    };
+  }
+
+  async function refreshBalanceStatus(source: "all" | "deepseek" | "packy" = "all") {
+    if (balanceRefreshing) return;
+    balanceRefreshing = true;
+    balanceRefreshError = null;
+    try {
+      balanceHelper = await api.refreshBalanceStatus(source);
+    } catch (e) {
+      balanceRefreshError = String(e);
+      dbgWarn("usage", "refreshBalanceStatus error", e);
+    } finally {
+      balanceRefreshing = false;
+    }
+  }
+
+  async function savePackyCredentials() {
+    balanceSaving = true;
+    try {
+      const next = {
+        ...(balanceHelper ?? { auto_refresh_secs: 120, cache: {} }),
+        packy_session: packySessionInput.trim() || null,
+        packy_tdc_itoken: packyTdcItokenInput.trim() || null,
+        packy_user_id: packyUserIdInput.trim() || null,
+      };
+      const settings = await api.updateUserSettings({
+        balance_helper: next,
+      } as Partial<UserSettings>);
+      balanceHelper = settings.balance_helper ?? null;
+      packySessionInput = balanceHelper?.packy_session ?? "";
+      packyTdcItokenInput = balanceHelper?.packy_tdc_itoken ?? "";
+      packyUserIdInput = balanceHelper?.packy_user_id ?? "";
+      void refreshBalanceStatus("packy");
+    } catch (e) {
+      dbgWarn("usage", "savePackyCredentials error", e);
+    } finally {
+      balanceSaving = false;
+    }
+  }
+
+  async function clearPackyCredentials() {
+    balanceSaving = true;
+    try {
+      const next = {
+        ...(balanceHelper ?? { auto_refresh_secs: 120, cache: {} }),
+        packy_session: null,
+        packy_tdc_itoken: null,
+        packy_user_id: null,
+      };
+      const settings = await api.updateUserSettings({
+        balance_helper: next,
+      } as Partial<UserSettings>);
+      balanceHelper = settings.balance_helper ?? null;
+      packySessionInput = "";
+      packyTdcItokenInput = "";
+      packyUserIdInput = "";
+      balanceRefreshError = null;
+    } catch (e) {
+      dbgWarn("usage", "clearPackyCredentials error", e);
+    } finally {
+      balanceSaving = false;
+    }
+  }
 
   const DATE_RANGES = [
     { label: "1d", days: 1 },
@@ -226,6 +330,30 @@
   onMount(() => {
     loadData(selectedDays);
     loadHeatmapData();
+    // Load balance helper + start auto-refresh
+    let balanceTimer: ReturnType<typeof setInterval>;
+    (async () => {
+      try {
+        const settings = await api.getUserSettings();
+        balanceHelper = settings.balance_helper ?? null;
+        packySessionInput = balanceHelper?.packy_session ?? "";
+        packyTdcItokenInput = balanceHelper?.packy_tdc_itoken ?? "";
+        packyUserIdInput = balanceHelper?.packy_user_id ?? "";
+        void refreshBalanceStatus("all");
+        const secs = Math.max(
+          60,
+          Math.min(180, balanceHelper?.auto_refresh_secs ?? 120),
+        );
+        balanceTimer = setInterval(() => {
+          void refreshBalanceStatus("all");
+        }, secs * 1000);
+      } catch (e) {
+        dbgWarn("usage", "load balance helper failed", e);
+      }
+    })();
+    return () => {
+      if (balanceTimer) clearInterval(balanceTimer);
+    };
   });
 </script>
 
@@ -332,6 +460,185 @@
       {error}
     </div>
   {:else if data}
+    <!-- Balance card -->
+    {#if balanceHelper}
+      <Card class="p-6 space-y-5">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              {t("settings_balance_title")}
+            </h2>
+            <p class="mt-1 text-xs text-muted-foreground">
+              {t("settings_balance_desc")}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={balanceRefreshing}
+            onclick={() => refreshBalanceStatus("all")}
+          >
+            {balanceRefreshing
+              ? t("settings_balance_refreshing")
+              : t("settings_balance_refresh")}
+          </Button>
+        </div>
+        {#if balanceRefreshError}
+          <p class="text-xs text-red-400">{balanceRefreshError}</p>
+        {/if}
+
+        {@const deepseek = balanceStatusText("deepseek")}
+        {@const packy = balanceStatusText("packy")}
+        <div class="grid gap-4 md:grid-cols-2">
+          <!-- DeepSeek panel -->
+          <div
+            class="rounded-xl bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent border border-blue-500/20 p-5 space-y-3"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/15"
+                >
+                  <svg
+                    class="h-5 w-5 text-blue-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <div>
+                  <div class="text-sm font-semibold">DeepSeek</div>
+                  <div
+                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <span
+                      class="inline-block h-1.5 w-1.5 rounded-full {deepseek.dotClass}"
+                    ></span>
+                    {deepseek.label}
+                  </div>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-bold tabular-nums">{deepseek.balance}</div>
+                {#if deepseek.sub}
+                  <div class="text-[10px] text-muted-foreground">{deepseek.sub}</div>
+                {/if}
+              </div>
+            </div>
+          </div>
+
+          <!-- Packy panel -->
+          <div
+            class="rounded-xl bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 p-5 space-y-3"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15"
+                >
+                  <svg
+                    class="h-5 w-5 text-emerald-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                </div>
+                <div>
+                  <div class="text-sm font-semibold">Packy</div>
+                  <div
+                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <span
+                      class="inline-block h-1.5 w-1.5 rounded-full {packy.dotClass}"
+                    ></span>
+                    {packy.label}
+                  </div>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-bold tabular-nums">{packy.balance}</div>
+                {#if packy.sub}
+                  <div class="text-[10px] text-muted-foreground">{packy.sub}</div>
+                {/if}
+              </div>
+            </div>
+
+            <!-- Packy credential inputs (collapsible) -->
+            <button
+              class="w-full text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onclick={() => (showPackyCredentials = !showPackyCredentials)}
+            >
+              <span class="flex items-center gap-1">
+                <svg
+                  class="h-3 w-3 transition-transform {showPackyCredentials ? 'rotate-90' : ''}"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                {t("settings_balance_packySession")}
+              </span>
+            </button>
+            {#if showPackyCredentials}
+              <div class="space-y-2">
+                <Input
+                  type="password"
+                  placeholder={t("settings_balance_packySession")}
+                  value={packySessionInput}
+                  oninput={(e) =>
+                    (packySessionInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <Input
+                  type="text"
+                  placeholder={t("settings_balance_packyTdcItoken")}
+                  value={packyTdcItokenInput}
+                  oninput={(e) =>
+                    (packyTdcItokenInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <Input
+                  type="text"
+                  placeholder={t("settings_balance_packyUserId")}
+                  value={packyUserIdInput}
+                  oninput={(e) =>
+                    (packyUserIdInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <div class="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={balanceSaving}
+                    onclick={clearPackyCredentials}
+                  >
+                    {t("settings_balance_clear")}
+                  </Button>
+                  <Button size="sm" disabled={balanceSaving} onclick={savePackyCredentials}>
+                    {balanceSaving
+                      ? t("settings_balance_saving")
+                      : t("settings_balance_save")}
+                  </Button>
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </Card>
+    {/if}
+
     <!-- Summary cards -->
     <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
       <Card class="p-4 text-center">

@@ -7,9 +7,10 @@ use crate::agent::windows_msvc_env::{
     SpawnPathPolicy,
 };
 use crate::models::{
-    BusEvent, PlatformCredential, RemoteHost, RunMeta, RunStatus, SessionMode, UserSettings,
-    WindowsMsvcEnvMode,
+    BusEvent, RemoteHost, RunMeta, RunStatus, SessionMode, UserSettings, WindowsMsvcEnvMode,
 };
+#[cfg(test)]
+use crate::models::PlatformCredential;
 use crate::process_ext::HideConsole;
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
@@ -133,6 +134,7 @@ struct ResolvedAuth {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg(test)]
 struct ProviderLaunchConfig {
     env: std::collections::HashMap<String, String>,
     include_co_authored_by: Option<bool>,
@@ -528,61 +530,12 @@ fn is_phase7_claude_compatible_api_platform(platform_id: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn build_deepseek_launch_config(cred: &PlatformCredential) -> Result<ProviderLaunchConfig, String> {
-    let api_key = cred
-        .api_key
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "DeepSeek API key is not configured".to_string())?;
-
+    let env =
+        crate::agent::provider_claude_config::provider_env_from_credential("deepseek", cred)?;
     Ok(ProviderLaunchConfig {
-        env: std::collections::HashMap::from([
-            (
-                "ANTHROPIC_BASE_URL".to_string(),
-                "https://api.deepseek.com/anthropic".to_string(),
-            ),
-            ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
-            (
-                "ANTHROPIC_MODEL".to_string(),
-                "deepseek-v4-pro".to_string(),
-            ),
-            (
-                "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-                "deepseek-v4-pro".to_string(),
-            ),
-            (
-                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                "deepseek-v4-pro".to_string(),
-            ),
-            (
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                "deepseek-v4-flash".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
-                "deepseek-v4-pro".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
-                "1".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK".to_string(),
-                "1".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_EFFORT_LEVEL".to_string(),
-                "max".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS".to_string(),
-                "true".to_string(),
-            ),
-            (
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
-                "400000".to_string(),
-            ),
-        ]),
+        env,
         include_co_authored_by: Some(false),
         thinking: Some(false),
         permissions_default_mode: Some("bypassPermissions".to_string()),
@@ -596,42 +549,14 @@ fn build_deepseek_launch_config(cred: &PlatformCredential) -> Result<ProviderLau
     })
 }
 
+#[cfg(test)]
 fn build_parameterized_provider_launch_config(
     cred: &PlatformCredential,
 ) -> Result<ProviderLaunchConfig, String> {
-    let api_key = cred
-        .api_key
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("{} API key is not configured", cred.platform_id))?;
-    let base_url = cred
-        .base_url
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("{} base URL is not configured", cred.platform_id))?;
-    let model = cred
-        .models
-        .as_ref()
-        .and_then(|models| models.first())
-        .filter(|value| !value.trim().is_empty())
-        .cloned()
-        .ok_or_else(|| format!("{} model is not configured", cred.platform_id))?;
-
+    let env =
+        crate::agent::provider_claude_config::provider_env_from_credential(&cred.platform_id, cred)?;
     Ok(ProviderLaunchConfig {
-        env: std::collections::HashMap::from([
-            ("ANTHROPIC_BASE_URL".to_string(), base_url),
-            ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
-            ("ANTHROPIC_MODEL".to_string(), model.clone()),
-            (
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                model.clone(),
-            ),
-            (
-                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                model.clone(),
-            ),
-            ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), model),
-        ]),
+        env,
         permissions_default_mode: Some("bypassPermissions".to_string()),
         enabled_plugins: Some(std::collections::HashMap::from([(
             "superpowers@claude-plugins-official".to_string(),
@@ -643,6 +568,7 @@ fn build_parameterized_provider_launch_config(
     })
 }
 
+#[cfg(test)]
 fn build_provider_launch_config(
     settings: &UserSettings,
     platform_id: &str,
@@ -760,8 +686,43 @@ pub(crate) async fn start_session_impl(
             .and_then(|p| p.platform_id.as_deref()))
         .or(meta.platform_id.as_deref());
     let effective_pid = effective_platform_for_auth_mode(&user_settings.auth_mode, requested_pid);
-    let provider_launch_config = match effective_pid {
-        Some(pid) => build_provider_launch_config(&user_settings, pid)?,
+    // Provider-backed Claude sessions: persist a stable JSON config file and derive
+    // the env projection from it. The JSON file is the durable source of truth;
+    // env vars are injected from the same materialized config into the CLI process.
+    let provider_config = match effective_pid {
+        Some(pid) => {
+            let provider_id =
+                crate::agent::provider_claude_config::platform_to_provider_id(pid);
+            let cred_lookup = provider_id.and_then(|id| {
+                user_settings
+                    .platform_credentials
+                    .iter()
+                    .find(|c| c.platform_id == pid)
+                    .map(|cred| (id, cred))
+            });
+            match cred_lookup {
+                Some((provider_id, cred)) => {
+                    match crate::agent::provider_claude_config::write_provider_claude_config(
+                        provider_id, pid, cred,
+                    ) {
+                        Ok(materialized) => {
+                            log::info!(
+                                "[session] provider Claude config written: {}",
+                                materialized.json_path.display()
+                            );
+                            Some(materialized)
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[session] failed to write provider Claude config: {e}"
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
+                None => None,
+            }
+        }
         None => None,
     };
     let resolved = resolve_auth_env_for_platform(&remote, &user_settings, effective_pid);
@@ -771,7 +732,7 @@ pub(crate) async fn start_session_impl(
         remote.is_some(),
         &meta.cwd,
     );
-    if let Some(config) = provider_launch_config.as_ref() {
+    if let Some(config) = provider_config.as_ref() {
         let extra_env = resolved.extra_env.get_or_insert_with(std::collections::HashMap::new);
         for (key, value) in &config.env {
             extra_env.insert(key.clone(), value.clone());

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, getContext, untrack } from "svelte";
+  import { onMount, getContext } from "svelte";
   import { page } from "$app/stores";
   import * as api from "$lib/api";
   import { loadCliInfo, KeybindingStore } from "$lib/stores";
@@ -18,7 +18,11 @@
   import { formatKeyDisplay } from "$lib/stores/keybindings.svelte";
   import { findCredential } from "$lib/utils/platform-presets";
   import { PHASE7_PROVIDERS, type Phase7ProviderEntry } from "$lib/utils/provider-catalog";
-  import type { PlatformCredential } from "$lib/types";
+  import type {
+    PlatformCredential,
+    WindowsMsvcEnvMode,
+    WindowsMsvcEnvStatus,
+  } from "$lib/types";
   import {
     isDebugMode,
     setDebugMode,
@@ -85,13 +89,6 @@
   let settings = $state<UserSettings | null>(null);
   let showApiKey = $state(false);
   let platformCredentials = $state<PlatformCredential[]>([]);
-  let packySessionInput = $state("");
-  let packyTdcItokenInput = $state("");
-  let packyUserIdInput = $state("");
-  let showPackySession = $state(false);
-  let balanceHelperSaving = $state(false);
-  let balanceRefreshing = $state(false);
-  let balanceRefreshError = $state<string | null>(null);
 
   type ConnectionAgentTab = "claude" | "codex" | "gemini";
   const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
@@ -105,6 +102,10 @@
     gemini: null,
   });
   let connectionCliChecking = $state(false);
+  let msvcEnvMode = $state<WindowsMsvcEnvMode>("auto");
+  let msvcEnvStatus = $state<WindowsMsvcEnvStatus | null>(null);
+  let msvcEnvLoading = $state(false);
+  let msvcEnvSaving = $state(false);
 
   function providerCliCheck(provider: Phase7ProviderEntry): CliCheckResult | null {
     if (provider.mode !== "official_cli") return null;
@@ -208,59 +209,53 @@
     saveGeneralPatch({ platform_credentials: platformCredentials });
   }
 
-  function balanceCacheStatus(source: "deepseek" | "packy"): string {
-    const entry = settings?.balance_helper?.cache?.[source];
-    if (!entry) return t("settings_balance_notChecked");
-    if (entry.status === "ok") {
-      return entry.balance_text
-        ? `${entry.balance_text} · ${entry.refreshed_at}`
-        : t("settings_balance_ok");
-    }
-    return entry.error
-      ? `${t("settings_balance_failed")} · ${entry.error}`
-      : t("settings_balance_failed");
-  }
-
-  async function savePackyCredentials() {
-    balanceHelperSaving = true;
+  async function loadMsvcEnvStatus(cwd?: string) {
+    if (!IS_WINDOWS) return;
+    msvcEnvLoading = true;
     try {
-      const next = {
-        ...(settings?.balance_helper ?? { auto_refresh_secs: 120, cache: {} }),
-        packy_session: packySessionInput.trim() || null,
-        packy_tdc_itoken: packyTdcItokenInput.trim() || null,
-        packy_user_id: packyUserIdInput.trim() || null,
-      };
-      settings = await api.updateUserSettings({ balance_helper: next } as Partial<UserSettings>);
-      packySessionInput = settings.balance_helper?.packy_session ?? "";
-      packyTdcItokenInput = settings.balance_helper?.packy_tdc_itoken ?? "";
-      packyUserIdInput = settings.balance_helper?.packy_user_id ?? "";
-      void refreshBalanceStatus("packy");
+      msvcEnvStatus = await api.getWindowsMsvcEnvStatus(cwd);
     } catch (e) {
-      dbgWarn("settings", "savePackyCredentials error", e);
+      dbgWarn("settings", "load MSVC env status failed", e);
+      msvcEnvStatus = null;
     } finally {
-      balanceHelperSaving = false;
+      msvcEnvLoading = false;
     }
   }
 
-  async function clearPackyCredentials() {
-    balanceHelperSaving = true;
+  async function saveMsvcEnvMode(mode: WindowsMsvcEnvMode) {
+    if (msvcEnvSaving || mode === msvcEnvMode) return;
+    msvcEnvMode = mode;
+    msvcEnvSaving = true;
     try {
-      const next = {
-        ...(settings?.balance_helper ?? { auto_refresh_secs: 120, cache: {} }),
-        packy_session: null,
-        packy_tdc_itoken: null,
-        packy_user_id: null,
-      };
-      settings = await api.updateUserSettings({ balance_helper: next } as Partial<UserSettings>);
-      packySessionInput = "";
-      packyTdcItokenInput = "";
-      packyUserIdInput = "";
-      balanceRefreshError = null;
+      settings = await api.updateUserSettings({ windows_msvc_env_mode: mode } as Partial<UserSettings>);
+      await loadMsvcEnvStatus(settings.working_directory);
     } catch (e) {
-      dbgWarn("settings", "clearPackyCredentials error", e);
+      dbgWarn("settings", "save MSVC env mode failed", e);
+      msvcEnvMode = settings?.windows_msvc_env_mode ?? "auto";
     } finally {
-      balanceHelperSaving = false;
+      msvcEnvSaving = false;
     }
+  }
+
+  function msvcEnvStateClass(state?: WindowsMsvcEnvStatus["state"]): string {
+    if (state === "injected") return "border-emerald-500/30 bg-emerald-500/5 text-emerald-400";
+    if (state === "warning") return "border-amber-500/30 bg-amber-500/5 text-amber-400";
+    return "border-border bg-muted/30 text-muted-foreground";
+  }
+
+  function msvcEnvModeLabel(mode: WindowsMsvcEnvMode): string {
+    if (mode === "always") return t("settings_msvc_mode_always");
+    if (mode === "off") return t("settings_msvc_mode_off");
+    return t("settings_msvc_mode_auto");
+  }
+
+  function msvcEnvStateLabel(state: WindowsMsvcEnvStatus["state"]): string {
+    if (state === "disabled") return t("settings_msvc_state_disabled");
+    if (state === "non_windows") return t("settings_msvc_state_nonWindows");
+    if (state === "not_needed") return t("settings_msvc_state_notNeeded");
+    if (state === "injected") return t("settings_msvc_state_injected");
+    if (state === "warning") return t("settings_msvc_state_warning");
+    return t("settings_msvc_state_pending");
   }
 
   async function refreshConnectionCliChecks() {
@@ -279,32 +274,6 @@
       CliCheckResult | null
     >;
     connectionCliChecking = false;
-  }
-
-  async function refreshBalanceStatus(source: "all" | "deepseek" | "packy" = "all") {
-    if (balanceRefreshing) return;
-    balanceRefreshing = true;
-    balanceRefreshError = null;
-    try {
-      const helper = await api.refreshBalanceStatus(source);
-      if (settings) {
-        settings = { ...settings, balance_helper: helper };
-      }
-    } catch (e) {
-      balanceRefreshError = String(e);
-      dbgWarn("settings", "refreshBalanceStatus error", e);
-    } finally {
-      balanceRefreshing = false;
-    }
-  }
-
-  function startBalanceAutoRefresh() {
-    const secs = Math.max(60, Math.min(180, settings?.balance_helper?.auto_refresh_secs ?? 120));
-    void refreshBalanceStatus("all");
-    const timer = setInterval(() => {
-      void refreshBalanceStatus("all");
-    }, secs * 1000);
-    return () => clearInterval(timer);
   }
 
   // ── Web Server state (desktop-only) ──
@@ -954,11 +923,6 @@
     }
   });
 
-  $effect(() => {
-    if (activeTab !== "connection") return;
-    return untrack(() => startBalanceAutoRefresh());
-  });
-
   // Refresh log count periodically when debug is on
   $effect(() => {
     if (!debugOn) return;
@@ -973,13 +937,12 @@
       settings = await api.getUserSettings();
       remoteHosts = settings.remote_hosts ?? [];
       platformCredentials = settings.platform_credentials ?? [];
-      packySessionInput = settings.balance_helper?.packy_session ?? "";
-      packyTdcItokenInput = settings.balance_helper?.packy_tdc_itoken ?? "";
-      packyUserIdInput = settings.balance_helper?.packy_user_id ?? "";
+      msvcEnvMode = settings.windows_msvc_env_mode ?? "auto";
     } catch (e) {
       dbgWarn("settings", "error", e);
     }
     void refreshConnectionCliChecks();
+    void loadMsvcEnvStatus(settings.working_directory);
     // Load web server status + token (desktop only)
     if (getTransport().isDesktop()) {
       Promise.all([api.getWebServerStatus(), api.getWebServerToken()])
@@ -1839,109 +1802,6 @@
             {/each}
           </div>
         </Card>
-
-        <Card class="p-6 space-y-4">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {t("settings_balance_title")}
-              </h2>
-              <p class="mt-1 text-xs text-muted-foreground">
-                {t("settings_balance_desc")}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={balanceRefreshing}
-              onclick={() => refreshBalanceStatus("all")}
-            >
-              {balanceRefreshing ? t("settings_balance_refreshing") : t("settings_balance_refresh")}
-            </Button>
-          </div>
-          {#if balanceRefreshError}
-            <p class="text-xs text-red-400">{balanceRefreshError}</p>
-          {/if}
-
-          <div class="grid gap-3 md:grid-cols-2">
-            <div class="rounded-md border border-border p-4">
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-sm font-medium">DeepSeek</div>
-                  <div class="mt-1 text-xs text-muted-foreground">
-                    {balanceCacheStatus("deepseek")}
-                  </div>
-                </div>
-                <span
-                  class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >
-                  API
-                </span>
-              </div>
-            </div>
-
-            <div class="rounded-md border border-border p-4">
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-sm font-medium">Packy</div>
-                  <div class="mt-1 text-xs text-muted-foreground">
-                    {balanceCacheStatus("packy")}
-                  </div>
-                </div>
-                <span
-                  class="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                >
-                  Packy Auth
-                </span>
-              </div>
-              <div class="space-y-2">
-                <Input
-                  type={showPackySession ? "text" : "password"}
-                  placeholder={t("settings_balance_packySession")}
-                  value={packySessionInput}
-                  oninput={(event) =>
-                    (packySessionInput = (event.currentTarget as HTMLInputElement).value)}
-                />
-                <Input
-                  type="text"
-                  placeholder={t("settings_balance_packyTdcItoken")}
-                  value={packyTdcItokenInput}
-                  oninput={(event) =>
-                    (packyTdcItokenInput = (event.currentTarget as HTMLInputElement).value)}
-                />
-                <Input
-                  type="text"
-                  placeholder={t("settings_balance_packyUserId")}
-                  value={packyUserIdInput}
-                  oninput={(event) =>
-                    (packyUserIdInput = (event.currentTarget as HTMLInputElement).value)}
-                />
-                <div class="flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onclick={() => (showPackySession = !showPackySession)}
-                  >
-                    {showPackySession ? t("settings_general_hide") : t("settings_general_show")}
-                  </Button>
-                </div>
-              </div>
-              <div class="mt-3 flex justify-end gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={balanceHelperSaving}
-                  onclick={clearPackyCredentials}
-                >
-                  {t("settings_balance_clear")}
-                </Button>
-                <Button size="sm" disabled={balanceHelperSaving} onclick={savePackyCredentials}>
-                  {balanceHelperSaving ? t("settings_balance_saving") : t("settings_balance_save")}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Card>
       </div>
     {:else if activeTab === "cli-config"}
       {#if cliConfigLoading && !cliConfigLoaded}
@@ -2187,6 +2047,60 @@
               </div>
             {/each}
           </Card>
+
+          <!-- MSVC Developer Environment (Windows only) -->
+          {#if IS_WINDOWS}
+            <Card class="p-6 space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                    {t("settings_msvc_title")}
+                  </h2>
+                  <p class="mt-1 text-xs text-muted-foreground">{t("settings_msvc_desc")}</p>
+                </div>
+                {#if msvcEnvLoading}
+                  <span class="text-xs text-muted-foreground">{t("settings_msvc_checking")}</span>
+                {/if}
+              </div>
+
+              <div class="grid grid-cols-3 gap-2">
+                {#each (["auto", "always", "off"] as WindowsMsvcEnvMode[]) as mode}
+                  <button
+                    class="rounded-md border px-3 py-2 text-sm transition-colors disabled:opacity-60 {msvcEnvMode ===
+                    mode
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent'}"
+                    disabled={msvcEnvSaving}
+                    onclick={() => saveMsvcEnvMode(mode)}
+                  >
+                    {msvcEnvModeLabel(mode)}
+                  </button>
+                {/each}
+              </div>
+
+              {#if msvcEnvStatus}
+                <div class="rounded-md border px-3 py-2 {msvcEnvStateClass(msvcEnvStatus.state)}">
+                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <span class="font-medium">{msvcEnvStateLabel(msvcEnvStatus.state)}</span>
+                    {#if msvcEnvStatus.source_path}
+                      <span class="font-mono text-[11px] opacity-80">
+                        {msvcEnvStatus.source_path}
+                      </span>
+                    {/if}
+                    {#if msvcEnvStatus.arch}
+                      <span class="text-[11px] opacity-80">{msvcEnvStatus.arch}</span>
+                    {/if}
+                  </div>
+                  {#if msvcEnvStatus.message}
+                    <p class="mt-1 text-xs opacity-90">{msvcEnvStatus.message}</p>
+                  {/if}
+                  {#if msvcEnvStatus.next_action}
+                    <p class="mt-1 text-xs opacity-80">{msvcEnvStatus.next_action}</p>
+                  {/if}
+                </div>
+              {/if}
+            </Card>
+          {/if}
 
           <!-- Footer note -->
           <p class="text-[10px] text-muted-foreground px-1">

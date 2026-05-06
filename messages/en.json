@@ -984,11 +984,9 @@
   "toolActivity_tabContext": "Context",
   "toolActivity_tabFiles": "Files",
   "toolActivity_tabInfo": "Info",
-  "toolActivity_tabRunningTasks": "Running",
   "toolActivity_tabTasks": "Tasks",
 
   "bgTask_empty": "No background tasks",
-  "bgTask_runningEmpty": "No running background tasks",
   "filesPanel_noFiles": "No file operations yet",
   "filesPanel_notLocatable": "Cannot locate the corresponding tool call",
 
@@ -1223,7 +1221,6 @@
   "bgTask_title": "Background Tasks ({count})",
   "bgTask_active": "{count} running",
   "bgTask_activeTitle": "{count} background tasks running",
-  "bgTask_runningTitle": "{count} running background tasks",
 
   "screenshot_notSupported": "Screenshot capture is only supported on macOS",
   "screenshot_captured": "Screenshot captured",
