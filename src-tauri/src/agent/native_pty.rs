@@ -418,7 +418,7 @@ pub async fn run_native_pty_agent(
         &agent,
         &cwd,
         spawned_at,
-        transcript_baseline,
+        transcript_baseline.clone(),
     );
     tokio::pin!(transcript_wait);
     let wait_outcome = loop {
@@ -432,6 +432,40 @@ pub async fn run_native_pty_agent(
                 }
             }
         }
+    };
+
+    // If the process exited before the transcript was detected, do a final one-shot
+    // scan. Codex/Gemini sometimes write the transcript just before exiting, and the
+    // polling loop above may race past it.
+    let wait_outcome = match wait_outcome {
+        NativeWaitOutcome::ProcessExited(code) => {
+            log::info!(
+                "[native-pty] {agent} process exited with code {code}, attempting final transcript scan"
+            );
+            match native_transcript::try_native_transcript_once(
+                &agent,
+                &cwd,
+                spawned_at,
+                transcript_baseline.as_ref(),
+            )
+            .await
+            {
+                Some(result) => {
+                    log::info!(
+                        "[native-pty] {agent} transcript recovered after process exit: {} chars",
+                        result.text.len()
+                    );
+                    NativeWaitOutcome::Transcript(Ok(result))
+                }
+                None => {
+                    log::warn!(
+                        "[native-pty] {agent} no transcript found after process exit (code {code})"
+                    );
+                    NativeWaitOutcome::ProcessExited(code)
+                }
+            }
+        }
+        other => other,
     };
 
     let terminal = resolve_native_turn_terminal(&agent, &run_id, wait_outcome);

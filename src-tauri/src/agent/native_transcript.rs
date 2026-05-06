@@ -50,6 +50,42 @@ pub async fn wait_for_native_transcript_turn(
     }
 }
 
+/// One-shot attempt to find and parse a transcript after the PTY process has exited.
+/// Returns the parsed text if found, or None if no matching transcript is available.
+pub async fn try_native_transcript_once(
+    agent: &str,
+    cwd: &str,
+    spawned_at: SystemTime,
+    baseline: Option<&NativeTranscriptBaseline>,
+) -> Option<NativeTranscriptResult> {
+    match agent {
+        "codex" => {
+            let path = match baseline {
+                Some(b) => Some(b.path.clone()),
+                None => find_codex_rollout(cwd, spawned_at).await,
+            }?;
+            let raw = tokio::fs::read_to_string(&path).await.ok()?;
+            let baseline_len = matching_baseline_len(&path, baseline);
+            let text = parse_codex_turn_after(&raw, baseline_len)?;
+            Some(NativeTranscriptResult {
+                text,
+                conversation_ref: codex_ref_from_rollout(&path),
+            })
+        }
+        "gemini" => {
+            let path = match baseline {
+                Some(b) => Some(b.path.clone()),
+                None => find_gemini_session(cwd, spawned_at).await,
+            }?;
+            let raw = tokio::fs::read_to_string(&path).await.ok()?;
+            let baseline_len = matching_baseline_len(&path, baseline);
+            let text = parse_gemini_turn_after(&raw, baseline_len)?;
+            Some(NativeTranscriptResult { text, conversation_ref: None })
+        }
+        _ => None,
+    }
+}
+
 fn home_dir() -> Result<PathBuf, String> {
     env::var_os("USERPROFILE")
         .or_else(|| env::var_os("HOME"))
