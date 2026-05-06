@@ -11,14 +11,13 @@
     RoomTurn,
     UserSettings,
   } from "$lib/types";
-  import { truncate } from "$lib/utils/format";
+  import { truncate, formatDuration } from "$lib/utils/format";
   import { PHASE7_PROVIDERS, getPhase7Provider } from "$lib/utils/provider-catalog";
   import {
     canSendRoomMessage,
     roomParticipantBadge,
     roomParticipantMetaLabel,
     roomMessagePlaceholderKey,
-    roomRequiresThreeParticipants,
   } from "$lib/utils/room-ui";
 
   type SeatAgent = RoundtableSeatDraft["agent"];
@@ -32,11 +31,6 @@
     platformId: string;
     prompt: string;
     role: string;
-  }
-
-  interface SeatPanel {
-    index: number;
-    participant?: RoomParticipantDetail;
   }
 
   interface LatestParticipantResponse {
@@ -61,8 +55,19 @@
   let connectionProfiles = $derived(
     (settings?.connection_profiles ?? []).filter((p) => p.enabled !== false),
   );
-  let seatPanels = $derived(fixedSeatPanels(store.room?.participants ?? []));
   let roomParticipantCount = $derived(store.room?.participants.length ?? 0);
+  let displayPanels = $derived.by(() => {
+    const participants = store.room?.participants ?? [];
+    if (store.room?.kind === "roundtable") {
+      return [0, 1, 2].map((index) => ({ index, participant: participants[index] }));
+    }
+    return participants.map((p, index) => ({ index, participant: p }));
+  });
+  let participantLabelMap = $derived(
+    Object.fromEntries(
+      (store.room?.participants ?? []).map((p) => [p.participant.id, p.participant.label]),
+    ),
+  );
   let roomComposerPlaceholderKey = $derived(
     store.room ? roomMessagePlaceholderKey(store.room.kind) : "room_roundtablePlaceholder",
   );
@@ -276,10 +281,6 @@
     };
   }
 
-  function fixedSeatPanels(participants: RoomParticipantDetail[]): SeatPanel[] {
-    return [0, 1, 2].map((index) => ({ index, participant: participants[index] }));
-  }
-
   function latestResponse(participantId?: string): LatestParticipantResponse | null {
     if (!participantId || !store.room) return null;
     for (let turnIndex = store.room.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
@@ -290,12 +291,6 @@
       if (response) return { turn, response };
     }
     return null;
-  }
-
-  function participantStatus(panel: SeatPanel): string {
-    const participant = panel.participant;
-    const latest = latestResponse(participant?.participant.id);
-    return latest?.response.status ?? participant?.run?.status ?? "waiting";
   }
 
   function cleanText(value?: string): string {
@@ -369,34 +364,29 @@
   function elapsedTime(startedAt?: string): string {
     if (!startedAt) return "";
     const ms = Date.now() - new Date(startedAt).getTime();
-    if (ms < 0) return "";
-    const secs = Math.floor(ms / 1000);
-    if (secs < 60) return `${secs}s`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m`;
-    const hours = Math.floor(mins / 60);
-    return `${hours}h ${mins % 60}m`;
+    return formatDuration(ms);
   }
+
+  const TURN_CHIP_CLASS: Record<string, string> = {
+    completed: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+    failed: "bg-red-500/20 text-red-400 border-red-500/30",
+  };
 
   function turnChipStatus(turn: RoomTurn): string {
-    if (turn.completed_at) {
-      const allOk = turn.responses.every((r) => r.status === "completed" || r.status === "complete");
-      const anyFailed = turn.responses.some((r) => r.status === "failed");
-      if (anyFailed) return "failed";
-      if (allOk) return "completed";
-    }
-    return turn.completed_at ? "completed" : "pending";
+    if (!turn.completed_at) return "pending";
+    const anyFailed = turn.responses.some((r) => r.status === "failed");
+    if (anyFailed) return "failed";
+    return "completed";
   }
 
-  function turnChipClass(status: string): string {
-    if (status === "completed") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
-    if (status === "failed") return "bg-red-500/20 text-red-400 border-red-500/30";
-    return "bg-amber-500/20 text-amber-400 border-amber-500/30";
-  }
-
-  function turnParticipantStatus(turn: RoomTurn, participantId: string): string {
-    const resp = turn.responses.find((r) => r.participant_id === participantId);
-    return resp?.status ?? "absent";
+  function participantDotClass(status: string): string {
+    const DOT_CLASS: Record<string, string> = {
+      completed: "bg-emerald-500",
+      complete: "bg-emerald-500",
+      failed: "bg-red-500",
+      absent: "bg-muted-foreground/30",
+    };
+    return DOT_CLASS[status] ?? "bg-amber-500";
   }
 </script>
 
@@ -507,12 +497,11 @@
       </div>
 
       <div class="min-h-0 flex-1 flex flex-col">
-        <!-- Three-pane workspace -->
         <div class="min-h-0 flex-1 grid grid-cols-1 gap-3 p-3 xl:grid-cols-3">
-          {#each seatPanels as panel}
+          {#each displayPanels as panel}
             {@const participant = panel.participant}
             {@const latest = latestResponse(participant?.participant.id)}
-            {@const status = participantStatus(panel)}
+            {@const status = latest?.response.status ?? participant?.run?.status ?? "waiting"}
             {@const runElapsed = elapsedTime(participant?.run?.started_at)}
             <article class="flex min-h-0 flex-col rounded-md border border-border bg-card overflow-hidden">
               <header class="shrink-0 border-b border-border px-4 py-2.5">
@@ -591,7 +580,6 @@
           </div>
         {/if}
 
-        <!-- Collapsible turn-history strip -->
         <div class="shrink-0 border-t border-border">
           <button
             class="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
@@ -619,7 +607,7 @@
                     {@const chipStatus = turnChipStatus(turn)}
                     <div class="rounded-md border border-border bg-card/60">
                       <div class="flex items-center gap-2 px-3 py-2">
-                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium {turnChipClass(chipStatus)}">
+                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium {TURN_CHIP_CLASS[chipStatus] ?? 'bg-amber-500/20 text-amber-400 border-amber-500/30'}">
                           #{turn.idx}
                         </span>
                         <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -628,18 +616,12 @@
                         <span class="shrink-0 text-[10px] text-muted-foreground/60">
                           {turn.mode}
                         </span>
-                        <!-- per-participant status dots -->
                         <div class="flex shrink-0 items-center gap-1">
                           {#each store.room.participants as p}
-                            {@const ps = turnParticipantStatus(turn, p.participant.id)}
+                            {@const resp = turn.responses.find((r) => r.participant_id === p.participant.id)}
+                            {@const ps = resp?.status ?? "absent"}
                             <span
-                              class="h-1.5 w-1.5 rounded-full {ps === 'completed' || ps === 'complete'
-                                ? 'bg-emerald-500'
-                                : ps === 'failed'
-                                  ? 'bg-red-500'
-                                  : ps === 'absent'
-                                    ? 'bg-muted-foreground/30'
-                                    : 'bg-amber-500'}"
+                              class="h-1.5 w-1.5 rounded-full {participantDotClass(ps)}"
                               title="{p.participant.label}: {ps}"
                             ></span>
                           {/each}
@@ -650,9 +632,7 @@
                           {#each turn.responses as response}
                             <div class="flex items-start gap-2 py-0.5 text-xs">
                               <span class="shrink-0 font-medium text-muted-foreground">
-                                {store.room.participants.find(
-                                  (item) => item.participant.id === response.participant_id,
-                                )?.participant.label ?? response.participant_id}:
+                                {participantLabelMap[response.participant_id] ?? response.participant_id}:
                               </span>
                               <span class={`shrink-0 rounded px-1 py-px text-[10px] ${statusClass(response.status)}`}>
                                 {response.status}
@@ -676,8 +656,6 @@
             </div>
           {/if}
         </div>
-
-        <!-- Toolbar + composer (fixed bottom) -->
         <div class="shrink-0 border-t border-border p-3">
           {#if store.room.kind === "roundtable"}
             <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
