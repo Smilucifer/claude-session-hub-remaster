@@ -282,7 +282,10 @@ async fn wait_for_codex_turn(
     baseline: Option<NativeTranscriptBaseline>,
 ) -> Result<NativeTranscriptResult, String> {
     let deadline = Instant::now() + Duration::from_secs(1800);
-    let mut rollout = None;
+    // When resuming, the baseline already pinpoints the rollout file —
+    // avoid the 300 s time filter in find_codex_rollout which would
+    // skip the file when the user pauses between turns.
+    let mut rollout: Option<PathBuf> = baseline.as_ref().map(|b| b.path.clone());
     while Instant::now() < deadline {
         if rollout.is_none() {
             rollout = find_codex_rollout(cwd, spawned_at).await;
@@ -476,7 +479,10 @@ async fn wait_for_gemini_turn(
     baseline: Option<NativeTranscriptBaseline>,
 ) -> Result<NativeTranscriptResult, String> {
     let deadline = Instant::now() + Duration::from_secs(1800);
-    let mut session = None;
+    // When resuming, the baseline already pinpoints the session file —
+    // avoid the 300 s time filter in find_gemini_session which would
+    // skip the file when the user pauses between turns.
+    let mut session: Option<PathBuf> = baseline.as_ref().map(|b| b.path.clone());
     while Instant::now() < deadline {
         if session.is_none() {
             session = find_gemini_session(cwd, spawned_at).await;
