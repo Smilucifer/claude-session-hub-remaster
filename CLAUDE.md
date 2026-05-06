@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 7 complete (2026-05-06). All 9 tasks implemented, code reviewed, and verified. Post-phase code health cleanup complete: 28→3 svelte-check errors (3 are CodeEditor false positive), 42→21 a11y warnings, 1217/1217 tests passing. Installers built at `src-tauri/target/release/bundle/`.
+**Current phase:** Phase 7 complete (2026-05-06). Post-phase additions (2026-05-07): provider config fully dynamized (reads from settings page instead of hardcoded models/URLs), per-session temp JSON (`--settings session-{run_id}.json`), and MiMo Pro provider added. All 9 tasks implemented, code reviewed, and verified. 3 svelte-check errors (CodeEditor false positive), 21 a11y warnings, frontend tests passing. Installers built at `src-tauri/target/release/bundle/`.
 
 ## Standard workflow
 
@@ -172,15 +172,16 @@ This codebase intentionally separates what the UI presents as a provider from wh
 
 Current providers (Phase 7):
 - **Official CLI providers** (subscription): Claude, Codex, Gemini — use their native CLI with bypass/yolo permissions.
-- **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
+- **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
 
 Key files:
 - `src/lib/utils/provider-catalog.ts`: PHASE7_PROVIDERS array, provider metadata, and label resolution.
 - `src/lib/utils/platform-presets.ts`: platform-specific base URLs and configuration defaults.
 
 Provider-native launch config generation (Phase 7):
-- DeepSeek uses a fixed template (API key only; model narrowed to `deepseek-v4-pro` / `deepseek-v4-flash`).
+- DeepSeek and MiMo Pro use a fixed-URL template (API key only; default model and base_url from preset).
 - GLM, QWEN, KIMI use a shared parameterized template (API key + base URL + model).
+- All providers use per-session temp JSON (`session-{run_id}.json`) generated fresh from the latest credential in settings, passed via `claude --settings <temp-json>` to override global `~/.claude/settings.json`.
 
 Do not collapse provider selection, model display, and actual CLI spawn logic into a single assumption.
 
@@ -258,6 +259,8 @@ linker = "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/
 
 Without this config, `cargo build`, `cargo test`, and `npm run tauri build` will fail at the build-script linking stage. If the MSVC Build Tools version changes, update the path. Use forward slashes (Windows accepts them and they avoid TOML escaping issues).
 
+**Known issue: Rust unit tests fail with STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139).** Root cause: VS 18 BuildTools MSVC 14.50.35730 links against a newer VCRUNTIME140.dll than the one installed in System32 (14.50.35719). The Windows loader finds the old System32 DLL first and rejects the binary because a required CRT entry point is missing. Workaround: use `cargo check` for Rust code validation; it catches compile errors without running the binary. Full test runs need either a matching VC++ redistributable update or a clean VM/CI environment.
+
 ### 11. Target directory cleanup
 
 The `src-tauri/target/` directory can accumulate 30+ GB of incremental compilation artifacts (primarily in `debug/incremental/` and `debug/deps/`). Periodically clean:
@@ -300,6 +303,7 @@ Key phases and their status:
 | 5.5 | Native CLI chat parity | [done] |
 | 6 | Driver MCP | [done] |
 | 7 | Native CLI auth, provider settings, roundtable layout | [done] |
+| 7.x | Provider config dynamization, per-session JSON, MiMo Pro | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

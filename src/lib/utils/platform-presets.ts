@@ -119,6 +119,16 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
     category: "provider",
     models: ["mimo-v2-flash"],
   },
+  {
+    id: "mimo-pro",
+    name: "Xiaomi MiMo Pro (\u5c0f\u7c73 Pro)",
+    base_url: "https://token-plan-cn.xiaomimimo.com/anthropic",
+    auth_env_var: "ANTHROPIC_AUTH_TOKEN",
+    description: "Xiaomi MiMo Pro",
+    key_placeholder: "your-mimo-pro-key",
+    category: "provider",
+    models: ["MiMo-V2.5-Pro"],
+  },
 
   // ── API Proxy ──
   {

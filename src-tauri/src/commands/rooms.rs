@@ -213,7 +213,7 @@ async fn create_room_participant_impl(
             None,
             None,
             platform_id,
-            None,
+            Some("plan".to_string()),
         )
         .await
         {

@@ -310,6 +310,9 @@ async fn execute_pipe_turn(
         &user_settings,
         run.model.clone(),
     );
+    // Roundtable sessions run in plan/read-only mode.
+    adapter_settings.permission_mode = Some("plan".to_string());
+
     let profile = match storage::settings::find_connection_profile(
         &user_settings,
         &run.agent,
@@ -1298,7 +1301,19 @@ fn run_status_label(status: RunStatus) -> &'static str {
 }
 
 fn run_preview(run_id: &str) -> Option<String> {
-    crate::storage::events::list_events(run_id, 0)
+    // Pass 1: RunEvent format (append_event via native PTY for Codex/Gemini).
+    let run_events = crate::storage::events::list_events(run_id, 0);
+    let assistant_count = run_events
+        .iter()
+        .filter(|e| matches!(e.event_type, crate::models::RunEventType::Assistant))
+        .count();
+    log::debug!(
+        "[room] run_preview pass1: run_id={}, total_events={}, assistant_events={}",
+        run_id,
+        run_events.len(),
+        assistant_count
+    );
+    if let Some(text) = run_events
         .into_iter()
         .rev()
         .find_map(|event| {
@@ -1313,11 +1328,66 @@ fn run_preview(run_id: &str) -> Option<String> {
                 .filter(|text| !text.is_empty())
                 .map(ToString::to_string)
         })
-        .or_else(|| {
-            crate::commands::runs::get_run(run_id.to_string())
-                .ok()
-                .and_then(|run| run.last_message_preview)
-        })
+    {
+        log::debug!("[room] run_preview pass1 hit: run_id={}, len={}", run_id, text.len());
+        return Some(text);
+    }
+
+    // Pass 2: bus envelope format (SessionActor writes {"_bus":true,"event":{...}}).
+    let events_path = crate::storage::run_dir(run_id).join("events.jsonl");
+    if let Ok(content) = std::fs::read_to_string(&events_path) {
+        let mut bus_delta_count = 0u32;
+        for line in content.lines().rev() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if v.get("_bus").and_then(|b| b.as_bool()) != Some(true) {
+                continue;
+            }
+            let Some(event) = v.get("event") else { continue };
+            let etype = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if etype == "message_delta" || etype == "message_complete" {
+                bus_delta_count += 1;
+                if let Some(text) = event
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                {
+                    log::debug!(
+                        "[room] run_preview pass2 hit: run_id={}, len={}, scanned_deltas={}",
+                        run_id,
+                        text.len(),
+                        bus_delta_count
+                    );
+                    return Some(text.to_string());
+                }
+            }
+        }
+        log::debug!(
+            "[room] run_preview pass2 miss: run_id={}, bus_deltas_scanned={}, file_exists=true",
+            run_id,
+            bus_delta_count
+        );
+    } else {
+        log::debug!(
+            "[room] run_preview pass2 miss: run_id={}, events.jsonl not found",
+            run_id
+        );
+    }
+
+    // Pass 3: last_message_preview fallback.
+    log::debug!(
+        "[room] run_preview pass3 fallback: run_id={}, checking last_message_preview",
+        run_id
+    );
+    crate::commands::runs::get_run(run_id.to_string())
+        .ok()
+        .and_then(|run| run.last_message_preview)
 }
 
 #[cfg(test)]

@@ -10,10 +10,12 @@ fn native_command(default_command: &str, settings: &AdapterSettings) -> String {
 }
 
 fn build_codex_base_args(settings: &AdapterSettings) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "--dangerously-bypass-approvals-and-sandbox".to_string(),
-        "--no-alt-screen".to_string(),
-    ];
+    let plan_mode = settings.permission_mode.as_deref() == Some("plan");
+    let mut args: Vec<String> = vec![];
+    if !plan_mode {
+        args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+    }
+    args.push("--no-alt-screen".to_string());
     if let Some(ref m) = settings.model {
         if !m.is_empty() {
             args.push("--model".to_string());
@@ -41,6 +43,7 @@ fn build_codex_base_args(settings: &AdapterSettings) -> Vec<String> {
 }
 
 fn build_gemini_base_args(settings: &AdapterSettings) -> Vec<String> {
+    let plan_mode = settings.permission_mode.as_deref() == Some("plan");
     let mut args: Vec<String> = vec![];
     if let Some(ref m) = settings.model {
         if !m.is_empty() {
@@ -48,9 +51,14 @@ fn build_gemini_base_args(settings: &AdapterSettings) -> Vec<String> {
             args.push(m.to_string());
         }
     }
-    args.push("--approval-mode".to_string());
-    args.push("yolo".to_string());
-    args.push("--skip-trust".to_string());
+    if plan_mode {
+        args.push("--approval-mode".to_string());
+        args.push("default".to_string());
+    } else {
+        args.push("--approval-mode".to_string());
+        args.push("yolo".to_string());
+        args.push("--skip-trust".to_string());
+    }
     for dir in &settings.add_dirs {
         args.push("--include-directories".to_string());
         args.push(dir.to_string());
@@ -337,5 +345,30 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w == ["--prompt-interactive", "Continue work"]));
+    }
+
+    #[test]
+    fn codex_plan_mode_omits_bypass_flag() {
+        let mut s = settings(Some("gpt-5.5"));
+        s.permission_mode = Some("plan".to_string());
+
+        let (_command, args) =
+            build_agent_command("codex", "Analyze this", &s, true).expect("codex command");
+
+        assert!(!args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        assert!(args.contains(&"--no-alt-screen".to_string()));
+        assert!(args.windows(2).any(|w| w == ["--model", "gpt-5.5"]));
+    }
+
+    #[test]
+    fn gemini_plan_mode_uses_default_approval() {
+        let mut s = settings(Some("gemini-2.5-pro"));
+        s.permission_mode = Some("plan".to_string());
+
+        let (_command, args) =
+            build_agent_command("gemini", "Analyze this", &s, true).expect("gemini command");
+
+        assert!(args.windows(2).any(|w| w == ["--approval-mode", "default"]));
+        assert!(!args.contains(&"--skip-trust".to_string()));
     }
 }

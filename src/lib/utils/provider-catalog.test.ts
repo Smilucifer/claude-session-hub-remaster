@@ -11,6 +11,7 @@ describe("Phase 7 provider catalog", () => {
       "GLM",
       "QWEN",
       "KIMI",
+      "MiMo Pro",
     ]);
   });
 
@@ -46,6 +47,14 @@ describe("Phase 7 provider catalog", () => {
       requiredConfig: ["api_key", "base_url", "model"],
       defaultPermissionMode: "bypass",
     });
+    expect(getPhase7Provider("mimo-pro")).toMatchObject({
+      mode: "claude_compatible_api",
+      executionAgent: "claude",
+      platformId: "mimo-pro",
+      defaultModel: "MiMo-V2.5-Pro",
+      requiredConfig: ["api_key"],
+      defaultPermissionMode: "bypass",
+    });
   });
 
   it("assigns required settings fields for fixed and parameterized API providers", () => {
@@ -69,6 +78,7 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude", "zhipu")).toBe("glm");
     expect(providerIdForRun("claude", "bailian")).toBe("qwen");
     expect(providerIdForRun("claude", "kimi")).toBe("kimi");
+    expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-pro");
     expect(providerIdForRun("codex")).toBe("codex");
     expect(providerIdForRun("gemini")).toBe("gemini");
     expect(providerIdForRun("claude")).toBe("claude");

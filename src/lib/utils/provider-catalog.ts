@@ -7,7 +7,8 @@ export type Phase7ProviderId =
   | "deepseek"
   | "glm"
   | "qwen"
-  | "kimi";
+  | "kimi"
+  | "mimo-pro";
 
 export interface Phase7ProviderEntry {
   id: Phase7ProviderId;
@@ -93,6 +94,17 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     requiredConfig: ["api_key", "base_url", "model"],
     defaultPermissionMode: "bypass",
   },
+  {
+    id: "mimo-pro",
+    label: "MiMo Pro",
+    mode: "claude_compatible_api",
+    executionAgent: "claude",
+    platformId: "mimo-pro",
+    defaultModel: "MiMo-V2.5-Pro",
+    defaultBaseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
+    requiredConfig: ["api_key"],
+    defaultPermissionMode: "bypass",
+  },
 ];
 
 export function getPhase7Provider(id: string): Phase7ProviderEntry {
@@ -104,6 +116,7 @@ export function providerIdForRun(agent: string, platformId?: string | null): Pha
   if (platformId === "zhipu" || platformId === "zhipu-intl") return "glm";
   if (platformId === "bailian") return "qwen";
   if (platformId === "kimi") return "kimi";
+  if (platformId === "mimo-pro") return "mimo-pro";
   if (agent === "codex" || agent === "gemini") return agent;
   return "claude";
 }
