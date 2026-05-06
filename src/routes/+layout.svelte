@@ -2379,7 +2379,7 @@
   {/if}
 
   <!-- Main content -->
-  <div class="flex flex-1 flex-col overflow-hidden relative">
+  <div class="flex flex-1 flex-col overflow-hidden">
     <UpdateBanner />
     <!-- Top bar (non-chat pages only — chat uses SessionStatusBar) -->
     {#if !isChatPage}
@@ -2413,28 +2413,27 @@
           <span class="font-medium">{pageName}</span>
         </div>
 
+        <button
+          class="ml-auto rounded-md p-1.5 hover:bg-accent transition-all duration-150"
+          onclick={() => (showMemoPanel = !showMemoPanel)}
+          title={t("memo_panelTitle")}
+        >
+          <svg
+            class="h-4 w-4 {showMemoPanel ? 'text-primary' : ''}"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
+              d="M15 3v5h5"
+            /><path d="M8 13h8" /><path d="M8 17h5" /></svg
+          >
+        </button>
       </header>
     {/if}
 
-    <!-- Global memo toggle (all pages) -->
-    <button
-      class="absolute top-2.5 right-4 z-20 rounded-md p-1.5 hover:bg-accent transition-all duration-150"
-      onclick={() => (showMemoPanel = !showMemoPanel)}
-      title={t("memo_panelTitle")}
-    >
-      <svg
-        class="h-4 w-4 {showMemoPanel ? 'text-primary' : ''}"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
-          d="M15 3v5h5"
-        /><path d="M8 13h8" /><path d="M8 17h5" /></svg
-      >
-    </button>
     <!-- Page content -->
     <main class="flex-1 overflow-y-auto">
       {@render children()}

@@ -667,6 +667,26 @@
         </button>
       {/if}
 
+      <!-- Global memo toggle -->
+      <button
+        class="rounded p-0.5 text-foreground/30 hover:text-foreground/60 hover:bg-accent transition-colors"
+        onclick={() => window.dispatchEvent(new CustomEvent("ocv:toggle-memo"))}
+        title={t("memo_panelTitle")}
+      >
+        <svg
+          class="h-3.5 w-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
+            d="M15 3v5h5"
+          /><path d="M8 13h8" /><path d="M8 17h5" /></svg
+        >
+      </button>
+
       <!-- Expand/collapse chevron -->
       <button
         class="rounded p-0.5 text-foreground/30 hover:text-foreground/60 hover:bg-accent transition-colors"
