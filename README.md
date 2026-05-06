@@ -33,23 +33,23 @@ Current architecture principles:
 
 ### Memo
 
-你可以在应用内维护全局备忘录和项目备忘录，用来保存长期偏好、项目约定、临时上下文和后续待办。项目备忘录会随当前项目目录切换，避免不同项目的上下文混在一起。
+你可以在应用内使用快速备忘（全局备忘录），用来保存长期偏好、项目约定、临时上下文和后续待办。备忘面板从页面右上角剪贴板图标滑出，不干扰当前工作流。也可以通过 Command Palette 打开。
 
-You can keep global and project-scoped memos inside the app for preferences, project conventions, temporary context, and follow-up notes. Project memos switch with the active project directory so context does not leak across projects.
+You can use Quick Memo (global memos) inside the app for preferences, project conventions, temporary context, and follow-up notes. The memo panel slides out from a clipboard-icon button in the top-right corner of every page, staying out of your way. Also accessible via Command Palette.
 
 支持：
 
-- 添加、编辑、复制、删除、清空 memo。
-- Global / Project scope 切换。
-- 重启后保留 memo 内容。
-- 通过 Command Palette 打开 Memo 面板。
+- 添加、复制、删除备忘条目。
+- 每条备忘显示内容与时间戳。
+- 重启后保留备忘内容。
+- 非聊天页顶部工具栏和聊天页 SessionStatusBar 均有入口。
 
 Supported:
 
-- Add, edit, copy, delete, and clear memos.
-- Switch between Global and Project scope.
+- Add, copy, and delete memo entries.
+- Each memo shows text and timestamp.
 - Keep memo content after restart.
-- Open the Memo panel from the Command Palette.
+- Accessible from the top bar on non-chat pages and SessionStatusBar on the chat page.
 
 ### Rooms, Roundtable, and Driver/Copilot
 
@@ -91,9 +91,9 @@ Currently useful for:
 
 The chat and room entries are being unified around five providers: Claude, Codex, Gemini, DeepSeek, and GLM. Claude, Codex, and Gemini use official CLI authentication. Codex launches without `exec` and defaults to `--dangerously-bypass-approvals-and-sandbox`; Gemini defaults to yolo approval mode. DeepSeek and GLM are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`.
 
-设置页正在简化为五个模型行，不再为 Codex/Gemini 提供自定义 API key、base URL 或保存登录方式。DeepSeek 只需要官方 API key；GLM 支持 API key、base URL 和 model。当前 Phase 7 仍在实现 Codex/Gemini 原生交互适配器；在完成前，不能把“CLI 已启动”视为和 Claude Code 一样的解析后会话渲染。
+设置页已简化为五个模型行，不再为 Codex/Gemini 提供自定义 API key、base URL 或保存登录方式。DeepSeek 只需要官方 API key；GLM 支持 API key、base URL 和 model。Codex 和 Gemini 使用 PTY 原生 CLI 执行路径，通过 transcript 文件监听完成判定而非进程退出语义。
 
-The settings page is being simplified to five model rows. Codex/Gemini no longer expose custom API key, base URL, or saved login method controls. DeepSeek needs only its official API key; GLM supports API key, base URL, and model. Phase 7 is still implementing the native Codex/Gemini interaction adapter; until that is complete, CLI launch alone is not considered Claude-like parsed conversation rendering.
+The settings page has been simplified to five model rows. Codex/Gemini no longer expose custom API key, base URL, or saved login method controls. DeepSeek needs only its official API key; GLM supports API key, base URL, and model. Codex and Gemini use a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics.
 
 Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. DeepSeek/GLM should keep provider identity separate from the Claude execution agent:
 
@@ -174,33 +174,41 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 ## 当前限制 / Current Limitations
 
-- Claude Code Room 参与者仍依赖活跃 stream session；Codex / Gemini 原生 interactive CLI 适配器仍在 Phase 7 中实现，完成前不能把其视为 Claude Code 同等的解析后会话渲染。
-- 继续上次会话目前只展示后端已支持继续的 agent / run；Codex/Gemini resume-last 路径已开始接入，但仍需要原生适配器证明 prompt 输入、完成判定、停止和归档语义。
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
 - 仍有部分上游基线检查需要后续清理。
 
 Current limitations:
 
-- Claude Code Room participants still depend on active stream sessions; the Codex/Gemini native interactive adapter is still part of Phase 7 work, so it is not yet Claude-equivalent parsed conversation rendering.
-- Continue-last-session only appears for agent / run combinations that the backend can actually resume; Codex/Gemini resume-last wiring has started, but the native adapter still must prove prompt input, completion detection, stop, and archival semantics.
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
 - Some upstream baseline checks still need cleanup.
 
 ## 后续计划 / Roadmap
 
+已完成：
+
+- Phase 7：Codex/Gemini PTY 原生 CLI 适配器、provider 设置页简化、Roundtable 三栏布局重设计、全局备忘面板重构。
+- Multi-CLI capability matrix（Phase 5.5 / Phase 7，五个 provider 能力矩阵）。
+- 全局快速备忘入口统一（所有页面顶栏）。
+
 计划：
 
 - Arena Memory 候选提升：项目事实、决策、经验沉淀。
-- Multi-CLI capability matrix。
-- Codex/Gemini native adapter for Claude-like parsed conversation rendering.
+- Codex/Gemini resume-last 语义完善（prompt 输入、完成判定、停止和归档）。
+- Roundtable Debate/Summary 交互完善。
+
+Completed:
+
+- Phase 7: Codex/Gemini PTY native CLI adapter, provider settings simplification, Roundtable three-pane layout redesign, global memo panel refactor.
+- Multi-CLI capability matrix (Phase 5.5 / Phase 7, five providers).
+- Unified global Quick Memo entry point (all page top bars).
 
 Plan:
 
 - Arena Memory promotion for project facts, decisions, and lessons.
-- Multi-CLI capability matrix.
-- Codex/Gemini native adapter for Claude-like parsed conversation rendering.
+- Codex/Gemini resume-last semantics (prompt input, completion detection, stop, and archival).
+- Roundtable Debate/Summary interaction polish.
 
 ## 开发 / Development
 
@@ -210,7 +218,19 @@ npx svelte-kit sync
 npm run dev
 ```
 
-常用验证：
+桌面端运行：
+
+```bash
+npm run tauri dev
+```
+
+全量验证（lint + format + i18n + test + build + Rust check）：
+
+```bash
+npm run verify
+```
+
+单点验证：
 
 ```bash
 npm run lint
@@ -220,6 +240,18 @@ npm run i18n:check
 npm test -- src/lib/stores/memo-store.test.ts
 cargo test --manifest-path src-tauri/Cargo.toml storage::memos::tests:: -- --nocapture
 cargo test --manifest-path src-tauri/Cargo.toml commands::memos::tests:: -- --nocapture
+```
+
+Desktop run:
+
+```bash
+npm run tauri dev
+```
+
+Full verification (lint + format + i18n + test + build + Rust check):
+
+```bash
+npm run verify
 ```
 
 Common checks:
