@@ -319,17 +319,17 @@ export function formatKeyDisplay(key: string): string {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!target) return false;
-  // Duck-type check for HTMLElement (works in both browser and Node test env)
-  const el = target as Record<string, unknown>;
+  type EditableLike = {
+    tagName?: string;
+    isContentEditable?: boolean;
+    closest?: (selector: string) => unknown;
+  };
+  const el = target as unknown as EditableLike;
   if (typeof el.tagName !== "string") return false;
-  const tag = el.tagName as string;
+  const tag = el.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return true;
   if (el.isContentEditable === true) return true;
-  if (
-    typeof el.closest === "function" &&
-    (el.closest as (s: string) => unknown)("[role='textbox']")
-  )
-    return true;
+  if (typeof el.closest === "function" && el.closest("[role='textbox']")) return true;
   return false;
 }
 

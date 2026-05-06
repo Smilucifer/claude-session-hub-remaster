@@ -80,6 +80,7 @@
           <button
             class="hover:text-destructive transition-colors"
             onclick={() => removeCustom(tool)}
+            aria-label="Remove {tool}"
           >
             <svg
               class="h-3 w-3"

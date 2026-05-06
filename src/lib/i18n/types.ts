@@ -1,7 +1,7 @@
 import type en from "$messages/en.json";
 
 /** Union of all valid message keys (derived from en.json). */
-export type MessageKey = keyof typeof en;
+export type MessageKey = Extract<keyof typeof en, string>;
 
 /** Variables for interpolation: `{ variable: string }`. */
 export type MessageParams = Record<string, string>;

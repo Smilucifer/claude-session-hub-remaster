@@ -239,16 +239,13 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     role="dialog"
     aria-modal="true"
-    onclick={() => (confirmDelete = null)}
+    onclick={(e) => e.target === e.currentTarget && (confirmDelete = null)}
     onkeydown={(e) => e.key === "Escape" && (confirmDelete = null)}
     tabindex="-1"
   >
     <div
       class="rounded-lg border border-border bg-background p-6 shadow-xl max-w-sm"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={() => {}}
       role="document"
-      tabindex="-1"
     >
       <h3 class="text-sm font-semibold text-foreground mb-2">{t("agent_deleteAgent")}</h3>
       <p class="text-xs text-muted-foreground mb-4">
@@ -574,16 +571,13 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     role="dialog"
     aria-modal="true"
-    onclick={() => (renameState = null)}
+    onclick={(e) => e.target === e.currentTarget && (renameState = null)}
     onkeydown={(e) => e.key === "Escape" && (renameState = null)}
     tabindex="-1"
   >
     <div
       class="rounded-lg border border-border bg-background p-6 shadow-xl max-w-sm w-full"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={() => {}}
       role="document"
-      tabindex="-1"
     >
       <h3 class="text-sm font-semibold text-foreground mb-3">{t("agent_renameTitle")}</h3>
       <input
@@ -625,7 +619,7 @@
 {#if editorState}
   <div
     class="fixed inset-0 z-40 flex justify-end bg-black/30"
-    onclick={() => (editorState = null)}
+    onclick={(e) => e.target === e.currentTarget && (editorState = null)}
     onkeydown={(e) => e.key === "Escape" && (editorState = null)}
     role="dialog"
     aria-modal="true"
@@ -633,10 +627,7 @@
   >
     <div
       class="w-full max-w-lg bg-background border-l border-border shadow-xl overflow-y-auto p-6"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={() => {}}
       role="document"
-      tabindex="-1"
     >
       <AgentEditor
         mode={editorState.mode}

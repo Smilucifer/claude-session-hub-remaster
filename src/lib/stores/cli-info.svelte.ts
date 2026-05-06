@@ -73,11 +73,12 @@ export async function loadCliVersionInfo(): Promise<void> {
   _versionLoading = true;
   try {
     dbg("cli-info", "loadCliVersionInfo");
-    const [cliCheck, distTags, cliConfig] = await Promise.all([
+    const [cliCheck, distTags, rawCliConfig] = await Promise.all([
       api.checkAgentCli("claude").catch(() => null),
       api.getCliDistTags().catch(() => ({ latest: undefined, stable: undefined })),
       api.getCliConfig().catch(() => ({})),
     ]);
+    const cliConfig = rawCliConfig as { autoUpdatesChannel?: string };
 
     if (!cliCheck?.found) {
       _versionInfo = null;

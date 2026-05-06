@@ -1798,6 +1798,8 @@
      When dragDropEnabled: true, Tauri intercepts OS drag events and Web drag events do not fire. -->
 <div
   class="border-t border-border bg-muted/30 px-4 py-3 relative"
+  role="region"
+  aria-label="File drop zone"
   ondragenter={handleDragEnter}
   ondragleave={handleDragLeave}
   ondragover={handleDragOver}

@@ -39,6 +39,7 @@
     onSelectConversation?: never;
     onResume?: never;
     onDelete?: never;
+    onNewChat?: never;
   };
 
   let {

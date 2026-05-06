@@ -626,7 +626,7 @@
                           {:else if parsed.type === "permission_request"}
                             <div class="text-[11px] text-amber-600 dark:text-amber-400">
                               {t("team_msgPermission", {
-                                tool: parsed.data.tool_name ?? "tool",
+                                tool: String(parsed.data.tool_name ?? "tool"),
                               })}{parsed.data.description ? ` — ${parsed.data.description}` : ""}
                               {#if isExpMsg && parsed.data.input}
                                 <pre

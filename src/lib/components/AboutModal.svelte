@@ -83,6 +83,7 @@
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
     role="dialog"
     aria-modal="true"
+    tabindex="-1"
     onclick={handleBackdropClick}
     onkeydown={handleKeydown}
   >

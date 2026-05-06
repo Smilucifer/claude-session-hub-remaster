@@ -80,7 +80,7 @@
   <!-- Fixed-position dropdown (escapes overflow-hidden ancestors) -->
   {#if open}
     <!-- Backdrop -->
-    <div class="fixed inset-0 z-40" onclick={() => (open = false)}></div>
+    <div class="fixed inset-0 z-40" role="presentation" onclick={() => (open = false)} onkeydown={(e) => e.key === "Escape" && (open = false)}></div>
 
     <div
       class="z-50 max-h-[60vh] overflow-y-auto rounded-md border border-sidebar-border bg-sidebar py-1 shadow-lg"

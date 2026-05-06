@@ -942,7 +942,7 @@
       dbgWarn("settings", "error", e);
     }
     void refreshConnectionCliChecks();
-    void loadMsvcEnvStatus(settings.working_directory);
+    void loadMsvcEnvStatus(settings?.working_directory);
     // Load web server status + token (desktop only)
     if (getTransport().isDesktop()) {
       Promise.all([api.getWebServerStatus(), api.getWebServerToken()])

@@ -30,7 +30,7 @@
   } = $props();
 
   // ── State ──
-  let editorMode = $state<"form" | "source">(mode === "create" ? "form" : "source");
+  let editorMode = $state<"form" | "source">("form");
   let formData = $state<AgentFormData>(defaultFormData());
   let sourceContent = $state("");
   let scope = $state<"user" | "project">("user");
@@ -42,11 +42,13 @@
   $effect(() => {
     if (mode === "edit" && agent) {
       scope = agent.scope as "user" | "project";
+      editorMode = "source";
       loadAgentContent();
     } else {
       formData = defaultFormData();
       sourceContent = "";
       scope = "user";
+      editorMode = "form";
     }
   });
 
@@ -246,9 +248,10 @@
     <div class="space-y-3">
       <!-- Name -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1">{t("agent_name")} *</label
+        <label for="agent-name" class="text-[11px] font-medium text-foreground block mb-1">{t("agent_name")} *</label
         >
         <input
+          id="agent-name"
           type="text"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -261,10 +264,10 @@
 
       <!-- Description -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1"
+        <label for="agent-description" class="text-[11px] font-medium text-foreground block mb-1"
           >{t("agent_description")} *</label
         >
-        <textarea
+        <textarea id="agent-description"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary resize-none disabled:opacity-50"
           rows="2"
@@ -277,7 +280,7 @@
       <!-- Scope (create only) -->
       {#if mode === "create"}
         <div>
-          <label class="text-[11px] font-medium text-foreground block mb-1">Scope</label>
+          <p class="text-[11px] font-medium text-foreground block mb-1">Scope</p>
           <div class="flex gap-2">
             <button
               class="px-3 py-1 text-xs rounded-md border transition-colors
@@ -303,8 +306,8 @@
 
       <!-- Model -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1">{t("agent_model")}</label>
-        <select
+        <label for="agent-model" class="text-[11px] font-medium text-foreground block mb-1">{t("agent_model")}</label>
+        <select id="agent-model"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           bind:value={formData.model}
@@ -319,7 +322,7 @@
 
       <!-- Tools -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1">{t("agent_tools")}</label>
+        <p class="text-[11px] font-medium text-foreground block mb-1">{t("agent_tools")}</p>
         {#if formData.tools.length > 0}
           <div class="flex flex-wrap gap-1 mb-1.5">
             {#each formData.tools as tool}
@@ -361,10 +364,10 @@
 
       <!-- Permission Mode -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1"
+        <label for="agent-permission-mode" class="text-[11px] font-medium text-foreground block mb-1"
           >{t("agent_permissionMode")}</label
         >
-        <select
+        <select id="agent-permission-mode"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           bind:value={formData.permissionMode}
@@ -380,10 +383,10 @@
 
       <!-- Max Turns -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1"
+        <label for="agent-max-turns" class="text-[11px] font-medium text-foreground block mb-1"
           >{t("agent_maxTurns")}</label
         >
-        <input
+        <input id="agent-max-turns"
           type="number"
           class="w-24 rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -399,9 +402,9 @@
 
       <!-- Memory -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1">{t("agent_memory")}</label
+        <label for="agent-memory" class="text-[11px] font-medium text-foreground block mb-1">{t("agent_memory")}</label
         >
-        <input
+        <input id="agent-memory"
           type="text"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -433,10 +436,10 @@
 
       <!-- Initial Prompt -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1"
+        <label for="agent-initial-prompt" class="text-[11px] font-medium text-foreground block mb-1"
           >{t("agent_initialPrompt")}</label
         >
-        <input
+        <input id="agent-initial-prompt"
           type="text"
           class="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground
             focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -448,10 +451,10 @@
 
       <!-- System Prompt -->
       <div>
-        <label class="text-[11px] font-medium text-foreground block mb-1"
+        <label for="agent-system-prompt" class="text-[11px] font-medium text-foreground block mb-1"
           >{t("agent_systemPrompt")}</label
         >
-        <textarea
+        <textarea id="agent-system-prompt"
           class="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground font-mono
             focus:outline-none focus:ring-1 focus:ring-primary resize-y disabled:opacity-50"
           rows="8"
@@ -466,7 +469,7 @@
     <div>
       {#if mode === "create"}
         <div class="mb-2">
-          <label class="text-[11px] font-medium text-foreground block mb-1">Scope</label>
+          <p class="text-[11px] font-medium text-foreground block mb-1">Scope</p>
           <div class="flex gap-2">
             <button
               class="px-3 py-1 text-xs rounded-md border transition-colors

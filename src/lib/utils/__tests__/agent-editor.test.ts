@@ -22,6 +22,8 @@ describe("serializeAgentFile", () => {
       memory: "MEMORY.md",
       background: true,
       isolation: "worktree",
+      effort: "medium",
+      initialPrompt: "",
       systemPrompt: "You are a code reviewer.",
     };
     const result = serializeAgentFile(data);
@@ -87,6 +89,8 @@ describe("parseAgentFile", () => {
       memory: "MEMORY.md",
       background: true,
       isolation: "worktree",
+      effort: "medium",
+      initialPrompt: "",
       systemPrompt: "You are a test agent.",
     };
     const serialized = serializeAgentFile(original);

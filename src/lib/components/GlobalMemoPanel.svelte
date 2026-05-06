@@ -66,6 +66,7 @@
         type="button"
         class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         onclick={onclose}
+        aria-label="Close"
       >
         <svg
           class="h-4 w-4"

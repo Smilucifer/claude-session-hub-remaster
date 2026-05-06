@@ -200,7 +200,7 @@
   }
 
   // Tab definitions
-  type TabDef = { id: typeof activeTab; labelKey: string; count: number };
+  type TabDef = { id: typeof activeTab; labelKey: import("$lib/i18n/types").MessageKey; count: number };
   const tabs = $derived.by((): TabDef[] => {
     const base: TabDef[] = [
       { id: "allow", labelKey: "permissions_allow", count: permissions?.user.allow.length ?? 0 },

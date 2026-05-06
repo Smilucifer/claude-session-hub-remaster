@@ -6,7 +6,6 @@
   import type {
     CcAgentProfile,
     ConnectionProfile,
-    RoomParticipantDetail,
     RoomResponseRef,
     RoomTurn,
     UserSettings,

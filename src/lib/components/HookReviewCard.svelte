@@ -19,12 +19,13 @@
   let submitting = $state(false);
 
   // Extract display info from hook data
-  const data = hookEvent.data as Record<string, unknown>;
-  const hookName =
+  const data = $derived(hookEvent.data as Record<string, unknown>);
+  const hookName = $derived(
     (data as { hook_name?: string }).hook_name ??
     (data as { tool_name?: string }).tool_name ??
-    "Unknown Tool";
-  const hookEventType = (data as { hook_event?: string }).hook_event ?? hookEvent.type;
+    "Unknown Tool",
+  );
+  const hookEventType = $derived((data as { hook_event?: string }).hook_event ?? hookEvent.type);
 
   function handleRespond(decision: "allow" | "deny") {
     if (!hookEvent.request_id || submitting) return;

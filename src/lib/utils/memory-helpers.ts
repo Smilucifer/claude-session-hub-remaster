@@ -5,10 +5,10 @@
  * - Shows non-existing (creatable) files only when `showCreate` is true,
  *   OR when the file is currently selected (to keep highlight visible).
  */
-export function filterVisibleCandidates(
-  files: { path: string; exists: boolean }[],
+export function filterVisibleCandidates<T extends { path: string; exists: boolean }>(
+  files: T[],
   showCreate: boolean,
   selectedPath: string,
-): { path: string; exists: boolean }[] {
+): T[] {
   return files.filter((f) => f.exists || showCreate || f.path === selectedPath);
 }

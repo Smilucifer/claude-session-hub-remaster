@@ -1,17 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import {
-  t,
-  initLocale,
-  switchLocale,
-  currentLocale,
-  locales,
-  baseLocale,
-  isLocale,
-  LOCALE_REGISTRY,
-  SUPPORTED_LOCALES,
-  BASE_LOCALE,
-  getEntry,
-} from "../index.svelte";
 
 // Mock debug utils (auto-mocked by vitest config convention)
 vi.mock("$lib/utils/debug", () => ({
@@ -19,15 +6,30 @@ vi.mock("$lib/utils/debug", () => ({
   dbgWarn: vi.fn(),
 }));
 
+let t: typeof import("../index.svelte").t;
+let initLocale: typeof import("../index.svelte").initLocale;
+let switchLocale: typeof import("../index.svelte").switchLocale;
+let currentLocale: typeof import("../index.svelte").currentLocale;
+let locales: typeof import("../index.svelte").locales;
+let baseLocale: typeof import("../index.svelte").baseLocale;
+let isLocale: typeof import("../index.svelte").isLocale;
+let LOCALE_REGISTRY: typeof import("../index.svelte").LOCALE_REGISTRY;
+let SUPPORTED_LOCALES: typeof import("../index.svelte").SUPPORTED_LOCALES;
+let BASE_LOCALE: typeof import("../index.svelte").BASE_LOCALE;
+let getEntry: typeof import("../index.svelte").getEntry;
+
 // Minimal DOM stubs for <html> attribute tests
 function setupDocument() {
-  // @ts-expect-error - test stub
-  globalThis.document = {
+  const doc = {
     documentElement: {
       lang: "",
       dir: "",
     },
-  };
+  } as unknown as Document;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: doc,
+  });
 }
 
 function setupLocalStorage() {
@@ -46,18 +48,39 @@ function setupLocalStorage() {
   // Ensure `typeof window !== "undefined"` passes in the module
   // @ts-expect-error - test stub
   globalThis.window = { localStorage: lsImpl };
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      languages: ["en-US", "en"],
+      language: "en-US",
+    },
+  });
   return store;
 }
 
 describe("i18n", () => {
   let lsStore: Record<string, string>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     setupDocument();
     lsStore = setupLocalStorage();
-    // Reset to base locale by switching explicitly
+
+    const mod = await import("../index.svelte");
+    t = mod.t;
+    initLocale = mod.initLocale;
+    switchLocale = mod.switchLocale;
+    currentLocale = mod.currentLocale;
+    locales = mod.locales;
+    baseLocale = mod.baseLocale;
+    isLocale = mod.isLocale;
+    LOCALE_REGISTRY = mod.LOCALE_REGISTRY;
+    SUPPORTED_LOCALES = mod.SUPPORTED_LOCALES;
+    BASE_LOCALE = mod.BASE_LOCALE;
+    getEntry = mod.getEntry;
+
+    initLocale();
     switchLocale("en");
-    // Clear any localStorage side-effects from the reset switch
     delete lsStore["ocv:locale"];
     delete lsStore["PARAGLIDE_LOCALE"];
   });
@@ -85,8 +108,7 @@ describe("i18n", () => {
 
   it("returns raw key when key is completely missing", () => {
     initLocale();
-    // @ts-expect-error - testing invalid key deliberately
-    expect(t("this_key_does_not_exist")).toBe("this_key_does_not_exist");
+    expect(t("this_key_does_not_exist" as any)).toBe("this_key_does_not_exist");
   });
 
   it("preserves unreplaced placeholders when param is missing", () => {

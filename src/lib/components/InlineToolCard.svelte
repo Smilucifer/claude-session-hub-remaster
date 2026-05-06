@@ -25,6 +25,7 @@
   import StatusIcon from "$lib/components/StatusIcon.svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { dbg } from "$lib/utils/debug";
+  import Self from "./InlineToolCard.svelte";
 
   let {
     tool,
@@ -140,6 +141,7 @@
   });
 
   let isAgentLike = $derived(tool.tool_name === "Agent" || tool.tool_name === "Task");
+  let isAsk = $derived(tool.tool_name === "AskUserQuestion");
 
   // Auto-expand when input is streaming in (running + has input data)
   // Skip Agent/Task — their input (full prompt) is too large to auto-expand.
@@ -149,7 +151,7 @@
       !isAgentLike &&
       tool.input &&
       Object.keys(tool.input).length > 0 &&
-      (tool as Record<string, unknown>)._inputJsonAccum != null,
+      (tool as unknown as Record<string, unknown>)._inputJsonAccum != null,
   );
   let renderLevel = $derived(getToolRenderLevel(tool.tool_name, tool.status));
   let isPlan = $derived(isPlanFilePath(String(tool.input?.file_path ?? tool.input?.path ?? "")));
@@ -229,8 +231,6 @@
           : "running",
   );
 
-  // AskUserQuestion detection
-  let isAsk = $derived(tool.tool_name === "AskUserQuestion");
   // Denied detection: explicit permission_denied status, OR error with no selected option
   // (handles old snapshots where finalizer overwrote permission_denied → error)
   let isAskDenied = $derived.by(() => {
@@ -569,7 +569,7 @@
   }
 
   function formatSuggestionLabel(s: PermissionSuggestion): string {
-    return _fmtSuggestion(s, t);
+    return _fmtSuggestion(s, t as (key: string, params?: Record<string, string>) => string);
   }
 </script>
 
@@ -1748,7 +1748,7 @@
             <MarkdownContent text={subEntry.content} />
           </div>
         {:else if subEntry.kind === "tool"}
-          <svelte:self
+          <Self
             tool={subEntry.tool}
             subTimeline={subEntry.subTimeline}
             {runId}

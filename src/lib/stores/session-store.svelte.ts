@@ -15,6 +15,7 @@ import type {
   CliCommand,
   McpServerInfo,
   ElicitationSchema,
+  RunStatus,
 } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 import type { SessionMode } from "$lib/types";
@@ -116,7 +117,7 @@ interface ReduceCtx {
   seenMessageIds: Set<string>;
   seenToolIds: Set<string>;
   /** Track run.status changes from non-terminal run_state events (running/idle). */
-  runStatus: string | null;
+  runStatus: RunStatus | null;
   /** New session_id from session_init (e.g. fork generates a new CLI session). */
   sessionId: string | null;
   /** Whether this run uses stream-json mode (skip tools mirror writes). */
@@ -127,6 +128,16 @@ interface ReduceCtx {
   toolTlIndex: Map<string, number>;
   /** tool_use_id → he[] index (only HookEvent entries with tool_use_id). */
   toolHeIndex: Map<string, number>;
+}
+
+type HookEventWithToolUseId = HookEvent & { tool_use_id?: string };
+
+function getHookToolUseId(event: HookEvent): string | undefined {
+  return (event as HookEventWithToolUseId).tool_use_id;
+}
+
+function asJsonRecord(value: unknown): Record<string, unknown> {
+  return value as Record<string, unknown>;
 }
 
 // ── Helpers ──
@@ -693,7 +704,7 @@ export class SessionStore {
   /** Append a hook event entry and update tool index if applicable.
    *  Index uses first-match semantics — only set if not already present. */
   private _pushHookEntry(ctx: ReduceCtx | null, heEntry: HookEvent): void {
-    const toolUseId = (heEntry as Record<string, unknown>).tool_use_id as string | undefined;
+    const toolUseId = getHookToolUseId(heEntry);
     if (ctx) {
       ctx.he.push(heEntry);
       if (toolUseId && !ctx.toolHeIndex.has(toolUseId))
@@ -730,10 +741,10 @@ export class SessionStore {
     if (
       idx !== undefined &&
       he[idx] &&
-      (he[idx] as Record<string, unknown>).tool_use_id === toolUseId
+      getHookToolUseId(he[idx]) === toolUseId
     )
       return idx;
-    const fallback = he.findIndex((e) => (e as Record<string, unknown>).tool_use_id === toolUseId);
+    const fallback = he.findIndex((e) => getHookToolUseId(e) === toolUseId);
     if (fallback >= 0) {
       dbgWarn("store", "_findHeIdx: index miss, found via scan", {
         toolUseId,
@@ -753,15 +764,13 @@ export class SessionStore {
     if (
       idx !== undefined &&
       he[idx] &&
-      (he[idx] as Record<string, unknown>).tool_use_id === toolUseId &&
+      getHookToolUseId(he[idx]) === toolUseId &&
       he[idx].status === status
     ) {
       return idx;
     }
     // Fallback: linear scan (covers status mismatch or stale index)
-    return he.findIndex(
-      (e) => (e as Record<string, unknown>).tool_use_id === toolUseId && e.status === status,
-    );
+    return he.findIndex((e) => getHookToolUseId(e) === toolUseId && e.status === status);
   }
 
   // ── SubTimeline helpers (subagent routing) ──
@@ -976,7 +985,7 @@ export class SessionStore {
       parentToolUseId,
       childToolUseId,
       (t) => {
-        const accum = SessionStore._accumulateJsonInput(t as Record<string, unknown>, partialJson);
+        const accum = SessionStore._accumulateJsonInput(asJsonRecord(t), partialJson);
         return { ...t, ...accum } as typeof t;
       },
       ctx,
@@ -1026,7 +1035,7 @@ export class SessionStore {
     }
     const batchHeIndex = new Map<string, number>();
     for (let i = 0; i < this.tools.length; i++) {
-      const tid = (this.tools[i] as Record<string, unknown>).tool_use_id as string | undefined;
+      const tid = getHookToolUseId(this.tools[i]);
       if (tid && !batchHeIndex.has(tid)) batchHeIndex.set(tid, i);
     }
     const ctx: ReduceCtx = {
@@ -1059,8 +1068,7 @@ export class SessionStore {
     const sessionDead =
       runStatus === "stopped" ||
       runStatus === "completed" ||
-      runStatus === "failed" ||
-      runStatus === "error";
+      runStatus === "failed";
     if (sessionDead) {
       const staleStatuses = new Set(["running", "ask_pending", "permission_prompt"]);
       const finalizeTools = (tl: TimelineEntry[]): TimelineEntry[] => {
@@ -1398,7 +1406,7 @@ export class SessionStore {
       }
       this._toolHeIndex.clear();
       for (let i = 0; i < this.tools.length; i++) {
-        const tid = (this.tools[i] as Record<string, unknown>).tool_use_id as string | undefined;
+        const tid = getHookToolUseId(this.tools[i]);
         if (tid && !this._toolHeIndex.has(tid)) this._toolHeIndex.set(tid, i);
       }
 
@@ -2316,7 +2324,8 @@ export class SessionStore {
           }
         }
         if (subChanged) {
-          u[i] = { ...u[i], subTimeline: newSub };
+          const toolEntry = entry as Extract<TimelineEntry, { kind: "tool" }>;
+          u[i] = { ...toolEntry, subTimeline: newSub };
           changed = true;
         }
       }
@@ -2608,7 +2617,7 @@ export class SessionStore {
         if (tIdx >= 0) {
           const old = tl[tIdx] as Extract<TimelineEntry, { kind: "tool" }>;
           const accum = SessionStore._accumulateJsonInput(
-            old.tool as Record<string, unknown>,
+            asJsonRecord(old.tool),
             ev.partial_json,
           );
           const updated: TimelineEntry = {
@@ -2832,15 +2841,15 @@ export class SessionStore {
 
         // Mirror to tools[] (HookEvent) only in non-stream mode (pipe/PTY)
         if (!this._isStreamMode(ctx)) {
-          const heEntry: HookEvent = {
+          const heEntry: HookEventWithToolUseId = {
             run_id: ev.run_id,
             hook_type: "PreToolUse",
             tool_name: ev.tool_name,
             tool_input: ev.input as Record<string, unknown>,
             status: "running",
             timestamp: new Date().toISOString(),
+            tool_use_id: ev.tool_use_id,
           };
-          (heEntry as Record<string, unknown>).tool_use_id = ev.tool_use_id;
           this._pushHookEntry(ctx, heEntry);
         }
         break;

@@ -408,7 +408,7 @@
   let statusBarRef: SessionStatusBar | undefined = $state();
   let stashedInput: PromptInputSnapshot | null = $state(null);
   let sidebarRequestedTab = $state<
-    "tools" | "context" | "files" | "info" | "runningTasks" | "tasks" | null
+    "tools" | "context" | "files" | "info" | "tasks" | null
   >(null);
 
   // ── Verbose state (chat page level) ──
@@ -1750,8 +1750,9 @@
   $effect(() => {
     const run = store.run;
     const terminal = xtermRef;
+    if (!run || !terminal) return;
     const key = getPipeExecTerminalReplayKey(run, store.useStreamSession, Boolean(terminal));
-    if (!key || !terminal) return;
+    if (!key) return;
     if (terminalReplayKey === key) return;
     terminalReplayKey = key;
     void store.loadRun(run.id, terminal);
@@ -2818,7 +2819,7 @@
             getAgentSettings: api.getAgentSettings,
             updateAgentSettings: api.updateAgentSettings,
             appendOutput: appendCommandOutput,
-            t,
+            t: t as (key: string, params?: Record<string, string>) => string,
           },
         );
       } catch (err) {
@@ -4149,7 +4150,7 @@
                         }}
                         attachments={entry.attachments}
                         onRewind={entry.cliUuid && store.sessionAlive && !store.isRunning
-                          ? () => handleRewindToMessage(entry)
+                          ? () => handleRewindToMessage({ cliUuid: entry.cliUuid!, content: entry.content, ts: entry.ts })
                           : undefined}
                       />
                     {:else if entry.kind === "assistant"}

@@ -18,7 +18,7 @@
   let container: HTMLDivElement | undefined = $state();
 
   // Throttled text for streaming mode: updates at most every 150ms
-  let throttledText = $state(text);
+  let throttledText = $state("");
   $effect(() => {
     const t = text;
     if (streaming) {

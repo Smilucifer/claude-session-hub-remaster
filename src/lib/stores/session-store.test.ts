@@ -91,7 +91,7 @@ describe("SessionStore reducer", () => {
     // Tests that intentionally trigger warnings must call warnSpy.mockClear()
     // before returning so this check passes.
     if (warnSpy.mock.calls.length > 0) {
-      const msgs = warnSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+      const msgs = warnSpy.mock.calls.map((c: unknown[]) => c.join(" ")).join("\n");
       warnSpy.mockRestore();
       throw new Error(`Unexpected console.warn during test:\n${msgs}`);
     }
@@ -110,9 +110,13 @@ describe("SessionStore reducer", () => {
     it("builds correct timeline", () => {
       expect(store.timeline).toHaveLength(2); // user_message + message_complete
       expect(store.timeline[0].kind).toBe("user");
-      expect(store.timeline[0].content).toBe("Hello");
+      if (store.timeline[0].kind === "user") {
+        expect(store.timeline[0].content).toBe("Hello");
+      }
       expect(store.timeline[1].kind).toBe("assistant");
-      expect(store.timeline[1].content).toBe("Hi there! How can I help?");
+      if (store.timeline[1].kind === "assistant") {
+        expect(store.timeline[1].content).toBe("Hi there! How can I help?");
+      }
     });
 
     it("sets model from session_init", () => {
@@ -405,7 +409,13 @@ describe("SessionStore reducer", () => {
       store.phase = "running";
       // Simulate optimistic entry (no cliUuid)
       store.timeline = [
-        { kind: "user", id: "opt-1", content: "Hello", ts: new Date().toISOString() },
+        {
+          kind: "user",
+          id: "opt-1",
+          anchorId: "opt-1",
+          content: "Hello",
+          ts: new Date().toISOString(),
+        },
       ];
       // Live event arrives with uuid
       const ev: BusEvent = {
@@ -450,7 +460,9 @@ describe("SessionStore reducer", () => {
       };
       store.applyEvent(ev);
       expect(store.timeline).toHaveLength(1);
-      expect(store.timeline[0].content).toBe("hello");
+      if (store.timeline[0].kind === "assistant") {
+        expect(store.timeline[0].content).toBe("hello");
+      }
     });
 
     it("accumulates message_delta streaming text", () => {
@@ -501,7 +513,9 @@ describe("SessionStore reducer", () => {
       });
       expect(store.timeline).toHaveLength(1);
       expect(store.timeline[0].kind).toBe("assistant");
-      expect(store.timeline[0].content).toContain("claude_stdout_text");
+      if (store.timeline[0].kind === "assistant") {
+        expect(store.timeline[0].content).toContain("claude_stdout_text");
+      }
     });
 
     it("ignores raw events from non-claude sources", () => {
@@ -597,8 +611,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-6",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "tool_start",
@@ -619,8 +631,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-6",
           state: "idle",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         // Session ends without user answering
       ];
@@ -647,8 +657,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-7",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         // Parent Task tool starts
         {
@@ -710,8 +718,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-pd",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "tool_start",
@@ -727,6 +733,7 @@ describe("SessionStore reducer", () => {
           tool_name: "AskUserQuestion",
           request_id: "req-pd",
           tool_input: { question: "Pick one", options: ["A", "B"] },
+          decision_reason: "awaiting user choice",
         },
         {
           type: "tool_end",
@@ -764,8 +771,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-8",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         // Parent Task tool starts
         {
@@ -792,6 +797,7 @@ describe("SessionStore reducer", () => {
           tool_name: "Bash",
           tool_input: { command: "rm -rf /" },
           request_id: "req-1",
+          decision_reason: "awaiting approval",
           // NO parent_tool_use_id — this is the CLI bug
         },
       ];
@@ -827,8 +833,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-9",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         // Parent Task tool starts
         {
@@ -852,6 +856,8 @@ describe("SessionStore reducer", () => {
           type: "permission_denied",
           run_id: "run-9",
           tool_use_id: "bash-c2",
+          tool_name: "Bash",
+          tool_input: { command: "rm -rf /" },
           // NO parent_tool_use_id
         },
       ];
@@ -903,9 +909,10 @@ describe("SessionStore reducer", () => {
 
   describe("unknown event type warning", () => {
     it("calls dbgWarn for unknown event types", async () => {
-      const { dbgWarn: mockDbgWarn } = (await import("$lib/utils/debug")) as {
+      const debugModule = (await import("$lib/utils/debug")) as unknown as {
         dbgWarn: ReturnType<typeof vi.fn>;
       };
+      const mockDbgWarn = debugModule.dbgWarn;
       mockDbgWarn.mockClear();
 
       store.run = makeRun("run-1");
@@ -953,16 +960,12 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-1",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         { type: "message_complete", run_id: "run-1", message_id: "m1", text: "Response" },
         {
           type: "run_state",
           run_id: "run-1",
           state: "idle",
-          error: null,
-          exit_code: null,
         } as BusEvent,
       ];
       store.applyEventBatch(events as BusEvent[]);
@@ -979,29 +982,21 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-1",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "run_state",
           run_id: "run-1",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "run_state",
           run_id: "run-1",
           state: "idle",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "run_state",
           run_id: "run-1",
           state: "idle",
-          error: null,
-          exit_code: null,
         } as BusEvent,
       ];
       store.applyEventBatch(events as BusEvent[]);
@@ -1020,7 +1015,6 @@ describe("SessionStore reducer", () => {
           run_id: "run-1",
           state: "failed",
           error: "interrupted",
-          exit_code: null,
         } as BusEvent,
       ];
       store.applyEventBatch(events as BusEvent[]);
@@ -1102,7 +1096,9 @@ describe("SessionStore reducer", () => {
       });
       expect(store.timeline).toHaveLength(1);
       expect(store.timeline[0].kind).toBe("assistant");
-      expect(store.timeline[0].content).toContain("claude_stderr");
+      if (store.timeline[0].kind === "assistant") {
+        expect(store.timeline[0].content).toContain("claude_stderr");
+      }
     });
 
     it("raw unknown source: silently ignored, no crash", () => {
@@ -1199,7 +1195,9 @@ describe("SessionStore reducer", () => {
         (e) => e.kind === "separator" && e.content.includes("Context compacted"),
       );
       expect(compactEntries).toHaveLength(1);
-      expect(compactEntries[0].content).toContain("180k tokens");
+      if (compactEntries[0].kind === "separator") {
+        expect(compactEntries[0].content).toContain("180k tokens");
+      }
     });
 
     it("preserves surrounding messages", () => {
@@ -1211,11 +1209,17 @@ describe("SessionStore reducer", () => {
       expect(store.timeline).toHaveLength(4);
       expect(store.timeline[0].kind).toBe("user");
       expect(store.timeline[1].kind).toBe("assistant");
-      expect(store.timeline[1].content).toContain("Hello!");
+      if (store.timeline[1].kind === "assistant") {
+        expect(store.timeline[1].content).toContain("Hello!");
+      }
       expect(store.timeline[2].kind).toBe("separator");
-      expect(store.timeline[2].content).toContain("Context compacted");
+      if (store.timeline[2].kind === "separator") {
+        expect(store.timeline[2].content).toContain("Context compacted");
+      }
       expect(store.timeline[3].kind).toBe("assistant");
-      expect(store.timeline[3].content).toContain("Continuing");
+      if (store.timeline[3].kind === "assistant") {
+        expect(store.timeline[3].content).toContain("Continuing");
+      }
     });
 
     it("ends at idle phase", () => {
@@ -1582,7 +1586,9 @@ describe("SessionStore reducer", () => {
 
       const subMsg = taskEntry.subTimeline![1];
       expect(subMsg.kind).toBe("assistant");
-      expect(subMsg.content).toBe("The command ran successfully.");
+      if (subMsg.kind === "assistant") {
+        expect(subMsg.content).toBe("The command ran successfully.");
+      }
     });
 
     it("subagent message_delta does not affect main streamingText", () => {
@@ -1657,7 +1663,9 @@ describe("SessionStore reducer", () => {
       expect(parent.subTimeline).toHaveLength(1);
       expect(parent.subTimeline![0].kind).toBe("assistant");
       expect(parent.subTimeline![0].id).toBe("__sub_stream_parent-1");
-      expect(parent.subTimeline![0].content).toBe("Hello");
+      if (parent.subTimeline![0].kind === "assistant") {
+        expect(parent.subTimeline![0].content).toBe("Hello");
+      }
     });
 
     it("accumulates message_delta text into synthetic entry content", () => {
@@ -1682,7 +1690,9 @@ describe("SessionStore reducer", () => {
       const parent = store.timeline.find(
         (e) => e.kind === "tool" && e.id === "parent-1",
       ) as Extract<TimelineEntry, { kind: "tool" }>;
-      expect(parent.subTimeline![0].content).toBe("Hello world");
+      if (parent.subTimeline![0].kind === "assistant") {
+        expect(parent.subTimeline![0].content).toBe("Hello world");
+      }
     });
 
     it("accumulates thinking_delta text into synthetic entry thinkingText", () => {
@@ -1748,7 +1758,9 @@ describe("SessionStore reducer", () => {
       expect(parent.subTimeline).toHaveLength(1);
       // Synthetic entry replaced by final message
       expect(parent.subTimeline![0].id).toBe("msg-final");
-      expect(parent.subTimeline![0].content).toBe("Final answer");
+      if (parent.subTimeline![0].kind === "assistant") {
+        expect(parent.subTimeline![0].content).toBe("Final answer");
+      }
     });
 
     it("handles concurrent children: each parent_tool_use_id gets its own synthetic entry", () => {
@@ -1789,10 +1801,14 @@ describe("SessionStore reducer", () => {
         (e) => e.kind === "tool" && e.id === "parent-b",
       ) as Extract<TimelineEntry, { kind: "tool" }>;
       expect(parentA.subTimeline).toHaveLength(1);
-      expect(parentA.subTimeline![0].content).toBe("from A");
+      if (parentA.subTimeline![0].kind === "assistant") {
+        expect(parentA.subTimeline![0].content).toBe("from A");
+      }
       expect(parentA.subTimeline![0].id).toBe("__sub_stream_parent-a");
       expect(parentB.subTimeline).toHaveLength(1);
-      expect(parentB.subTimeline![0].content).toBe("from B");
+      if (parentB.subTimeline![0].kind === "assistant") {
+        expect(parentB.subTimeline![0].content).toBe("from B");
+      }
       expect(parentB.subTimeline![0].id).toBe("__sub_stream_parent-b");
     });
 
@@ -1835,7 +1851,7 @@ describe("SessionStore reducer", () => {
       ) as Extract<TimelineEntry, { kind: "tool" }>;
       const child = parent.subTimeline![0] as Extract<TimelineEntry, { kind: "tool" }>;
       expect(child.tool.input).toEqual({ command: "ls" });
-      expect((child.tool as Record<string, unknown>)._inputJsonAccum).toBe('{"command":"ls"}');
+      expect((child.tool as unknown as { _inputJsonAccum?: string })._inputJsonAccum).toBe('{"command":"ls"}');
     });
   });
 
@@ -2255,8 +2271,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-8",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent,
         {
           type: "tool_start",
@@ -3518,7 +3532,9 @@ describe("SessionStore reducer", () => {
           run_id: "run-1",
           session_id: "sess-1",
           model: "claude-opus-4-6",
-          // cwd, tools, output_style not present → should clear via ?? ""
+          cwd: "",
+          tools: [],
+          // output_style not present → should clear via ?? ""
         },
       ];
       store.applyEventBatch(events as BusEvent[]);
@@ -4281,7 +4297,7 @@ describe("SessionStore reducer", () => {
         // Non-empty busEvents that produce an empty timeline is a reducer anomaly
         // For this test, we use a single unknown event type that doesn't create timeline entries
         mockGetBusEvents.mockResolvedValue([
-          { type: "run_state", run_id: "run-wg-1", state: "running", error: null, exit_code: null },
+          { type: "run_state", run_id: "run-wg-1", state: "running" },
         ]);
 
         const testStore = new SessionStore();
@@ -4516,8 +4532,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-idle-throttle",
           state: "idle",
-          error: null,
-          exit_code: null,
         } as BusEvent;
         s.applyEvent(idleEvent);
         expect((s as any)._lastSnapshotSeq).toBe(5); // Updated
@@ -4529,8 +4543,6 @@ describe("SessionStore reducer", () => {
           type: "run_state",
           run_id: "run-idle-throttle",
           state: "running",
-          error: null,
-          exit_code: null,
         } as BusEvent);
         // Back to idle with same seq
         s.run = { ...s.run!, status: "running" };
@@ -4697,7 +4709,9 @@ describe("SessionStore reducer", () => {
 
         const assistant = s.timeline.find((e) => e.kind === "assistant" && e.id === "msg-think-1");
         expect(assistant).toBeDefined();
-        expect(assistant!.thinkingText).toBe("Let me reason about this... Step 2.");
+        if (assistant?.kind === "assistant") {
+          expect(assistant.thinkingText).toBe("Let me reason about this... Step 2.");
+        }
       });
 
       it("persists thinkingText on subagent message_complete", () => {
@@ -4756,7 +4770,9 @@ describe("SessionStore reducer", () => {
           (e) => e.kind === "assistant" && e.id === "msg-sub-1",
         );
         expect(subAssistant).toBeDefined();
-        expect(subAssistant!.thinkingText).toBe("Sub thinking...");
+        if (subAssistant?.kind === "assistant") {
+          expect(subAssistant.thinkingText).toBe("Sub thinking...");
+        }
       });
     });
   });

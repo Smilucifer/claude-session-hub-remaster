@@ -62,6 +62,7 @@
         <button
           class="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           onclick={() => (open = false)}
+          aria-label="Close"
         >
           <svg
             class="h-4 w-4"

@@ -434,6 +434,7 @@
               selectedPlatform = null;
               error = "";
             }}
+            aria-label="Back"
           >
             <svg
               class="h-4 w-4"
@@ -496,9 +497,10 @@
             <!-- Custom: extra Base URL input -->
             {#if selectedPlatform.id === "custom"}
               <div class="flex flex-col gap-1.5">
-                <label class="text-xs font-medium text-muted-foreground">{t("setup_baseUrl")}</label
+                <label class="text-xs font-medium text-muted-foreground" for="setup-base-url">{t("setup_baseUrl")}</label
                 >
                 <input
+                  id="setup-base-url"
                   type="text"
                   bind:value={customBaseUrl}
                   placeholder="https://api.example.com"
@@ -509,11 +511,12 @@
 
             <!-- API Key input -->
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-muted-foreground"
+              <label class="text-xs font-medium text-muted-foreground" for="setup-api-key"
                 >{t("setup_apiKeyLabel")}</label
               >
               <div class="relative">
                 <input
+                  id="setup-api-key"
                   type={showKey ? "text" : "password"}
                   bind:value={apiKey}
                   placeholder={selectedPlatform.key_placeholder}
