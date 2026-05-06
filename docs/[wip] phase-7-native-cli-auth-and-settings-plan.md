@@ -1,7 +1,7 @@
 # Phase 7 Native CLI Auth and Settings Simplification Plan
 
 **Feature:** Phase 7 - Native CLI auth, simplified provider settings, and chat-entry parity
-**Status:** Tasks 1-8 complete, Task 9 remaining (2026-05-06).
+**Status:** All 9 tasks complete (2026-05-06). Ready for Phase 7 verification pass.
 **Goal:** Align Claude, Codex, Gemini, DeepSeek, and GLM around the intended auth model while simplifying setup and making Codex/Gemini session entry feel like Claude.
 **Acceptance Criteria:**
 
@@ -440,6 +440,23 @@ Deferred review suggestions:
 - Kept `updateRoomMemo` API and `RoomStore.updateMemo` method unchanged for backward compatibility.
 - Added i18n keys: `memo_panelTitle`, `memo_panelPlaceholder`, `memo_redirectHint` (zh-CN + en).
 - Build, i18n check, and memo-related frontend tests all pass.
+
+### Task 9: Improve Roundtable Answer Presentation
+
+**Task 9 Implementation Note - 2026-05-06**
+
+- Replaced the old scrollable-content-area layout with a flex-column structure: three panes fill the primary vertical space, a collapsible history strip sits below, and the toolbar+composer is fixed at the bottom.
+- Three equal-width panes (1-column on narrow screens, 3-column on `xl:`) each show participant name/provider, status badge, elapsed time (from run `started_at`), and scrollable latest output/preview.
+- History strip: a single toggle button bar shows turn count. When expanded, each turn renders as a compact card with turn number chip (color-coded: emerald=completed, red=failed, amber=pending), user input, mode label, and per-participant status dots.
+- Expanded history also shows per-response detail lines with participant label, status badge, and truncated preview text.
+- Research artifact section (for research rooms) collapsed into a `<details>` element in the history strip area.
+- Non-roundtable rooms still render participant cards in the same three-pane grid.
+
+Validation:
+- `npm run build`
+- `npm run i18n:check` (0 errors)
+- `npm test -- src/lib/stores/room-store.test.ts` (18 tests pass)
+- `npm test -- src/lib/utils/room-ui.test.ts` (6 tests pass)
 
 ### Task 9: Improve Roundtable Answer Presentation
 

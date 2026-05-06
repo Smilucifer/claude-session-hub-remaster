@@ -1511,6 +1511,7 @@
   "room_noResponseYet": "还没有回答",
   "room_lastPrompt": "问题",
   "room_history": "历史记录",
+  "room_historyCollapsed": "点击展开",
   "room_requiredProjectFolder": "请先选择项目文件夹。",
   "room_kindRoundtable": "圆桌",
   "room_kindDriver": "Driver",

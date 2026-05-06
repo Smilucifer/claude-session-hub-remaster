@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-05 (updated 2026-05-06)  
 **Sources:** `C:\Users\InBlu\review\claude.md`, `codex.md`, `gemini.md`, and `user.md`
-**Status:** Tasks 1-8 complete; balance helper + memo panel done; Task 9 (Roundtable layout) next.
+**Status:** All 9 tasks complete (2026-05-06). Ready for Phase 7 verification pass.
 
 ## Owner Requirement
 
@@ -157,3 +157,20 @@ Validation:
 - `npm run i18n:check` (0 errors)
 - `npm test -- src/lib/stores/memo-store.test.ts` (9 tests pass)
 - `npm test -- src/lib/utils/memo-page.test.ts` (2 tests pass)
+
+## Roundtable Layout Redesign - 2026-05-06
+
+Accepted and implemented (Task 9):
+
+- **Three-pane workspace:** replaced the old scrollable content area with a flex-column layout. Three equal-width, scrollable panes fill the primary vertical space above the history strip.
+- **Pane headers enriched:** each pane now shows participant label, provider/model metadata, status badge, and computed elapsed time from run `started_at`.
+- **Collapsible history strip:** a toggle bar shows turn count. Expanded view renders color-coded turn chips (emerald/red/amber), user input, mode label, per-participant status dots, and per-response detail lines with truncated previews.
+- **Fixed bottom toolbar:** action toolbar (Debate/Summary/summarizer selector) and composer remain fixed at the bottom of the workspace.
+- **Research artifact:** collapsed into a `<details>` element in the history strip area for research rooms.
+- **Non-roundtable rooms:** still render participant cards in the same three-pane grid structure.
+
+Validation:
+- `npm run build`
+- `npm run i18n:check` (0 errors)
+- `npm test -- src/lib/stores/room-store.test.ts` (18 tests pass)
+- `npm test -- src/lib/utils/room-ui.test.ts` (6 tests pass)

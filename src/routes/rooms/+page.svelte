@@ -55,6 +55,7 @@
   let roundtableMessage = $state("");
   let summaryParticipantId = $state("");
   let deletingRoomId = $state("");
+  let historyExpanded = $state(false);
 
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
   let connectionProfiles = $derived(
@@ -364,6 +365,39 @@
     if (kind === "lesson") return t("room_memoryLesson");
     return t("room_memoryFact");
   }
+
+  function elapsedTime(startedAt?: string): string {
+    if (!startedAt) return "";
+    const ms = Date.now() - new Date(startedAt).getTime();
+    if (ms < 0) return "";
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ${mins % 60}m`;
+  }
+
+  function turnChipStatus(turn: RoomTurn): string {
+    if (turn.completed_at) {
+      const allOk = turn.responses.every((r) => r.status === "completed" || r.status === "complete");
+      const anyFailed = turn.responses.some((r) => r.status === "failed");
+      if (anyFailed) return "failed";
+      if (allOk) return "completed";
+    }
+    return turn.completed_at ? "completed" : "pending";
+  }
+
+  function turnChipClass(status: string): string {
+    if (status === "completed") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+    if (status === "failed") return "bg-red-500/20 text-red-400 border-red-500/30";
+    return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+  }
+
+  function turnParticipantStatus(turn: RoomTurn, participantId: string): string {
+    const resp = turn.responses.find((r) => r.participant_id === participantId);
+    return resp?.status ?? "absent";
+  }
 </script>
 
 <div class="flex h-full min-h-0 bg-background">
@@ -472,284 +506,237 @@
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto p-5">
-        <section>
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <h3 class="text-sm font-semibold">
-              {roomRequiresThreeParticipants(store.room.kind)
-                ? t("room_threeSeatBoard")
-                : t("room_participants")}
-            </h3>
-            {#if roomRequiresThreeParticipants(store.room.kind) && roomParticipantCount < 3}
-              <span class="text-xs text-amber-600">{t("room_needThreeParticipants")}</span>
-            {/if}
-          </div>
-          {#if roomRequiresThreeParticipants(store.room.kind)}
-            <div class="grid min-h-[360px] grid-cols-1 gap-3 xl:grid-cols-3">
-              {#each seatPanels as panel}
-                {@const participant = panel.participant}
-                {@const latest = latestResponse(participant?.participant.id)}
-                <article
-                  class="flex min-h-[320px] flex-col rounded-md border border-border bg-card"
-                >
-                  <header class="border-b border-border px-4 py-3">
-                    <div class="flex items-start justify-between gap-3">
+      <div class="min-h-0 flex-1 flex flex-col">
+        <!-- Three-pane workspace -->
+        <div class="min-h-0 flex-1 grid grid-cols-1 gap-3 p-3 xl:grid-cols-3">
+          {#each seatPanels as panel}
+            {@const participant = panel.participant}
+            {@const latest = latestResponse(participant?.participant.id)}
+            {@const status = participantStatus(panel)}
+            {@const runElapsed = elapsedTime(participant?.run?.started_at)}
+            <article class="flex min-h-0 flex-col rounded-md border border-border bg-card overflow-hidden">
+              <header class="shrink-0 border-b border-border px-4 py-2.5">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold">
+                        {panel.index + 1}
+                      </span>
                       <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span
-                            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold"
-                            >{panel.index + 1}</span
-                          >
-                          <div class="min-w-0">
-                            <h4 class="truncate text-sm font-semibold">
-                              {participant?.participant.label ?? t("room_waitingForParticipant")}
-                            </h4>
-                            <p class="truncate text-xs text-muted-foreground">
-                              {participant
-                                ? roomParticipantMetaLabel(
-                                    participant.participant.agent,
-                                    participant.run?.platform_id,
-                                    participant.run?.model,
-                                  )
-                                : t("room_waitingResponse")}
-                            </p>
-                          </div>
-                        </div>
+                        <h4 class="truncate text-sm font-semibold">
+                          {participant?.participant.label ?? t("room_waitingForParticipant")}
+                        </h4>
+                        <p class="truncate text-[11px] text-muted-foreground">
+                          {participant
+                            ? roomParticipantMetaLabel(
+                                participant.participant.agent,
+                                participant.run?.platform_id,
+                                participant.run?.model,
+                              )
+                            : t("room_waitingResponse")}
+                        </p>
                       </div>
-                      <span
-                        class={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(
-                          participantStatus(panel),
-                        )}`}
-                      >
-                        {participantStatus(panel)}
+                    </div>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    {#if runElapsed}
+                      <span class="text-[10px] text-muted-foreground/70 tabular-nums">{runElapsed}</span>
+                    {/if}
+                    <span class={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(status)}`}>
+                      {status}
+                    </span>
+                  </div>
+                </div>
+              </header>
+
+              <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                {#if latest?.response.preview}
+                  <p class="whitespace-pre-wrap break-words text-sm leading-6">
+                    {latest.response.preview}
+                  </p>
+                  <p class="mt-3 rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
+                    {t("room_lastPrompt")}: {truncate(latest.turn.user_input, 180)}
+                  </p>
+                {:else if latest?.response.error}
+                  <p class="text-sm text-destructive">{latest.response.error}</p>
+                {:else}
+                  <div class="flex h-full items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground">
+                    {participant ? t("room_noResponseYet") : t("room_waitingForParticipant")}
+                  </div>
+                {/if}
+              </div>
+            </article>
+          {/each}
+        </div>
+
+        {#if store.room.kind === "research" && store.room.research_artifact}
+          <div class="shrink-0 border-t border-border px-3 py-2">
+            <details class="text-sm">
+              <summary class="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                {t("room_researchArtifact")} · {store.room.research_artifact.topic} · v{store.room.research_artifact.schema_version}
+              </summary>
+              <div class="mt-2 space-y-2">
+                {#each store.room.research_artifact.memory_candidates as candidate}
+                  <div class="rounded border border-border/70 px-2 py-1.5">
+                    <div class="flex flex-wrap gap-2 text-xs">
+                      <span class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                        {memoryKindLabel(candidate.kind)}
                       </span>
                     </div>
-                  </header>
-
-                  <div class="flex min-h-0 flex-1 flex-col px-4 py-3">
-                    <div class="mb-2 text-xs font-medium text-muted-foreground">
-                      {t("room_latestAnswer")}
-                    </div>
-                    {#if latest?.response.preview}
-                      <p class="min-h-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6">
-                        {latest.response.preview}
-                      </p>
-                      <p class="mt-3 rounded bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
-                        {t("room_lastPrompt")}: {truncate(latest.turn.user_input, 180)}
-                      </p>
-                    {:else if latest?.response.error}
-                      <p class="text-sm text-destructive">{latest.response.error}</p>
-                    {:else}
-                      <div
-                        class="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground"
-                      >
-                        {participant ? t("room_noResponseYet") : t("room_waitingForParticipant")}
-                      </div>
-                    {/if}
+                    <p class="mt-1 text-xs text-foreground">{candidate.text}</p>
                   </div>
-                </article>
-              {/each}
-            </div>
-          {:else}
-            <div class="grid gap-3 xl:grid-cols-3">
-              {#if store.room.participants.length === 0}
-                <p
-                  class="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground xl:col-span-3"
-                >
-                  {t("room_noParticipants")}
-                </p>
+                {/each}
+              </div>
+            </details>
+          </div>
+        {/if}
+
+        <!-- Collapsible turn-history strip -->
+        <div class="shrink-0 border-t border-border">
+          <button
+            class="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
+            onclick={() => (historyExpanded = !historyExpanded)}
+          >
+            <svg
+              class="h-3 w-3 shrink-0 transition-transform duration-150 {historyExpanded ? 'rotate-90' : ''}"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="m9 18 6-6-6-6" /></svg
+            >
+            <span class="font-medium">{t("room_history")}</span>
+            <span class="tabular-nums">{store.room.turns.length}</span>
+            {#if !historyExpanded && store.room.turns.length > 0}
+              <span class="text-muted-foreground/50">{t("room_historyCollapsed")}</span>
+            {/if}
+          </button>
+
+          {#if historyExpanded}
+            <div class="max-h-64 overflow-y-auto border-t border-border px-3 pb-3">
+              {#if store.room.turns.length === 0}
+                <p class="py-6 text-center text-xs text-muted-foreground">{t("room_noTurns")}</p>
               {:else}
-                {#each store.room.participants as participant}
-                  {@const latest = latestResponse(participant.participant.id)}
-                  <article
-                    class="flex min-h-[220px] flex-col rounded-md border border-border bg-card"
-                  >
-                    <header class="border-b border-border px-4 py-3">
-                      <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                          <h4 class="truncate text-sm font-semibold">
-                            {participant.participant.label}
-                          </h4>
-                          <p class="truncate text-xs text-muted-foreground">
-                            {roomParticipantMetaLabel(
-                              participant.participant.agent,
-                              participant.run?.platform_id,
-                              participant.run?.model,
-                            )}
-                          </p>
-                        </div>
-                        <span
-                          class={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusClass(
-                            participant.run?.status,
-                          )}`}
-                        >
-                          {participant.run?.status ?? "missing"}
+                <div class="space-y-2 pt-2">
+                  {#each store.room.turns as turn}
+                    {@const chipStatus = turnChipStatus(turn)}
+                    <div class="rounded-md border border-border bg-card/60">
+                      <div class="flex items-center gap-2 px-3 py-2">
+                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium {turnChipClass(chipStatus)}">
+                          #{turn.idx}
                         </span>
+                        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                          {turn.user_input}
+                        </span>
+                        <span class="shrink-0 text-[10px] text-muted-foreground/60">
+                          {turn.mode}
+                        </span>
+                        <!-- per-participant status dots -->
+                        <div class="flex shrink-0 items-center gap-1">
+                          {#each store.room.participants as p}
+                            {@const ps = turnParticipantStatus(turn, p.participant.id)}
+                            <span
+                              class="h-1.5 w-1.5 rounded-full {ps === 'completed' || ps === 'complete'
+                                ? 'bg-emerald-500'
+                                : ps === 'failed'
+                                  ? 'bg-red-500'
+                                  : ps === 'absent'
+                                    ? 'bg-muted-foreground/30'
+                                    : 'bg-amber-500'}"
+                              title="{p.participant.label}: {ps}"
+                            ></span>
+                          {/each}
+                        </div>
                       </div>
-                    </header>
-                    <div class="flex min-h-0 flex-1 flex-col px-4 py-3">
-                      {#if latest?.response.preview}
-                        <p class="flex-1 whitespace-pre-wrap break-words text-sm leading-6">
-                          {latest.response.preview}
-                        </p>
-                      {:else if latest?.response.error}
-                        <p class="text-sm text-destructive">{latest.response.error}</p>
-                      {:else}
-                        <div
-                          class="flex flex-1 items-center justify-center rounded-md border border-dashed border-border px-4 text-center text-sm text-muted-foreground"
-                        >
-                          {t("room_noResponseYet")}
+                      {#if turn.responses.length > 0}
+                        <div class="border-t border-border px-3 py-2">
+                          {#each turn.responses as response}
+                            <div class="flex items-start gap-2 py-0.5 text-xs">
+                              <span class="shrink-0 font-medium text-muted-foreground">
+                                {store.room.participants.find(
+                                  (item) => item.participant.id === response.participant_id,
+                                )?.participant.label ?? response.participant_id}:
+                              </span>
+                              <span class={`shrink-0 rounded px-1 py-px text-[10px] ${statusClass(response.status)}`}>
+                                {response.status}
+                              </span>
+                              {#if response.preview}
+                                <span class="min-w-0 flex-1 truncate text-muted-foreground/70">
+                                  {truncate(response.preview, 120)}
+                                </span>
+                              {/if}
+                              {#if response.error}
+                                <span class="text-destructive truncate">{response.error}</span>
+                              {/if}
+                            </div>
+                          {/each}
                         </div>
                       {/if}
                     </div>
-                  </article>
-                {/each}
+                  {/each}
+                </div>
               {/if}
             </div>
           {/if}
-        </section>
+        </div>
 
-        {#if store.room.kind === "research" && store.room.research_artifact}
-          <section class="mt-6">
-            <h3 class="mb-3 text-sm font-semibold">{t("room_researchArtifact")}</h3>
-            <div class="rounded-md border border-border bg-card p-3 text-sm">
-              <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span>{store.room.research_artifact.topic}</span>
-                <span>v{store.room.research_artifact.schema_version}</span>
-              </div>
-              <p class="mt-2 text-xs text-muted-foreground">
-                {store.room.research_artifact.generated_at}
-              </p>
-              {#if store.room.research_artifact.memory_candidates.length > 0}
-                <div class="mt-3 space-y-2">
-                  {#each store.room.research_artifact.memory_candidates as candidate}
-                    <div class="rounded border border-border/70 px-2 py-1.5">
-                      <div class="flex flex-wrap gap-2 text-xs">
-                        <span class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
-                          {memoryKindLabel(candidate.kind)}
-                        </span>
-                        <span class="text-muted-foreground">{candidate.source_run_id}</span>
-                      </div>
-                      <p class="mt-1 text-xs text-foreground">{candidate.text}</p>
-                    </div>
-                  {/each}
-                </div>
-              {:else}
-                <p class="mt-3 text-xs text-muted-foreground">{t("room_noMemoryCandidates")}</p>
-              {/if}
-            </div>
-          </section>
-        {/if}
-
-        <section class="mt-6">
-          <h3 class="mb-3 text-sm font-semibold">{t("room_history")}</h3>
-          <div class="space-y-2">
-            {#if store.room.turns.length === 0}
-              <p
-                class="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground"
+        <!-- Toolbar + composer (fixed bottom) -->
+        <div class="shrink-0 border-t border-border p-3">
+          {#if store.room.kind === "roundtable"}
+            <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-muted-foreground">
+                {t("room_roundtableToolbarStatus", {
+                  count: String(completedPublicTurnCount),
+                })}
+              </span>
+              <button
+                class="rounded-md border border-border px-2.5 py-1.5 hover:bg-accent disabled:opacity-50"
+                disabled={!canDebate}
+                title={t("room_debateTitle")}
+                onclick={handleDebate}
               >
-                {t("room_noTurns")}
-              </p>
-            {:else}
-              {#each store.room.turns as turn}
-                <div class="rounded-md border border-border bg-card p-3">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                      >#{turn.idx}</span
+                {t("room_debate")}
+              </button>
+              <button
+                class="rounded-md border border-border bg-amber-500/10 px-2.5 py-1.5 hover:bg-amber-500/15 disabled:opacity-50"
+                disabled={!canSummary}
+                title={t("room_summaryTitle")}
+                onclick={handleSummary}
+              >
+                {t("room_summary")}
+              </button>
+              <label class="flex items-center gap-1 text-muted-foreground">
+                <span>{t("room_summaryTarget")}</span>
+                <select
+                  class="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:opacity-50"
+                  bind:value={summaryParticipantId}
+                  disabled={store.saving || summaryParticipants.length === 0}
+                >
+                  {#each summaryParticipants as participant}
+                    <option value={participant.participant.id}>{participant.participant.label}</option
                     >
-                    <span class="text-xs text-muted-foreground">{turn.user_input}</span>
-                  </div>
-                  {#if turn.responses.length > 0}
-                    <div class="mt-3 grid gap-2 md:grid-cols-3">
-                      {#each turn.responses as response}
-                        <div class="rounded-md border border-border bg-background px-3 py-2">
-                          <div class="flex flex-wrap items-center gap-2 text-xs">
-                            <span class="font-medium">
-                              {store.room.participants.find(
-                                (item) => item.participant.id === response.participant_id,
-                              )?.participant.label ?? response.participant_id}
-                            </span>
-                            <span class={`rounded px-1.5 py-0.5 ${statusClass(response.status)}`}
-                              >{response.status}</span
-                            >
-                          </div>
-                          {#if response.preview}
-                            <p class="mt-2 whitespace-pre-wrap break-words text-sm text-foreground">
-                              {response.preview}
-                            </p>
-                          {/if}
-                          {#if response.error}
-                            <p class="mt-1 text-xs text-destructive">{response.error}</p>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-            {/if}
-          </div>
-        </section>
-      </div>
-
-      <div class="border-t border-border p-3">
-        {#if store.room.kind === "roundtable"}
-          <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
-            <span class="text-muted-foreground">
-              {t("room_roundtableToolbarStatus", {
-                count: String(completedPublicTurnCount),
-              })}
-            </span>
+                  {/each}
+                </select>
+              </label>
+            </div>
+          {/if}
+          <div class="flex gap-2">
+            <textarea
+              class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder={t(roomComposerPlaceholderKey)}
+              bind:value={roundtableMessage}
+              onkeydown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSendRoundtableMessage();
+                }
+              }}
+            ></textarea>
             <button
-              class="rounded-md border border-border px-2.5 py-1.5 hover:bg-accent disabled:opacity-50"
-              disabled={!canDebate}
-              title={t("room_debateTitle")}
-              onclick={handleDebate}
+              class="w-24 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+              disabled={store.saving || !canSendCurrentRoomMessage}
+              onclick={handleSendRoundtableMessage}
             >
-              {t("room_debate")}
+              {t("room_send")}
             </button>
-            <button
-              class="rounded-md border border-border bg-amber-500/10 px-2.5 py-1.5 hover:bg-amber-500/15 disabled:opacity-50"
-              disabled={!canSummary}
-              title={t("room_summaryTitle")}
-              onclick={handleSummary}
-            >
-              {t("room_summary")}
-            </button>
-            <label class="flex items-center gap-1 text-muted-foreground">
-              <span>{t("room_summaryTarget")}</span>
-              <select
-                class="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:opacity-50"
-                bind:value={summaryParticipantId}
-                disabled={store.saving || summaryParticipants.length === 0}
-              >
-                {#each summaryParticipants as participant}
-                  <option value={participant.participant.id}>{participant.participant.label}</option
-                  >
-                {/each}
-              </select>
-            </label>
           </div>
-        {/if}
-        <div class="flex gap-2">
-          <textarea
-            class="min-h-12 flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-            placeholder={t(roomComposerPlaceholderKey)}
-            bind:value={roundtableMessage}
-            onkeydown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                void handleSendRoundtableMessage();
-              }
-            }}
-          ></textarea>
-          <button
-            class="w-24 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-            disabled={store.saving || !canSendCurrentRoomMessage}
-            onclick={handleSendRoundtableMessage}
-          >
-            {t("room_send")}
-          </button>
         </div>
       </div>
     {:else}

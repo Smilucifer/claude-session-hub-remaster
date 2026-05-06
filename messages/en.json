@@ -1511,6 +1511,7 @@
   "room_noResponseYet": "No answer yet",
   "room_lastPrompt": "Prompt",
   "room_history": "History",
+  "room_historyCollapsed": "Click to expand",
   "room_requiredProjectFolder": "Select a project folder first.",
   "room_kindRoundtable": "Roundtable",
   "room_kindDriver": "Driver",
