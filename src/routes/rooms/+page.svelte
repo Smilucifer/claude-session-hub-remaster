@@ -19,6 +19,7 @@
     roomMessagePlaceholderKey,
     roomTurnModeLabel,
   } from "$lib/utils/room-ui";
+  import RoomStepper from "$lib/components/RoomStepper.svelte";
 
   type SeatAgent = RoundtableSeatDraft["agent"];
 
@@ -49,7 +50,6 @@
   let roundtableMessage = $state("");
   let summaryParticipantId = $state("");
   let deletingRoomId = $state("");
-  let historyExpanded = $state(false);
 
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
   let connectionProfiles = $derived(
@@ -393,27 +393,6 @@
     return formatDuration(ms);
   }
 
-  const TURN_CHIP_CLASS: Record<string, string> = {
-    completed: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-    failed: "bg-red-500/20 text-red-400 border-red-500/30",
-  };
-
-  function turnChipStatus(turn: RoomTurn): string {
-    if (!turn.completed_at) return "pending";
-    const anyFailed = turn.responses.some((r) => r.status === "failed");
-    if (anyFailed) return "failed";
-    return "completed";
-  }
-
-  function participantDotClass(status: string): string {
-    const DOT_CLASS: Record<string, string> = {
-      completed: "bg-emerald-500",
-      complete: "bg-emerald-500",
-      failed: "bg-red-500",
-      absent: "bg-muted-foreground/30",
-    };
-    return DOT_CLASS[status] ?? "bg-amber-500";
-  }
 </script>
 
 <div class="flex h-full min-h-0 bg-background">
@@ -607,80 +586,11 @@
         {/if}
 
         <div class="shrink-0 border-t border-border">
-          <button
-            class="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
-            onclick={() => (historyExpanded = !historyExpanded)}
-          >
-            <svg
-              class="h-3 w-3 shrink-0 transition-transform duration-150 {historyExpanded ? 'rotate-90' : ''}"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            ><path d="m9 18 6-6-6-6" /></svg
-            >
-            <span class="font-medium">{t("room_history")}</span>
-            <span class="tabular-nums">{store.room.turns.length}</span>
-            {#if !historyExpanded && store.room.turns.length > 0}
-              <span class="text-muted-foreground/50">{t("room_historyCollapsed")}</span>
-            {/if}
-          </button>
-
-          {#if historyExpanded}
-            <div class="max-h-64 overflow-y-auto border-t border-border px-3 pb-3">
-              {#if store.room.turns.length === 0}
-                <p class="py-6 text-center text-xs text-muted-foreground">{t("room_noTurns")}</p>
-              {:else}
-                <div class="space-y-2 pt-2">
-                  {#each store.room.turns as turn}
-                    {@const chipStatus = turnChipStatus(turn)}
-                    <div class="rounded-md border border-border bg-card/60">
-                      <div class="flex items-center gap-2 px-3 py-2">
-                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium {TURN_CHIP_CLASS[chipStatus] ?? 'bg-amber-500/20 text-amber-400 border-amber-500/30'}">
-                          #{turn.idx}
-                        </span>
-                        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                          {turn.user_input}
-                        </span>
-                        <span class="shrink-0 text-[10px] text-muted-foreground/60">
-                          {roomTurnModeLabel(turn.mode)}
-                        </span>
-                        <div class="flex shrink-0 items-center gap-1">
-                          {#each store.room.participants as p}
-                            {@const resp = turn.responses.find((r) => r.participant_id === p.participant.id)}
-                            {@const ps = resp?.status ?? "absent"}
-                            <span
-                              class="h-1.5 w-1.5 rounded-full {participantDotClass(ps)}"
-                              title="{p.participant.label}: {ps}"
-                            ></span>
-                          {/each}
-                        </div>
-                      </div>
-                      {#if turn.responses.length > 0}
-                        <div class="border-t border-border px-3 py-2">
-                          {#each turn.responses as response}
-                            <div class="flex items-start gap-2 py-0.5 text-xs">
-                              <span class="shrink-0 font-medium text-muted-foreground">
-                                {participantLabelMap[response.participant_id] ?? response.participant_id}:
-                              </span>
-                              <span class={`shrink-0 rounded px-1 py-px text-[10px] ${statusClass(response.status)}`}>
-                                {participantStatusLabel(response.status)}
-                              </span>
-                              {#if response.preview}
-                                <span class="min-w-0 flex-1 truncate text-muted-foreground/70">
-                                  {truncate(response.preview, 120)}
-                                </span>
-                              {/if}
-                              {#if response.error}
-                                <span class="text-destructive truncate">{response.error}</span>
-                              {/if}
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/if}
+          <RoomStepper
+            roomId={store.room.id}
+            turns={store.room.turns}
+            bind:activeSnapshot={store.activeSnapshot}
+          />
         </div>
         <div class="shrink-0 border-t border-border p-3">
           {#if store.room.kind === "roundtable"}

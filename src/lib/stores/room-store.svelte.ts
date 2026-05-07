@@ -1,5 +1,5 @@
 import * as api from "$lib/api";
-import type { RoomDetail, RoomKind, RoomSummary } from "$lib/types";
+import type { RoomDetail, RoomKind, RoomSummary, RoomTurnSnapshot } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 import {
   getPhase7Provider,
@@ -32,6 +32,7 @@ export class RoomStore {
   loading = $state(false);
   saving = $state(false);
   error = $state<string | null>(null);
+  activeSnapshot = $state<RoomTurnSnapshot | null>(null);
 
   private _loadSeq = 0;
   private _detailSeq = 0;
