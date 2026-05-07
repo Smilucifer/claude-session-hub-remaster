@@ -1,6 +1,6 @@
 # Claude Session Hub Remaster / Claude Session Hub 重制版
 
-> English follows Chinese in each section.  
+> English follows Chinese in each section.
 > 每个章节均先中文、后英文。
 
 ## 致谢 / Acknowledgements
@@ -188,40 +188,6 @@ Current limitations:
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
 - Balance queries only cover DeepSeek (API key auth) and MiMo (cookie auth); other providers lack balance checking.
 - Rust unit tests are blocked by a local VCRUNTIME140.dll version mismatch (VS 18 BuildTools vs System32); use `cargo check` instead of `cargo test`.
-
-## 后续计划 / Roadmap
-
-已完成：
-
-- Phase 7：Codex PTY 原生 CLI 适配器、provider 设置页动态化、Roundtable 三栏布局重设计、全局备忘面板重构。
-- Phase 7.x：Provider 配置完全动态化（从设置页读取而非硬编码）、per-session 临时配置 JSON、MiMo Pro provider、MiMo 余额/用量检查器（cookie 认证，琥珀色主题卡片）。
-- Phase 7.y：Room 删除时停止 participant 并软删除 runs、Roundtable 增量回合推送（JSONL 去重 + 1500ms 前端轮询）、右键"移除会话"上下文菜单、participant 状态本地化、seat label 修改自动同步 prompt。
-- Phase 8：Gemini 彻底移除（~54 文件）、Stepper mini-map 逐轮回放替换 History strip、`@DisplayName` SingleTarget 公开点名、Room sidebar 虚拟分组、seat prompt 英文约束、context events 验证、code review 修复。
-- Multi-CLI capability matrix（Phase 5.5 / Phase 7，七个 provider 能力矩阵）。
-- 全局快速备忘入口统一（所有页面顶栏）。
-- 1214 前端测试通过，cargo check 干净。
-
-计划：
-
-- 强化 Codex：继续优化 Codex PTY 执行路径、resume-last 语义、prompt 输入与完成判定，将 Codex 提升为仅次于 Claude 的主力 provider。
-- Arena Memory 候选提升：项目事实、决策、经验沉淀。
-- Roundtable Debate/Summary 交互完善。
-
-Completed:
-
-- Phase 7: Codex PTY native CLI adapter, dynamic provider settings, Roundtable three-pane layout redesign, global memo panel refactor.
-- Phase 7.x: Fully dynamic provider config (reads from settings page instead of hardcoded), per-session temp JSON, MiMo Pro provider, MiMo balance/usage checker (cookie-based auth, amber-themed card).
-- Phase 7.y: Room delete stops participants + soft-deletes runs, incremental roundtable turns (JSONL dedup + 1500ms frontend polling), right-click "Remove Session" context menu, localized participant status labels, seat label auto-syncs prompt.
-- Phase 8: Gemini removal (~54 files), Stepper mini-map replaces History strip, `@DisplayName` SingleTarget public targeting, Room sidebar virtual grouping, seat prompt English constraint, context events verification, code review fixes.
-- Multi-CLI capability matrix (Phase 5.5 / Phase 7, seven providers).
-- Unified global Quick Memo entry point (all page top bars).
-- 1214 frontend tests passing, cargo check clean.
-
-Plan:
-
-- Strengthen Codex: Continue optimizing Codex PTY execution, resume-last semantics, prompt input and completion detection, elevating Codex as the primary runner-up to Claude.
-- Arena Memory promotion for project facts, decisions, and lessons.
-- Roundtable Debate/Summary interaction polish.
 
 ## 开发 / Development
 
