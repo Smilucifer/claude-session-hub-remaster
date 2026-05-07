@@ -48,6 +48,7 @@ import type {
   RoomDetail,
   RoomKind,
   RoomSummary,
+  RoomTurnSnapshot,
   BalanceHelperSettings,
 } from "./types";
 
@@ -139,6 +140,14 @@ export interface RoomRunIndexEntry {
 export async function listRoomRunIndex(): Promise<RoomRunIndexEntry[]> {
   dbg("api", "listRoomRunIndex");
   return invoke<RoomRunIndexEntry[]>("list_room_run_index");
+}
+
+export async function getRoomTurnSnapshot(
+  roomId: string,
+  turnId: string,
+): Promise<RoomTurnSnapshot> {
+  dbg("api", "getRoomTurnSnapshot", { roomId, turnId });
+  return invoke<RoomTurnSnapshot>("get_room_turn_snapshot", { roomId, turnId });
 }
 
 export async function getRoom(id: string): Promise<RoomDetail> {

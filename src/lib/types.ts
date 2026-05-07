@@ -147,6 +147,19 @@ export interface RoomTurn {
   completed_at?: string;
 }
 
+export interface ParticipantSnapshot {
+  participant_id: string;
+  label: string;
+  content: string;
+  status: string;
+  error?: string;
+}
+
+export interface RoomTurnSnapshot {
+  turn: RoomTurn;
+  participant_contents: ParticipantSnapshot[];
+}
+
 export interface RoomSummary {
   id: string;
   kind: RoomKind;

@@ -1573,6 +1573,8 @@
   "room_statusLabelFailed": "失败",
   "room_statusLabelStopped": "已停止",
   "room_statusLabelWaiting": "等待中...",
+  "room_snapshotBanner": "只读历史 · 第 {turn} 轮快照",
+  "room_snapshotExit": "退出快照",
 
   "appUpdate_available": "发现新版本（{version}）。",
   "appUpdate_download": "下载",

@@ -1573,6 +1573,8 @@
   "room_statusLabelFailed": "Failed",
   "room_statusLabelStopped": "Stopped",
   "room_statusLabelWaiting": "Waiting...",
+  "room_snapshotBanner": "Read-only history · Turn {turn} snapshot",
+  "room_snapshotExit": "Exit snapshot",
 
   "appUpdate_available": "A new version ({version}) is available.",
   "appUpdate_download": "Download",
