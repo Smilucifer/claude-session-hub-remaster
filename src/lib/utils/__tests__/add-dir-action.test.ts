@@ -37,18 +37,6 @@ describe("executeAddDir", () => {
     });
   });
 
-  it("pre-session gemini saves selected directory to gemini settings", async () => {
-    const deps = makeDeps({
-      openDirectoryDialog: vi.fn().mockResolvedValue("/gemini/dir"),
-      getAgentSettings: vi.fn().mockResolvedValue({ add_dirs: [] }),
-    });
-    await executeAddDir({ agent: "gemini", sessionAlive: false, args: "" }, deps);
-
-    expect(deps.updateAgentSettings).toHaveBeenCalledWith("gemini", {
-      add_dirs: ["/gemini/dir"],
-    });
-  });
-
   it("user cancels dialog — no further action", async () => {
     const deps = makeDeps({
       openDirectoryDialog: vi.fn().mockResolvedValue(null),

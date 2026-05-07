@@ -9,7 +9,6 @@ import {
 describe("native permission mapping", () => {
   it("recognizes native pipe-exec agents", () => {
     expect(isNativeAgent("codex")).toBe(true);
-    expect(isNativeAgent("gemini")).toBe(true);
     expect(isNativeAgent("claude")).toBe(false);
   });
 
@@ -30,7 +29,6 @@ describe("native permission mapping", () => {
     expect(isPermissionModeVisibleForAgent("codex", "default")).toBe(false);
     expect(isPermissionModeVisibleForAgent("codex", "bypassPermissions")).toBe(true);
     expect(isPermissionModeVisibleForAgent("codex", "acceptEdits")).toBe(false);
-    expect(isPermissionModeVisibleForAgent("gemini", "plan")).toBe(false);
     expect(isPermissionModeVisibleForAgent("claude", "plan")).toBe(true);
   });
 });

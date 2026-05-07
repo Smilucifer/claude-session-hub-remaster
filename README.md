@@ -85,13 +85,13 @@ Currently useful for:
 
 ### Providers and CLI Authentication
 
-当前主力 provider：Claude、Codex、DeepSeek、GLM、QWEN、KIMI、MiMo Pro。Codex 通过 PTY 原生 CLI 执行，默认带 `--dangerously-bypass-approvals-and-sandbox`；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 作为一等 provider 显示，执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。Gemini 已被废弃，不再维护。
+当前主力 provider：Claude、Codex、DeepSeek、GLM、QWEN、KIMI、MiMo Pro。Codex 通过 PTY 原生 CLI 执行，默认带 `--dangerously-bypass-approvals-and-sandbox`；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 作为一等 provider 显示，执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。
 
-The current primary providers are: Claude, Codex, DeepSeek, GLM, QWEN, KIMI, and MiMo Pro. Codex uses PTY-based native CLI execution and defaults to `--dangerously-bypass-approvals-and-sandbox`. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`. Gemini has been deprecated and is no longer maintained.
+The current primary providers are: Claude, Codex, DeepSeek, GLM, QWEN, KIMI, and MiMo Pro. Codex uses PTY-based native CLI execution and defaults to `--dangerously-bypass-approvals-and-sandbox`. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`.
 
-设置页提供每个 provider 独立的模型和认证配置。Claude、Codex 使用官方 CLI 认证；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 支持 API key / base URL / model 动态配置，每次启动从最新设置生成 per-session 临时配置。Codex 使用 PTY 原生 CLI 执行路径，通过 transcript 文件监听完成判定而非进程退出语义。Gemini 相关配置项已移除。
+设置页提供每个 provider 独立的模型和认证配置。Claude、Codex 使用官方 CLI 认证；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 支持 API key / base URL / model 动态配置，每次启动从最新设置生成 per-session 临时配置。Codex 使用 PTY 原生 CLI 执行路径，通过 transcript 文件监听完成判定而非进程退出语义。
 
-The settings page provides independent model and auth configuration per provider. Claude and Codex use official CLI authentication. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro support dynamic API key / base URL / model configuration, generating a per-session temp config from the latest settings on each launch. Codex uses a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics. Gemini-related settings have been removed.
+The settings page provides independent model and auth configuration per provider. Claude and Codex use official CLI authentication. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro support dynamic API key / base URL / model configuration, generating a per-session temp config from the latest settings on each launch. Codex uses a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics.
 
 Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. API providers should keep provider identity separate from the Claude execution agent:
 
@@ -175,7 +175,6 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
-- Gemini 已在 UI 和设置页中移除，但后端 agent/commands/storage 中仍保留相关代码，待后续清理。
 - 余额查询仅覆盖 DeepSeek（API key 认证）和 MiMo（cookie 认证），其余 provider 暂无余额检查。
 - Rust 单元测试受限于本地 VCRUNTIME140.dll 版本不匹配（VS 18 BuildTools vs System32），需用 `cargo check` 替代 `cargo test`。
 
@@ -183,7 +182,6 @@ Current limitations:
 
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
-- Gemini has been removed from the UI and settings, but backend code (agent/commands/storage) still contains Gemini references pending cleanup.
 - Balance queries only cover DeepSeek (API key auth) and MiMo (cookie auth); other providers lack balance checking.
 - Rust unit tests are blocked by a local VCRUNTIME140.dll version mismatch (VS 18 BuildTools vs System32); use `cargo check` instead of `cargo test`.
 
@@ -200,7 +198,6 @@ Current limitations:
 
 计划：
 
-- 放弃 Gemini：Gemini 官方 CLI 稳定性不如预期，后续不再维护 Gemini 相关代码与配置。
 - 强化 Codex：继续优化 Codex PTY 执行路径、resume-last 语义、prompt 输入与完成判定，将 Codex 提升为仅次于 Claude 的主力 provider。
 - Arena Memory 候选提升：项目事实、决策、经验沉淀。
 - Roundtable Debate/Summary 交互完善。
@@ -216,7 +213,6 @@ Completed:
 
 Plan:
 
-- Drop Gemini: Gemini's official CLI stability has been underwhelming. Gemini-related code and config will no longer be maintained.
 - Strengthen Codex: Continue optimizing Codex PTY execution, resume-last semantics, prompt input and completion detection, elevating Codex as the primary runner-up to Claude.
 - Arena Memory promotion for project facts, decisions, and lessons.
 - Roundtable Debate/Summary interaction polish.

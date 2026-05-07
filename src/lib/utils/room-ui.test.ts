@@ -41,7 +41,6 @@ describe("room UI helpers", () => {
     expect(roomParticipantProviderLabel("claude", "bailian")).toBe("QWEN");
     expect(roomParticipantProviderLabel("claude", "kimi")).toBe("KIMI");
     expect(roomParticipantProviderLabel("codex")).toBe("Codex");
-    expect(roomParticipantProviderLabel("gemini")).toBe("Gemini");
   });
 
   it("includes the model after the visible provider label when present", () => {

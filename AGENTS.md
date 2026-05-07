@@ -30,4 +30,4 @@ Git history uses Conventional Commits such as `feat:`, `fix:`, `chore:`, and `me
 
 ## Security & Configuration Tips
 
-Do not commit API keys, local settings, or generated runtime state. Claude, Codex, and Gemini should use official CLI authentication. DeepSeek/GLM API configuration belongs in local settings only.
+Do not commit API keys, local settings, or generated runtime state. Claude and Codex should use official CLI authentication. DeepSeek/GLM API configuration belongs in local settings only.

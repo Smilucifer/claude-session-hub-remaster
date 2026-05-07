@@ -3902,7 +3902,7 @@ describe("SessionStore reducer", () => {
       it("replays completed native CLI runs into the chat timeline", async () => {
         const run = makeRun("run-pipe-1", {
           status: "completed",
-          agent: "gemini",
+          agent: "codex",
           execution_path: "pipe_exec",
         });
         mockGetRun.mockResolvedValue(run);
@@ -4033,7 +4033,7 @@ describe("SessionStore reducer", () => {
         const testStore = new SessionStore();
         testStore.run = makeRun("run-pipe-fail", {
           status: "running",
-          agent: "gemini",
+          agent: "codex",
           execution_path: "pipe_exec",
         });
         mockGetRun.mockResolvedValue(
@@ -4072,7 +4072,7 @@ describe("SessionStore reducer", () => {
       it("does not replay native CLI terminal stdout as chat text", async () => {
         const run = makeRun("run-pipe-stdout", {
           status: "running",
-          agent: "gemini",
+          agent: "codex",
           execution_path: "pipe_exec",
         });
         mockGetRun.mockResolvedValue(run);

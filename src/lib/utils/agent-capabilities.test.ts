@@ -28,16 +28,6 @@ describe("agent capability matrix", () => {
     });
   });
 
-  it("enables Gemini pipe mode but keeps it out of Room actors", () => {
-    expect(capabilitiesForAgent("gemini")).toMatchObject({
-      kind: "gemini",
-      stream_session: false,
-      pipe_exec: true,
-      resume: "none",
-    });
-    expect(canUseRoomActor("gemini")).toBe(false);
-  });
-
   it("requires a run-level session actor path for Room actors", () => {
     expect(canUseRoomActorRun({ agent: "claude", execution_path: "session_actor" })).toBe(true);
     expect(canUseRoomActorRun({ agent: "claude", execution_path: "pipe_exec" })).toBe(false);
@@ -49,7 +39,6 @@ describe("agent capability matrix", () => {
       true,
     );
     expect(canUseRoomParticipantRun({ agent: "codex", execution_path: "pipe_exec" })).toBe(true);
-    expect(canUseRoomParticipantRun({ agent: "gemini", execution_path: "pipe_exec" })).toBe(true);
     expect(canUseRoomParticipantRun({ agent: "unknown", execution_path: "pipe_exec" })).toBe(false);
   });
 });

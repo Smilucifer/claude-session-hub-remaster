@@ -20,15 +20,6 @@ describe("getAgentFeatures", () => {
     expect(f.addDirAction).toBe(true);
   });
 
-  it("returns native shortcut features for gemini", () => {
-    const f = getAgentFeatures("gemini");
-    expect(f.effortSelector).toBe(false);
-    expect(f.planModeToggle).toBe(false);
-    expect(f.permissionModeSwitch).toBe(true);
-    expect(f.slashCommandMenu).toBe(true);
-    expect(f.addDirAction).toBe(true);
-  });
-
   it("returns minimal features for unknown agent", () => {
     const f = getAgentFeatures("unknown-agent");
     expect(f.effortSelector).toBe(false);
@@ -37,10 +28,9 @@ describe("getAgentFeatures", () => {
 });
 
 describe("isKnownAgent", () => {
-  it("recognizes claude, codex, and gemini", () => {
+  it("recognizes claude and codex", () => {
     expect(isKnownAgent("claude")).toBe(true);
     expect(isKnownAgent("codex")).toBe(true);
-    expect(isKnownAgent("gemini")).toBe(true);
   });
 
   it("returns false for unknown agents", () => {

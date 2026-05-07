@@ -957,12 +957,12 @@ mod tests {
         let json = settings_json_with_user_patch(serde_json::json!({
             "cc_agent_profiles": [
                 {
-                    "id": "gemini-via-ccr",
-                    "label": "Gemini via CCR",
+                    "id": "deepseek-via-ccr",
+                    "label": "DeepSeek via CCR",
                     "agent": "claude",
                     "platform_id": "ccr",
-                    "model": "gemini-2.5-pro",
-                    "prompt": "You are the Gemini seat.",
+                    "model": "deepseek-v4-pro",
+                    "prompt": "You are the DeepSeek seat.",
                     "role": "researcher"
                 }
             ]
@@ -972,11 +972,11 @@ mod tests {
 
         assert_eq!(settings.user.cc_agent_profiles.len(), 1);
         let profile = &settings.user.cc_agent_profiles[0];
-        assert_eq!(profile.id, "gemini-via-ccr");
-        assert_eq!(profile.label, "Gemini via CCR");
+        assert_eq!(profile.id, "deepseek-via-ccr");
+        assert_eq!(profile.label, "DeepSeek via CCR");
         assert_eq!(profile.agent, "claude");
         assert_eq!(profile.platform_id.as_deref(), Some("ccr"));
-        assert_eq!(profile.model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(profile.model.as_deref(), Some("deepseek-v4-pro"));
         assert!(profile.enabled);
     }
 

@@ -544,7 +544,7 @@ pub struct AgentSettings {
     /// Extra launch arguments appended before the prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<Vec<String>>,
-    /// Native CLI no-review mode. For Gemini this maps to --yolo; for Codex to its bypass flag.
+    /// Native CLI no-review mode. For Codex this maps to its bypass flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yolo_mode: Option<bool>,
     pub updated_at: String,
@@ -592,7 +592,6 @@ impl Default for AllSettings {
         let mut agents = std::collections::HashMap::new();
         agents.insert("claude".to_string(), AgentSettings::default_for("claude"));
         agents.insert("codex".to_string(), AgentSettings::default_for("codex"));
-        agents.insert("gemini".to_string(), AgentSettings::default_for("gemini"));
         Self {
             user: UserSettings::default(),
             agents,

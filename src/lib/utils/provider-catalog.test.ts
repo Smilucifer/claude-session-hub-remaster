@@ -6,7 +6,6 @@ describe("Phase 7 provider catalog", () => {
     expect(PHASE7_PROVIDERS.map((provider) => provider.label)).toEqual([
       "Claude",
       "Codex",
-      "Gemini",
       "DeepSeek",
       "GLM",
       "QWEN",
@@ -80,7 +79,6 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude", "kimi")).toBe("kimi");
     expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-pro");
     expect(providerIdForRun("codex")).toBe("codex");
-    expect(providerIdForRun("gemini")).toBe("gemini");
     expect(providerIdForRun("claude")).toBe("claude");
   });
 });

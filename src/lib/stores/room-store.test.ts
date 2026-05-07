@@ -137,27 +137,27 @@ describe("RoomStore", () => {
         capabilities: capabilitiesForAgent("codex"),
       },
     ];
-    const withGemini = detail("r1", "Roundtable");
-    withGemini.participants = [
+    const withDeepSeek = detail("r1", "Roundtable");
+    withDeepSeek.participants = [
       ...withCodex.participants,
       {
         participant: {
           id: "p3",
-          run_id: "run-gemini",
-          agent: "gemini",
-          label: "Gemini",
+          run_id: "run-deepseek",
+          agent: "claude",
+          label: "DeepSeek",
           role: "participant",
           joined_at: "2026-04-30T00:00:00Z",
         },
         run: undefined,
-        capabilities: capabilitiesForAgent("gemini"),
+        capabilities: capabilitiesForAgent("claude"),
       },
     ];
     vi.mocked(api.createRoom).mockResolvedValue(created);
     vi.mocked(api.createRoomParticipant)
       .mockResolvedValueOnce(withClaude)
       .mockResolvedValueOnce(withCodex)
-      .mockResolvedValueOnce(withGemini);
+      .mockResolvedValueOnce(withDeepSeek);
     vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Roundtable")]);
 
     await store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
@@ -177,10 +177,10 @@ describe("RoomStore", () => {
         role: "participant",
       },
       {
-        agent: "gemini",
-        prompt: "You are Gemini.",
-        model: "gemini-2.5-pro",
-        label: "Gemini",
+        agent: "deepseek",
+        prompt: "You are DeepSeek.",
+        model: "deepseek-v4-pro",
+        label: "DeepSeek",
         role: "participant",
       },
     ]);
@@ -214,13 +214,13 @@ describe("RoomStore", () => {
     expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
       3,
       "r1",
-      "gemini",
-      "You are Gemini.",
+      "claude",
+      "You are DeepSeek.",
       "D:/work",
-      "gemini-2.5-pro",
+      "deepseek-v4-pro",
+      "deepseek",
       undefined,
-      undefined,
-      "Gemini",
+      "DeepSeek",
       "participant",
     );
     expect(store.selectedRoomId).toBe("r1");
@@ -228,7 +228,7 @@ describe("RoomStore", () => {
     expect(store.room?.participants.map((item) => item.participant.agent)).toEqual([
       "claude",
       "codex",
-      "gemini",
+      "claude",
     ]);
     expect(store.saving).toBe(false);
   });

@@ -1322,7 +1322,7 @@ fn run_status_label(status: RunStatus) -> &'static str {
 }
 
 fn run_preview(run_id: &str) -> Option<String> {
-    // Pass 1: RunEvent format (append_event via native PTY for Codex/Gemini).
+    // Pass 1: RunEvent format (append_event via native PTY for Codex).
     let run_events = crate::storage::events::list_events(run_id, 0);
     let assistant_count = run_events
         .iter()

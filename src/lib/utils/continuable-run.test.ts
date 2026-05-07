@@ -35,11 +35,9 @@ describe("findLastContinuableRun", () => {
       run("codex-completed", "codex", {
         conversation_ref: { kind: "codex_thread", id: "thread-1" },
       }),
-      run("gemini-completed", "gemini"),
     ];
 
     expect(findLastContinuableRun(runs, "codex")?.id).toBe("codex-completed");
-    expect(findLastContinuableRun(runs, "gemini")?.id).toBe("gemini-completed");
   });
 
   it("returns Claude-compatible API runs by provider identity", () => {
