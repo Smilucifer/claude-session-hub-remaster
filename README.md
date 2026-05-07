@@ -53,9 +53,9 @@ Supported:
 
 ### Rooms, Roundtable, and Driver/Copilot
 
-Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude / Codex / Gemini participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。
+Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude / Codex participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。
 
-Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude / Codex / Gemini participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point.
+Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude / Codex participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point.
 
 当前适合用来：
 
@@ -87,13 +87,13 @@ Currently useful for:
 
 ### Providers and CLI Authentication
 
-普通聊天入口和会议室入口正在统一为五个 provider：Claude、Codex、Gemini、DeepSeek、GLM。Claude、Codex、Gemini 使用官方 CLI 认证；Codex 启动命令不使用 `exec`，并默认带 `--dangerously-bypass-approvals-and-sandbox`；Gemini 默认使用 yolo approval mode。DeepSeek 和 GLM 作为一等 provider 显示，但执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。
+当前主力 provider：Claude、Codex、DeepSeek、GLM、QWEN、KIMI、MiMo Pro。Codex 通过 PTY 原生 CLI 执行，默认带 `--dangerously-bypass-approvals-and-sandbox`；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 作为一等 provider 显示，执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。Gemini 已被废弃，不再维护。
 
-The chat and room entries are being unified around five providers: Claude, Codex, Gemini, DeepSeek, and GLM. Claude, Codex, and Gemini use official CLI authentication. Codex launches without `exec` and defaults to `--dangerously-bypass-approvals-and-sandbox`; Gemini defaults to yolo approval mode. DeepSeek and GLM are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`.
+The current primary providers are: Claude, Codex, DeepSeek, GLM, QWEN, KIMI, and MiMo Pro. Codex uses PTY-based native CLI execution and defaults to `--dangerously-bypass-approvals-and-sandbox`. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro are first-class providers in the UI, but execute through Claude Code compatible sessions with provider configuration injected by `platform_id`. Gemini has been deprecated and is no longer maintained.
 
-设置页已简化为五个模型行，不再为 Codex/Gemini 提供自定义 API key、base URL 或保存登录方式。DeepSeek 只需要官方 API key；GLM 支持 API key、base URL 和 model。Codex 和 Gemini 使用 PTY 原生 CLI 执行路径，通过 transcript 文件监听完成判定而非进程退出语义。
+设置页提供每个 provider 独立的模型和认证配置。Claude、Codex 使用官方 CLI 认证；DeepSeek、GLM、QWEN、KIMI、MiMo Pro 支持 API key / base URL / model 动态配置，每次启动从最新设置生成 per-session 临时配置。Codex 使用 PTY 原生 CLI 执行路径，通过 transcript 文件监听完成判定而非进程退出语义。Gemini 相关配置项已移除。
 
-The settings page has been simplified to five model rows. Codex/Gemini no longer expose custom API key, base URL, or saved login method controls. DeepSeek needs only its official API key; GLM supports API key, base URL, and model. Codex and Gemini use a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics.
+The settings page provides independent model and auth configuration per provider. Claude and Codex use official CLI authentication. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro support dynamic API key / base URL / model configuration, generating a per-session temp config from the latest settings on each launch. Codex uses a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics. Gemini-related settings have been removed.
 
 Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. DeepSeek/GLM should keep provider identity separate from the Claude execution agent:
 
@@ -152,9 +152,9 @@ Claude-compatible API profiles can still be represented under `user.cc_agent_pro
 
 ### Windows Native Toolchain Support
 
-在 Windows 上，如果你从普通桌面窗口启动应用，Claude / Codex 子进程通常拿不到 Visual Studio Developer Prompt 里的 `cl`、`link`、Windows SDK 等环境。当前版本会在明确需要 native toolchain 的项目中，自动为本地 CLI 子进程补充 MSVC developer environment。Codex / Gemini 如果通过 npm `.cmd` shim 安装，应用会在 Windows 上直接以 `node.exe + CLI js` 方式启动，避免对话时闪出临时 `cmd` 窗口。
+在 Windows 上，如果你从普通桌面窗口启动应用，Claude / Codex 子进程通常拿不到 Visual Studio Developer Prompt 里的 `cl`、`link`、Windows SDK 等环境。当前版本会在明确需要 native toolchain 的项目中，自动为本地 CLI 子进程补充 MSVC developer environment。Codex 如果通过 npm `.cmd` shim 安装，应用会在 Windows 上直接以 `node.exe + CLI js` 方式启动，避免对话时闪出临时 `cmd` 窗口。
 
-On Windows, when the app is launched from the normal desktop environment, Claude / Codex child processes usually do not inherit the `cl`, `link`, Windows SDK, and related variables from a Visual Studio Developer Prompt. This version can automatically add an MSVC developer environment for local CLI child processes when the current project clearly needs native tooling. When Codex / Gemini are installed through npm `.cmd` shims, the app launches `node.exe + the CLI js` directly on Windows to avoid transient `cmd` windows during chat.
+On Windows, when the app is launched from the normal desktop environment, Claude / Codex child processes usually do not inherit the `cl`, `link`, Windows SDK, and related variables from a Visual Studio Developer Prompt. This version can automatically add an MSVC developer environment for local CLI child processes when the current project clearly needs native tooling. When Codex is installed through npm `.cmd` shims, the app launches `node.exe + the CLI js` directly on Windows to avoid transient `cmd` windows during chat.
 
 模式：
 
@@ -188,26 +188,30 @@ Current limitations:
 
 已完成：
 
-- Phase 7：Codex/Gemini PTY 原生 CLI 适配器、provider 设置页简化、Roundtable 三栏布局重设计、全局备忘面板重构。
-- Multi-CLI capability matrix（Phase 5.5 / Phase 7，五个 provider 能力矩阵）。
+- Phase 7：Codex PTY 原生 CLI 适配器、provider 设置页动态化、Roundtable 三栏布局重设计、全局备忘面板重构。
+- Multi-CLI capability matrix（Phase 5.5 / Phase 7，七个 provider 能力矩阵）。
 - 全局快速备忘入口统一（所有页面顶栏）。
+- Room 优化：删除时停止 participant 并软删除 runs、Roundtable 增量回合推送、右键上下文菜单、participant 状态本地化。
 
 计划：
 
+- 放弃 Gemini：Gemini 官方 CLI 稳定性不如预期，后续不再维护 Gemini 相关代码与配置。
+- 强化 Codex：继续优化 Codex PTY 执行路径、resume-last 语义、prompt 输入与完成判定，将 Codex 提升为仅次于 Claude 的主力 provider。
 - Arena Memory 候选提升：项目事实、决策、经验沉淀。
-- Codex/Gemini resume-last 语义完善（prompt 输入、完成判定、停止和归档）。
 - Roundtable Debate/Summary 交互完善。
 
 Completed:
 
-- Phase 7: Codex/Gemini PTY native CLI adapter, provider settings simplification, Roundtable three-pane layout redesign, global memo panel refactor.
-- Multi-CLI capability matrix (Phase 5.5 / Phase 7, five providers).
+- Phase 7: Codex PTY native CLI adapter, dynamic provider settings, Roundtable three-pane layout redesign, global memo panel refactor.
+- Multi-CLI capability matrix (Phase 5.5 / Phase 7, seven providers).
 - Unified global Quick Memo entry point (all page top bars).
+- Room optimizations: delete stops participants + soft-deletes runs, incremental roundtable turns, right-click context menu, localized participant status labels.
 
 Plan:
 
+- Drop Gemini: Gemini's official CLI stability has been underwhelming. Gemini-related code and config will no longer be maintained.
+- Strengthen Codex: Continue optimizing Codex PTY execution, resume-last semantics, prompt input and completion detection, elevating Codex as the primary runner-up to Claude.
 - Arena Memory promotion for project facts, decisions, and lessons.
-- Codex/Gemini resume-last semantics (prompt input, completion detection, stop, and archival).
 - Roundtable Debate/Summary interaction polish.
 
 ## 开发 / Development
