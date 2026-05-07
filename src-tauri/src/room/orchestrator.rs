@@ -62,6 +62,7 @@ pub enum RoundtableCommand {
     Debate { input: String },
     Summary { target: String },
     Private { target: String, message: String },
+    SingleTarget { target: String, message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +136,25 @@ pub async fn run_roundtable_turn_with_runtime(
                 private_message,
                 vec![target],
                 true,
+            )
+        }
+        RoundtableCommand::SingleTarget {
+            target,
+            message: target_message,
+        } => {
+            let participant = find_participant_unique(&room.participants, &target)?.clone();
+            let target_ref = active_target_for_participant(participant.clone(), sessions).await?;
+            let prompt = build_singletarget_prompt(
+                public_turns.len() as u64 + 1,
+                &participant.label,
+                &target_message,
+            );
+            (
+                RoomTurnMode::SingleTarget,
+                message.trim().to_string(),
+                prompt,
+                vec![target_ref],
+                false,
             )
         }
     };
@@ -692,12 +712,25 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
         return RoundtableCommand::Summary { target };
     }
 
+    // /dm @Name msg → Private turn (written to private.json)
+    if let Some(rest) = strip_command_word(trimmed, "/dm") {
+        if let Some(at_rest) = rest.strip_prefix('@') {
+            let mut parts = at_rest.splitn(2, char::is_whitespace);
+            let target = parts.next().unwrap_or_default().to_string();
+            let message = parts.next().unwrap_or_default().trim().to_string();
+            if !target.is_empty() && !message.is_empty() {
+                return RoundtableCommand::Private { target, message };
+            }
+        }
+    }
+
+    // @Name msg → SingleTarget public turn (only named participant answers)
     if let Some(rest) = trimmed.strip_prefix('@') {
         let mut parts = rest.splitn(2, char::is_whitespace);
         let target = parts.next().unwrap_or_default().to_string();
         let message = parts.next().unwrap_or_default().trim().to_string();
         if !target.is_empty() && !message.is_empty() {
-            return RoundtableCommand::Private { target, message };
+            return RoundtableCommand::SingleTarget { target, message };
         }
     }
 
@@ -818,6 +851,20 @@ pub fn build_fanout_prompt(turn_num: u64, user_input: &str, data_pack: Option<&s
     body.push_str(user_input.trim());
     body.push_str("\n\n请独立回答（你看不到另两家观点，本色发挥即可）。");
     body
+}
+
+pub fn build_singletarget_prompt(
+    turn_num: u64,
+    target_label: &str,
+    user_message: &str,
+) -> String {
+    format!(
+        "[通用圆桌 · 第 {turn_num} 轮 · @single-target → {target_label}]\n\n\
+         ## 用户指名提问\n\
+         {}\n\n\
+         你是本轮唯一被指名回答的参与者。请给出你的完整观点。",
+        user_message.trim()
+    )
 }
 
 pub fn build_summary_prompt(
@@ -1301,6 +1348,29 @@ fn find_participant<'a>(
     })
 }
 
+/// Like `find_participant` but returns an error if multiple participants match by label.
+fn find_participant_unique<'a>(
+    participants: &'a [RoomParticipant],
+    target: &str,
+) -> Result<&'a RoomParticipant, String> {
+    let normalized = target.trim().trim_start_matches('@').to_ascii_lowercase();
+    let matches: Vec<&RoomParticipant> = participants
+        .iter()
+        .filter(|participant| {
+            participant.id.eq_ignore_ascii_case(&normalized)
+                || participant.run_id.eq_ignore_ascii_case(&normalized)
+                || participant.label.to_ascii_lowercase() == normalized
+        })
+        .collect();
+    match matches.len() {
+        0 => Err(format!("Room participant @{target} not found")),
+        1 => Ok(matches[0]),
+        _ => Err(format!(
+            "Ambiguous participant name '{target}' — please use a unique label"
+        )),
+    }
+}
+
 fn outcome_status_label(status: TurnOutcomeStatus) -> &'static str {
     match status {
         TurnOutcomeStatus::Pending => "pending",
@@ -1675,7 +1745,14 @@ mod tests {
             }
         );
         assert_eq!(
-            parse_roundtable_command("@Alice check this privately"),
+            parse_roundtable_command("@Alice check this"),
+            RoundtableCommand::SingleTarget {
+                target: "Alice".to_string(),
+                message: "check this".to_string()
+            }
+        );
+        assert_eq!(
+            parse_roundtable_command("/dm @Alice check this privately"),
             RoundtableCommand::Private {
                 target: "Alice".to_string(),
                 message: "check this privately".to_string()
@@ -1684,19 +1761,19 @@ mod tests {
     }
 
     #[test]
-    fn command_words_do_not_capture_similarly_named_private_targets() {
+    fn command_words_do_not_capture_similarly_named_singletargets() {
         assert_eq!(
-            parse_roundtable_command("@debateAlice check this privately"),
-            RoundtableCommand::Private {
+            parse_roundtable_command("@debateAlice check this"),
+            RoundtableCommand::SingleTarget {
                 target: "debateAlice".to_string(),
-                message: "check this privately".to_string()
+                message: "check this".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("@summaryBot check this privately"),
-            RoundtableCommand::Private {
+            parse_roundtable_command("@summaryBot check this"),
+            RoundtableCommand::SingleTarget {
                 target: "summaryBot".to_string(),
-                message: "check this privately".to_string()
+                message: "check this".to_string()
             }
         );
     }

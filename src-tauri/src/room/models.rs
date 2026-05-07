@@ -44,6 +44,7 @@ pub enum RoomTurnMode {
     Private,
     Review,
     Research,
+    SingleTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
