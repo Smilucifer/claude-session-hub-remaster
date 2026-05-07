@@ -4,7 +4,7 @@
   import { renderMarkdown } from "$lib/utils/markdown";
   import { currentLocale, t } from "$lib/i18n/index.svelte";
   import readmeEn from "../../../README.md?raw";
-  import readmeZhCN from "../../../README.zh-CN.md?raw";
+  const readmeZhCN = readmeEn; // README.md is already bilingual
 
   let { open = $bindable(false) }: { open: boolean } = $props();
 
