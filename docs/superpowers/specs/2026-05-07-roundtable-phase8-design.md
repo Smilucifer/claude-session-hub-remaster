@@ -1,7 +1,7 @@
-# Phase 8 Design: Roundtable Enhancements + Gemini Cleanup + Context HUD
+# Phase 8 Design: Roundtable Enhancements + Gemini Cleanup + Context Events
 
 **Date:** 2026-05-07
-**Status:** Draft
+**Status:** Draft v2 (incorporating cx2cc + deepseek review feedback)
 
 ---
 
@@ -13,8 +13,8 @@ Six coordinated changes to the Claude Session Hub Tauri app:
 2. **Stepper Mini-Map** — Replace History strip with a turn-by-turn stepper for room replay
 3. **@Name SingleTarget** — `@DisplayName msg` sends a public turn to only the named participant
 4. **Room Session Grouping** — Virtual "Rooms" folder in sidebar for room participant runs
-5. **Roundtable Prompt Constraint** — Add English "discussable judgment, not actionable plan" constraint
-6. **Context Usage HUD** — Ensure all CC sessions report context usage to the frontend (replaces external ccstatusline need)
+5. **Roundtable Prompt Constraint** — Bilingual "discussable judgment, not actionable plan" constraint
+6. **Context Events Verification** — Ensure all CC session types correctly display context events in the UI
 
 ---
 
@@ -57,6 +57,7 @@ Remove all Gemini references from frontend, backend, tests, and configuration. T
 - `src-tauri/src/models.rs` — Remove `"gemini"` from `AllSettings::default()`
 - `src-tauri/src/storage/managed_apps.rs` — Remove `ManagedCliApp::Gemini` variant
 - `src-tauri/src/storage/mcp_registry.rs` — Remove all `list_configured_gemini()`, `read_gemini_settings()`, `write_gemini_settings()`, `write_gemini_mcp_server()`, `remove_gemini_mcp_server()`, `toggle_gemini_server()`, `gemini_settings_path()`
+- `src-tauri/src/storage/settings.rs` — Verify and remove any Gemini-specific read/write functions (not in original list; flagged by review)
 - `src-tauri/src/commands/files.rs` — Remove `~/.gemini/` protected dir, Gemini memory file detection
 - `src-tauri/src/commands/rooms.rs` — Remove `"gemini"` from agent validation, error message, default label
 - `src-tauri/src/commands/runs.rs` — Remove Gemini test cases
@@ -73,7 +74,14 @@ Remove all Gemini references from frontend, backend, tests, and configuration. T
 - `src/lib/stores/room-store.test.ts`
 - `src/lib/stores/session-store.test.ts`
 
-**i18n:** No Gemini-specific messages found — no changes needed.
+**i18n:** Verify with `grep -i gemini messages/` — no Gemini-specific messages expected, but confirm.
+
+### Historical Gemini Runs
+
+Existing runs with `agent === "gemini"` are preserved as read-only history. UI fallback:
+- In `provider-catalog.ts` `providerIdForRun()`: return a fallback label `"Gemini (deprecated)"` for runs with `agent === "gemini"` instead of panicking
+- In `agent-capabilities.ts` `normalizeAgentKind()`: map `"gemini"` to `"unknown"` (not a hard error)
+- Sidebar and history pages render these runs normally with the deprecated label
 
 ### Approach
 
@@ -81,7 +89,7 @@ Systematic file-by-file removal. For type unions, remove the `"gemini"` variant.
 
 ### Risk
 
-Low. Gemini was already deprecated. No other code depends on Gemini paths.
+Medium. The scope (~54 files, cross-cutting frontend/backend/types/tests) means high chance of missed string branches or test fixture drift. Mitigation: grep-based post-removal verification.
 
 ---
 
@@ -90,6 +98,17 @@ Low. Gemini was already deprecated. No other code depends on Gemini paths.
 ### Current State
 
 The History strip (`rooms/+page.svelte` lines 608-683) shows collapsible turn chips with `#turn.idx`, mode, user_input, and per-participant status dots. It's a flat list — no snapshot/replay capability.
+
+### Data Model Verification
+
+`RoomResponseRef` in `src-tauri/src/room/models.rs` (lines 49-58) **does** include `event_seq_start: u64` and `event_seq_end: u64`. These are valid seq numbers into the run's `events.jsonl`. The `list_events(run_id, since_seq)` function in `events.rs` can read events by seq range. Snapshot loading is feasible via:
+
+```
+for each response in turn.responses:
+    events = list_events(response.run_id, 0)
+    snapshot_events = events.filter(e => e.seq >= response.event_seq_start && e.seq <= response.event_seq_end)
+    content = extract_assistant_text(snapshot_events)
+```
 
 ### Design
 
@@ -117,50 +136,76 @@ Replace the History strip with a **vertical stepper** component:
 ```
 
 **Behavior:**
-- Each turn is a clickable dot (○) in a vertical stepper
+- Each turn is a clickable element in a vertical stepper
 - Dot color: green (all complete), amber (in progress), red (has failure), gray (pending)
+- Turn text summary is always visible as inline label next to the dot (not hidden in tooltip)
+- Tooltip provides additional detail (full user_input, per-participant status) as enhancement only
 - Clicking a dot enters **snapshot mode**:
-  - Participant panes switch to show that turn's response data (loaded from `timeline.jsonl` `responses[]` refs)
+  - Participant panes switch to show that turn's response data
   - Purple banner appears: 「只读历史 · 第 N 轮快照」with an「退出快照」button
   - Composer is disabled
 - Clicking the latest turn or「退出快照」returns to **live mode**
 - The stepper is scrollable when there are many turns
-- Each dot shows a tooltip with turn mode and truncated user_input
 
-### Data Flow
+### Snapshot Pane Rendering
 
-1. `RoomTurn` data already available in `store.room.turns[]`
-2. `RoomResponseRef` contains `preview` (truncated response) and references to run events
-3. For full snapshot: read run events between `event_seq_start` and `event_seq_end` via a new Tauri command `get_room_turn_snapshot(room_id, turn_id)`
-4. New Tauri command in `commands/rooms.rs`: reads the referenced run events and returns the full response text for each participant in that turn
+When snapshot mode is active, participant panes need to render static content instead of live streams.
+
+**Approach:** Add `readonly` mode to existing pane rendering:
+- Each pane receives `snapshotContent: string | null` prop
+- When `snapshotContent` is non-null, render it as formatted markdown (reuse existing `ChatMessage` component in readonly mode)
+- When null, render live session data as before
+
+**Two-phase loading:**
+1. **Immediate (from timeline):** Use `RoomResponseRef.preview` (already stored, truncated) for instant display
+2. **Full (on demand):** When user clicks a snapshot dot, fire `get_room_turn_snapshot` Tauri command to load full event data between `event_seq_start..event_seq_end`
 
 ### New Files
 
 - `src/lib/components/RoomStepper.svelte` — The stepper component
 - New Tauri command: `get_room_turn_snapshot` in `src-tauri/src/commands/rooms.rs`
 
+### `get_room_turn_snapshot` Command
+
+```rust
+#[tauri::command]
+pub fn get_room_turn_snapshot(room_id: String, turn_id: String) -> Result<RoomTurnSnapshot, String>
+```
+
+Returns:
+```rust
+pub struct RoomTurnSnapshot {
+    pub turn: RoomTurn,
+    pub participant_contents: Vec<ParticipantSnapshot>,
+}
+
+pub struct ParticipantSnapshot {
+    pub participant_id: String,
+    pub label: String,
+    pub content: String,       // Full assistant text extracted from events
+    pub status: String,
+    pub error: Option<String>,
+}
+```
+
+Implementation: read `timeline.jsonl` to find the turn, then for each `RoomResponseRef`, read events from `events.jsonl` by seq range and extract assistant message content.
+
 ### Modified Files
 
 - `src/routes/rooms/+page.svelte` — Replace History strip section with `RoomStepper`, add snapshot mode state
 - `src/lib/stores/room-store.svelte.ts` — Add `snapshotTurn`, `exitSnapshot` methods, `activeSnapshot` state
-- `src/lib/types.ts` — Add `RoomTurnSnapshot` type if needed
+- `src/lib/types.ts` — Add `RoomTurnSnapshot`, `ParticipantSnapshot` types
 - `messages/en.json`, `messages/zh-CN.json` — Add i18n keys for snapshot banner
+
+### Edge Cases
+
+- Soft-deleted runs: `get_room_turn_snapshot` should handle missing `events.jsonl` gracefully — return `preview` fallback with status `"deleted"`
+- Large turn counts (20+): stepper uses CSS `overflow-y: auto` with max-height, no virtualization needed for typical room sizes
+- Rapid consecutive turns: snapshot data is read-only from persisted JSONL, no consistency issues
 
 ### Private Turns in Stepper
 
-Existing private turns (stored in `private.json`) do NOT appear in the stepper — only public `timeline.jsonl` turns are shown. This is consistent with the current History strip behavior.
-
-### Snapshot Mode State
-
-```typescript
-// In room-store
-activeSnapshot: RoomTurn | null = null;  // null = live mode
-
-snapshotTurn(turn: RoomTurn) { this.activeSnapshot = turn; }
-exitSnapshot() { this.activeSnapshot = null; }
-```
-
-When `activeSnapshot` is set, the participant panes render snapshot data instead of live session data.
+Existing private turns (stored in `private.json`) do NOT appear in the stepper — only public `timeline.jsonl` turns are shown.
 
 ---
 
@@ -172,37 +217,52 @@ When `activeSnapshot` is set, the participant panes render snapshot data instead
 
 ### Design
 
-Change `@TargetName message` to produce a **public SingleTarget turn**:
+Two separate entry points:
 
-- `target_participant_ids` contains only the named participant
-- Stored in `timeline.jsonl` (public), not `private.json`
-- Only the named participant receives the prompt and responds
-- Other participants do NOT receive any message
-- The turn appears in the stepper with mode `"singletarget"` (new variant)
+| Syntax | Mode | Behavior |
+|--------|------|----------|
+| `@Name msg` | **SingleTarget** (public) | Named participant answers, turn written to `timeline.jsonl` |
+| `/dm @Name msg` | **Private** (existing) | Named participant answers privately, written to `private.json` |
+
+This preserves backward compatibility — users who want private messaging use `/dm`.
+
+### Naming Convention
+
+| Layer | Value |
+|-------|-------|
+| Rust enum variant | `RoomTurnMode::SingleTarget` |
+| Rust command enum | `RoundtableCommand::SingleTarget { target, message }` |
+| TypeScript wire value | `"singletarget"` |
+| UI label (i18n) | "Single Target" / "指名回答" |
+| Prompt header | `@single-target` |
 
 ### Changes
 
 **`src-tauri/src/room/models.rs`:**
 - Add `SingleTarget` variant to `RoomTurnMode` enum
-- Update TypeScript type in `src/lib/types.ts` to match
 
 **`src-tauri/src/room/orchestrator.rs`:**
-- Change `parse_roundtable_command()`: `@TargetName message` returns `RoundtableCommand::SingleTarget { target, message }` instead of `Private`
-- Keep the `Private` variant in `RoundtableCommand` enum for backward compatibility (existing private turns in `private.json` still need to be readable), but no new Private turns will be created via `@name`
-- Add `build_singletarget_prompt()` — similar to fanout but addressed to one participant, includes instruction that only this participant is answering
+- Change `parse_roundtable_command()`:
+  - `@TargetName message` → `RoundtableCommand::SingleTarget { target, message }`
+  - `/dm @TargetName message` → `RoundtableCommand::Private { target, message }` (preserved)
+- Add `build_singletarget_prompt()` — addressed to one participant, includes instruction that only this participant is answering
 - In `run_roundtable_turn_with_runtime()`, handle `SingleTarget` mode: resolve target via `find_participant()`, send prompt only to that participant, write turn to public timeline
-- If `find_participant()` fails (name not found), return an error to the frontend instead of falling through to fanout
+- **Ambiguity handling:** If `find_participant()` matches multiple participants (same label), return error `"Ambiguous participant name '{name}' — please use a unique label"`
+- **Not found handling:** If `find_participant()` returns None, return error `"Participant '{name}' not found in this room"`
 
 **`src/lib/utils/room-ui.ts`:**
-- Add `singletarget` to `roomTurnModeLabel()` and `roomTurnModeColor()`
+- Add `"singletarget"` to `roomTurnModeLabel()` and `roomTurnModeColor()`
+
+**`src/lib/types.ts`:**
+- Add `"singletarget"` to `RoomTurnMode` union
 
 **`messages/en.json`, `messages/zh-CN.json`:**
-- Add label for "SingleTarget" mode
+- Add labels for SingleTarget mode and `/dm` help text
 
 ### Prompt Template
 
 ```
-[通用圆桌 · 第 {turn_num} 轮 · @singletarget → {target_label}]
+[通用圆桌 · 第 {turn_num} 轮 · @single-target → {target_label}]
 
 ## 用户指名提问
 {user_message}
@@ -222,47 +282,64 @@ Room participant runs are stored in `runs/` alongside standalone runs. `RunMeta`
 
 Add a virtual **"Rooms"** project folder at the top of the sidebar that groups all room participant runs by room name.
 
-### Approach: Frontend-Only (No Backend Schema Change)
+### Approach: New Backend Command + Frontend Grouping
 
-Instead of adding `room_id` to RunMeta (which requires migration), derive room membership from the existing room data at sidebar build time.
+To avoid N+1 queries (loading each room's detail individually), add a single lightweight Tauri command:
 
-**Data flow:**
-1. When building sidebar groups, also load `RoomSummary[]` via the existing `list_rooms` Tauri command
-2. For each room, load its `RoomDetail` to get `participants[].run_id`
-3. Build a `Map<run_id, room_name>` lookup
-4. In `buildProjectFolders()`:
+**New command: `list_room_run_index`**
+
+```rust
+#[tauri::command]
+pub fn list_room_run_index() -> Result<Vec<RoomRunIndexEntry>, String>
+
+pub struct RoomRunIndexEntry {
+    pub room_id: String,
+    pub room_name: String,
+    pub room_kind: String,
+    pub run_ids: Vec<String>,
+}
+```
+
+Implementation: scan `rooms/` directory, read each `room.json`, extract `id`, `name`, `kind`, and `participants[].run_id`. Single IPC call returns the full mapping.
+
+**Frontend data flow:**
+1. On sidebar mount, call `list_room_run_index()` once
+2. Build `Map<run_id, { room_id, room_name, room_kind }>` lookup
+3. In `buildProjectFolders()`:
    - Runs whose ID is in the lookup are **extracted** from their normal cwd folder
    - They are grouped into a virtual `ProjectFolder` with `folderKey: "rooms"`, `cwd: "__rooms__"` (sentinel)
-   - Within the Rooms folder, they are sub-grouped by room name (each room becomes a `ConversationGroup` or sub-section)
+   - Within the Rooms folder, sub-grouped by room name
 
 ### Modified Files
 
+- `src-tauri/src/commands/rooms.rs` — Add `list_room_run_index` command
+- `src-tauri/src/lib.rs` — Register new command
 - `src/lib/utils/sidebar-groups.ts`:
-  - Add `roomRunIds: Map<string, string>` parameter to `buildProjectFolders()` (run_id → room_name)
+  - Add `roomRunIds: Map<string, { roomId, roomName, roomKind }>` parameter to `buildProjectFolders()`
   - Filter room runs out of normal cwd folders
   - Create virtual "Rooms" folder with room-run sub-groups
-- `src/lib/components/Sidebar.svelte` (or wherever sidebar is rendered):
-  - Load room summaries on mount
-  - Pass `roomRunIds` to `buildProjectFolders()`
-- `src/lib/components/ProjectFolderItem.svelte`:
-  - Handle the "Rooms" virtual folder (special icon, non-removable)
-- `messages/en.json`, `messages/zh-CN.json`:
-  - Add "Rooms" label
+- `src/lib/components/` (sidebar host) — Call `list_room_run_index` on mount, pass to `buildProjectFolders()`
+- `src/lib/components/ProjectFolderItem.svelte` — Handle the "Rooms" virtual folder (special icon, non-removable)
+- `src/lib/api.ts` — Add API wrapper for `list_room_run_index`
+- `messages/en.json`, `messages/zh-CN.json` — Add "Rooms" label
 
 ### UX Details
 
-- The "Rooms" folder appears at the top of the sidebar (pinned)
+- The "Rooms" folder appears at the top of the sidebar (always pinned, non-removable)
 - Each room is a sub-section showing room name and kind badge
-- Clicking a room run navigates to `/rooms?room={room_id}` (the room page)
+- **Click behavior:**
+  - Single-click a run entry → navigate to `/rooms?room={room_id}` (the room page, where the run is contextualized)
+  - The room page is the natural context for room participant runs, not the standalone chat view
 - The "Rooms" folder cannot be hidden/removed (unlike regular cwd folders)
 - Room runs are excluded from their original cwd folder to avoid duplication
 
 ### Edge Cases
 
-- Room participant runs that have been soft-deleted should not appear
-- Rooms with no active participants (all runs deleted) should not appear
-- If a room is deleted, its runs disappear from the sidebar automatically (they're soft-deleted by `delete_room`)
-- If a room has no `name` (empty string), use the room `id` (truncated) as the display name
+- Room participant runs that have been soft-deleted: filtered out by checking `run.status !== "deleted"`
+- Rooms with no active participants: filtered out (empty `run_ids` after filtering)
+- Room name empty/fallback: use `"未命名房间"` / `"Unnamed Room"` (i18n)
+- **Pinned runs conflict:** If a run is both pinned and belongs to a room, pinned status takes precedence — the run stays in its pinned position and is NOT extracted into the Rooms folder. This avoids confusion.
+- **Data refresh:** Listen for `ocv:runs-changed` Tauri event to re-fetch `list_room_run_index`. No new event needed — room changes always trigger run changes.
 
 ---
 
@@ -274,21 +351,7 @@ The roundtable prompts in `orchestrator.rs` instruct participants to "answer ind
 
 ### Design
 
-Add the following English constraint to the **default seat prompt** (frontend) and the **fanout/debate/summary prompt builders** (backend):
-
-```
-IMPORTANT: Roundtable outputs are "discussable judgments" — not research reports, not executable plans. When the user needs to take action, the conclusion will suggest switching to an independent session for implementation.
-```
-
-### Modified Locations
-
-**Frontend (`rooms/+page.svelte`):**
-- `defaultSeatPromptWithLabel()` (line 342-343) — append constraint
-
-**Backend (`orchestrator.rs`):**
-- `build_fanout_prompt()` (line 810-821) — append constraint after the "请独立回答" instruction
-- `build_debate_prompt()` (line 739-808) — append constraint after the debate instruction
-- `build_summary_prompt()` (line 823-860) — append constraint after the summary instruction
+Add a **bilingual** constraint to the default seat prompt (frontend) and the fanout/debate/summary prompt builders (backend):
 
 ### Constraint Text (shared constant)
 
@@ -296,92 +359,97 @@ Define a Rust const in `orchestrator.rs`:
 
 ```rust
 const ROUNDTABLE_SCOPE_CONSTRAINT: &str = "\
+重要：圆桌输出属于「讨论性判断」——非研究报告，非可执行方案。当需要实际行动时，建议切换到独立会话执行。\n\
 IMPORTANT: Roundtable outputs are \"discussable judgments\" — not research reports, \
 not executable plans. When the user needs to take action, suggest switching to an \
 independent session for implementation.";
 ```
 
+### Modified Locations
+
+**Frontend (`rooms/+page.svelte`):**
+- `defaultSeatPromptWithLabel()` — append constraint (verify line number at implementation time)
+
+**Backend (`orchestrator.rs`):**
+- `build_fanout_prompt()` (line 810-821) — append constraint after the "请独立回答" instruction
+- `build_debate_prompt()` (line 739-808) — append constraint after the debate instruction
+- `build_summary_prompt()` (line 823-860) — append constraint after the summary instruction
+
 Append this to each prompt template with a blank line separator.
 
 ---
 
-## 6. Context Usage HUD (Replace External ccstatusline Need)
+## 6. Context Events Verification
 
 ### Current State
 
-The app already has:
-- `ContextUsageGrid` component — visualizes context usage
-- `CostSummaryView` component — cost/token stats
+The app already has context usage UI components:
+- `ContextUsageGrid` — visualizes context usage
+- `CostSummaryView` — cost/token stats
 - `session-store.svelte.ts` — tracks `contextWindow`, `rateLimitUtilization`, `rateLimitResetsAt`, token counts
-- `parseContextMarkdown` utility — parses context info from session events
+- `parseContextMarkdown` — parses context info from session events
 
-However, context usage events (`context_window` type) may not be consistently reported for all session types (especially provider-based sessions using the pipe-exec path).
+These components exist but it's unclear whether they are consistently visible for all CC session types.
 
-### Design
+### Goal
 
-Ensure all CC sessions emit context usage events that the frontend can display.
+Ensure all CC session types (Claude native, Claude-compatible API providers, Codex native PTY) correctly emit and display context usage events in the chat UI.
 
-### Investigation Needed
+### Execution Paths to Verify
 
-1. Check if `context_window` events are emitted by the stream-session path (Claude native)
-2. Check if `context_window` events are emitted by the pipe-exec path (provider-based)
-3. If pipe-exec doesn't emit them, add event forwarding from the agent stream
+| Path | Used by | context_window events | Status |
+|------|---------|----------------------|--------|
+| SessionActor / stream-session | Claude native, API providers (via `--settings`) | Source: Claude CLI stream-json | **Verify** |
+| PipeExec | Legacy/deprecated | Source: stdout parsing | **Verify** |
+| Native PTY | Codex | Source: transcript file | **Verify** |
 
-### Approach
+### Investigation Steps
 
-**If events are already emitted for all paths:**
-- No backend changes needed
-- Verify the UI components are rendered in the chat page for all session types
-- Ensure the `ContextUsageGrid` and rate limit indicators are visible in the chat header/status area
+1. Start a Claude native session → check if `ContextUsageGrid` renders in chat header
+2. Start a DeepSeek/MiMo session (provider-based) → check same
+3. Start a Codex session → check same
+4. For any path where context events are missing:
+   - Trace the event emission path in `stream.rs` / `native_transcript.rs`
+   - Add context_window event forwarding if absent
 
-**If events are missing for some paths:**
-- In the stream/pipe-exec handlers, parse context usage from the agent's output stream
-- Emit `context_window` events to the frontend via the existing event system
-- The session store already handles these events — just need to ensure they arrive
+### Likely Outcome
 
-### Modified Files (likely)
+Since Claude-compatible providers use `SessionActor` with `--settings` injection (same stream-session path as Claude native), context events should already work. Codex native PTY may be the gap — transcript parsing may not forward context_window events.
 
-- `src-tauri/src/agent/stream.rs` — Ensure context events are forwarded for all agent types
-- `src/routes/chat/+page.svelte` — Ensure `ContextUsageGrid` is rendered and visible
-- `src/lib/stores/session-store.svelte.ts` — Verify event handling is complete
+### Modified Files (after investigation)
 
-### UI Placement
-
-The context usage indicator should be visible in the chat page header area (near the session name/model display), not hidden in a sub-panel. Consider a compact horizontal bar showing:
-- Context % fill (with color: green < 50%, amber 50-80%, red > 80%)
-- Rate limit utilization (if available)
-- Token count summary
+- `src-tauri/src/agent/native_transcript.rs` — Forward context events from transcript if missing
+- `src/routes/chat/+page.svelte` — Ensure `ContextUsageGrid` is rendered in the header area for all session types (not hidden in a sub-tab)
+- No new components needed — existing components are sufficient
 
 ---
 
 ## Implementation Order
 
-Recommended sequence based on dependencies and risk:
+Two-phase approach: investigation spikes first, then implementation.
+
+### Phase 0: Investigation Spikes (30 min)
+
+1. Verify `ContextUsageGrid` visibility for each session type (Item 6)
+2. Confirm `event_seq_start/end` usage in `get_room_turn_snapshot` approach (Item 2) — **DONE: fields confirmed to exist**
+3. Confirm `list_room_run_index` feasibility — scan `rooms/` dir, read `room.json` (Item 4)
+
+### Phase 1: Implementation
 
 1. **Gemini Removal** (Item 1) — Clean foundation, no dependencies
-2. **Prompt Constraint** (Item 5) — Trivial, single-file change
+2. **Prompt Constraint** (Item 5) — Trivial, single const + append
 3. **@Name SingleTarget** (Item 3) — Small scope, backend + frontend
-4. **Room Session Grouping** (Item 4) — Frontend-only, no backend schema change
-5. **Context Usage HUD** (Item 6) — Needs investigation first
+4. **Room Session Grouping** (Item 4) — New Tauri command + frontend grouping
+5. **Context Events** (Item 6) — Fix any gaps found in investigation
 6. **Stepper Mini-Map** (Item 2) — Largest scope, new component + Tauri command
-
-Items 1 and 5 can be done first as a quick win. Items 3 and 4 are independent of each other. Item 6 depends on investigation findings. Item 2 is the most complex and should be last.
 
 ---
 
 ## Testing Strategy
 
-- **Gemini Removal:** Run `npm run check`, `npm test`, `cargo check`, `cargo test` — all should pass with zero Gemini references
+- **Gemini Removal:** Run `npm run check`, `npm test`, `cargo check` — all should pass with zero Gemini references. (Note: `cargo test` fails on this machine due to VC++ redistributable mismatch; use `cargo check` for Rust validation.)
 - **Stepper:** Test with a multi-turn room, verify snapshot loads correct data, banner appears, exit works
-- **SingleTarget:** Test `@Alice hello` produces a public turn with only Alice responding
-- **Room Grouping:** Create a room, verify runs appear in "Rooms" folder, not in cwd folder
-- **Prompt Constraint:** Verify generated prompts include the constraint text
-- **Context HUD:** Test with native Claude session and provider-based session, verify context % displays for both
-
----
-
-## Open Questions
-
-1. **Stepper snapshot data:** Should we load full event data on click (lazy), or pre-load all turn snapshots on room select (eager)? Lazy is better for performance.
-2. **Room grouping performance:** Loading all room details for sidebar could be slow with many rooms. Consider caching or a dedicated `list_room_run_ids` command that returns just the mapping.
-3. **Context HUD for pipe-exec:** Need to verify whether Claude Code's stream-json format includes context_window events for non-native sessions.
+- **SingleTarget:** Test `@Alice hello` produces a public turn with only Alice responding; test `/dm @Alice hello` produces private turn; test `@UnknownName` returns error
+- **Room Grouping:** Create a room, verify runs appear in "Rooms" folder, not in cwd folder; verify pinned runs stay in their pinned position
+- **Prompt Constraint:** Verify generated prompts include the bilingual constraint text
+- **Context Events:** Test with Claude native and provider-based session, verify context % displays for both
