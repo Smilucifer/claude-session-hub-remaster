@@ -597,6 +597,34 @@ pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, St
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
             }
+            if let Some(token) = v.get("mimo_service_token") {
+                next.mimo_service_token = token
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+            }
+            if let Some(uid) = v.get("mimo_user_id") {
+                next.mimo_user_id = uid
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+            }
+            if let Some(slh) = v.get("mimo_slh") {
+                next.mimo_slh = slh
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+            }
+            if let Some(ph) = v.get("mimo_ph") {
+                next.mimo_ph = ph
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+            }
             if let Some(secs) = v.get("auto_refresh_secs") {
                 next.auto_refresh_secs = secs.as_u64().ok_or_else(|| {
                     "balance_helper.auto_refresh_secs must be a number".to_string()

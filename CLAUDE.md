@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 7 complete (2026-05-06). Post-phase additions (2026-05-07): provider config fully dynamized (reads from settings page instead of hardcoded models/URLs), per-session temp JSON (`--settings session-{run_id}.json`), and MiMo Pro provider added. All 9 tasks implemented, code reviewed, and verified. 3 svelte-check errors (CodeEditor false positive), 21 a11y warnings, frontend tests passing. Installers built at `src-tauri/target/release/bundle/`.
+**Current phase:** Phase 7 complete (2026-05-06). Post-phase additions (2026-05-07): provider config fully dynamized (reads from settings page instead of hardcoded models/URLs), per-session temp JSON (`--settings session-{run_id}.json`), MiMo Pro provider added, and MiMo balance/usage checker (cookie-based auth to platform.xiaomimimo.com, dual API: `/api/v1/balance` + `/api/v1/tokenPlan/usage`, amber-themed card on usage page). All tasks implemented, code reviewed, and verified. 3 svelte-check errors (CodeEditor false positive), 22 a11y warnings, frontend tests passing. Installers built at `src-tauri/target/release/bundle/`.
 
 ## Standard workflow
 
@@ -148,7 +148,7 @@ Important command groups:
 - `commands/chat.rs`: chat send path for `pipe_exec` runs, attachment staging, and spawn flow.
 - `commands/session.rs`: actor-backed session lifecycle, auth/env resolution, resume/stop flow, provider-native launch config generation, and Windows MSVC env injection.
 - `commands/rooms.rs`: room CRUD, participant creation, run attachment, and room capability checks.
-- `commands/balance.rs`: DeepSeek and Packy balance/status queries (Phase 7 balance helper).
+- `commands/balance.rs`: DeepSeek, Packy, and MiMo balance/usage queries (Phase 7 balance helper with cookie-based auth for MiMo).
 - `commands/runs.rs`, `commands/history.rs`, `commands/memos.rs`, `commands/settings.rs`: persistence-backed app features.
 
 If a frontend API call seems to "just update UI", verify whether it actually maps to a persisted Tauri command first.

@@ -284,6 +284,10 @@ export interface BalanceHelperSettings {
   packy_session?: string | null;
   packy_tdc_itoken?: string | null;
   packy_user_id?: string | null;
+  mimo_service_token?: string | null;
+  mimo_user_id?: string | null;
+  mimo_slh?: string | null;
+  mimo_ph?: string | null;
   auto_refresh_secs: number;
   cache: Record<string, BalanceCacheEntry>;
 }

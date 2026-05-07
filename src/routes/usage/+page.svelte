@@ -40,6 +40,11 @@
   let packyTdcItokenInput = $state("");
   let packyUserIdInput = $state("");
   let showPackyCredentials = $state(false);
+  let mimoServiceTokenInput = $state("");
+  let mimoUserIdInput = $state("");
+  let mimoSlhInput = $state("");
+  let mimoPhInput = $state("");
+  let showMimoCredentials = $state(false);
   let balanceSaving = $state(false);
 
   function balanceStatusText(source: string): {
@@ -72,7 +77,7 @@
     };
   }
 
-  async function refreshBalanceStatus(source: "all" | "deepseek" | "packy" = "all") {
+  async function refreshBalanceStatus(source: "all" | "deepseek" | "packy" | "mimo" = "all") {
     if (balanceRefreshing) return;
     balanceRefreshing = true;
     balanceRefreshError = null;
@@ -129,6 +134,58 @@
       balanceRefreshError = null;
     } catch (e) {
       dbgWarn("usage", "clearPackyCredentials error", e);
+    } finally {
+      balanceSaving = false;
+    }
+  }
+
+  async function saveMimoCredentials() {
+    balanceSaving = true;
+    try {
+      const next = {
+        ...(balanceHelper ?? { auto_refresh_secs: 120, cache: {} }),
+        mimo_service_token: mimoServiceTokenInput.trim() || null,
+        mimo_user_id: mimoUserIdInput.trim() || null,
+        mimo_slh: mimoSlhInput.trim() || null,
+        mimo_ph: mimoPhInput.trim() || null,
+      };
+      const settings = await api.updateUserSettings({
+        balance_helper: next,
+      } as Partial<UserSettings>);
+      balanceHelper = settings.balance_helper ?? null;
+      mimoServiceTokenInput = balanceHelper?.mimo_service_token ?? "";
+      mimoUserIdInput = balanceHelper?.mimo_user_id ?? "";
+      mimoSlhInput = balanceHelper?.mimo_slh ?? "";
+      mimoPhInput = balanceHelper?.mimo_ph ?? "";
+      void refreshBalanceStatus("mimo");
+    } catch (e) {
+      dbgWarn("usage", "saveMimoCredentials error", e);
+    } finally {
+      balanceSaving = false;
+    }
+  }
+
+  async function clearMimoCredentials() {
+    balanceSaving = true;
+    try {
+      const next = {
+        ...(balanceHelper ?? { auto_refresh_secs: 120, cache: {} }),
+        mimo_service_token: null,
+        mimo_user_id: null,
+        mimo_slh: null,
+        mimo_ph: null,
+      };
+      const settings = await api.updateUserSettings({
+        balance_helper: next,
+      } as Partial<UserSettings>);
+      balanceHelper = settings.balance_helper ?? null;
+      mimoServiceTokenInput = "";
+      mimoUserIdInput = "";
+      mimoSlhInput = "";
+      mimoPhInput = "";
+      balanceRefreshError = null;
+    } catch (e) {
+      dbgWarn("usage", "clearMimoCredentials error", e);
     } finally {
       balanceSaving = false;
     }
@@ -339,6 +396,10 @@
         packySessionInput = balanceHelper?.packy_session ?? "";
         packyTdcItokenInput = balanceHelper?.packy_tdc_itoken ?? "";
         packyUserIdInput = balanceHelper?.packy_user_id ?? "";
+        mimoServiceTokenInput = balanceHelper?.mimo_service_token ?? "";
+        mimoUserIdInput = balanceHelper?.mimo_user_id ?? "";
+        mimoSlhInput = balanceHelper?.mimo_slh ?? "";
+        mimoPhInput = balanceHelper?.mimo_ph ?? "";
         void refreshBalanceStatus("all");
         const secs = Math.max(
           60,
@@ -489,6 +550,7 @@
 
         {@const deepseek = balanceStatusText("deepseek")}
         {@const packy = balanceStatusText("packy")}
+        {@const mimo = balanceStatusText("mimo")}
         <div class="grid gap-4 md:grid-cols-2">
           <!-- DeepSeek panel -->
           <div
@@ -627,6 +689,111 @@
                     {t("settings_balance_clear")}
                   </Button>
                   <Button size="sm" disabled={balanceSaving} onclick={savePackyCredentials}>
+                    {balanceSaving
+                      ? t("settings_balance_saving")
+                      : t("settings_balance_save")}
+                  </Button>
+                </div>
+              </div>
+            {/if}
+          </div>
+
+          <!-- MiMo panel -->
+          <div
+            class="rounded-xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 p-5 space-y-3"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15"
+                >
+                  <svg
+                    class="h-5 w-5 text-amber-400"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    stroke="none"
+                  >
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                  </svg>
+                </div>
+                <div>
+                  <div class="text-sm font-semibold">MiMo</div>
+                  <div
+                    class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <span
+                      class="inline-block h-1.5 w-1.5 rounded-full {mimo.dotClass}"
+                    ></span>
+                    {mimo.label}
+                  </div>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-bold tabular-nums">{mimo.balance}</div>
+                {#if mimo.sub}
+                  <div class="text-[10px] text-muted-foreground">{mimo.sub}</div>
+                {/if}
+              </div>
+            </div>
+
+            <!-- MiMo credential inputs (collapsible) -->
+            <button
+              class="w-full text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onclick={() => (showMimoCredentials = !showMimoCredentials)}
+            >
+              <span class="flex items-center gap-1">
+                <svg
+                  class="h-3 w-3 transition-transform {showMimoCredentials ? 'rotate-90' : ''}"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                {t("settings_balance_mimoServiceToken")}
+              </span>
+            </button>
+            {#if showMimoCredentials}
+              <div class="space-y-2">
+                <Input
+                  type="password"
+                  placeholder={t("settings_balance_mimoServiceToken")}
+                  value={mimoServiceTokenInput}
+                  oninput={(e) =>
+                    (mimoServiceTokenInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <Input
+                  type="text"
+                  placeholder={t("settings_balance_mimoUserId")}
+                  value={mimoUserIdInput}
+                  oninput={(e) =>
+                    (mimoUserIdInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <Input
+                  type="text"
+                  placeholder={t("settings_balance_mimoSlh")}
+                  value={mimoSlhInput}
+                  oninput={(e) =>
+                    (mimoSlhInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <Input
+                  type="text"
+                  placeholder={t("settings_balance_mimoPh")}
+                  value={mimoPhInput}
+                  oninput={(e) =>
+                    (mimoPhInput = (e.currentTarget as HTMLInputElement).value)}
+                />
+                <div class="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={balanceSaving}
+                    onclick={clearMimoCredentials}
+                  >
+                    {t("settings_balance_clear")}
+                  </Button>
+                  <Button size="sm" disabled={balanceSaving} onclick={saveMimoCredentials}>
                     {balanceSaving
                       ? t("settings_balance_saving")
                       : t("settings_balance_save")}

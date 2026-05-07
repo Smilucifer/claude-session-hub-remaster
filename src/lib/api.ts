@@ -367,7 +367,7 @@ export async function updateUserSettings(patch: Partial<UserSettings>): Promise<
 }
 
 export async function refreshBalanceStatus(
-  source?: "all" | "deepseek" | "packy",
+  source?: "all" | "deepseek" | "packy" | "mimo",
 ): Promise<BalanceHelperSettings> {
   dbg("api", "refreshBalanceStatus", { source });
   return invoke<BalanceHelperSettings>("refresh_balance_status", { source: source ?? null });
