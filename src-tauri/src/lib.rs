@@ -167,6 +167,7 @@ pub fn run() {
             commands::rooms::update_room_memo,
             commands::rooms::send_room_message,
             commands::rooms::delete_room,
+            commands::rooms::list_room_run_index,
             commands::memos::list_memos,
             commands::memos::add_memo,
             commands::memos::update_memo,

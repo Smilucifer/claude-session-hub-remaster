@@ -61,6 +61,33 @@ pub fn create_room(
     room_detail(&room.id)
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RoomRunIndexEntry {
+    pub room_id: String,
+    pub room_name: String,
+    pub room_kind: String,
+    pub run_ids: Vec<String>,
+}
+
+#[tauri::command]
+pub fn list_room_run_index() -> Result<Vec<RoomRunIndexEntry>, String> {
+    let summaries = storage::rooms::list_rooms();
+    let mut entries = Vec::new();
+    for summary in summaries {
+        let room = match storage::rooms::get_room(&summary.id) {
+            Some(r) => r,
+            None => continue,
+        };
+        entries.push(RoomRunIndexEntry {
+            room_id: room.id,
+            room_name: room.name,
+            room_kind: format!("{:?}", room.kind).to_lowercase(),
+            run_ids: room.participants.iter().map(|p| p.run_id.clone()).collect(),
+        });
+    }
+    Ok(entries)
+}
+
 fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
     match kind
         .unwrap_or("roundtable")
@@ -312,9 +339,9 @@ fn create_claude_participant_run(
 fn normalize_agent(agent: &str) -> Result<String, String> {
     let normalized = agent.trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "claude" | "codex" | "gemini" => Ok(normalized),
+        "claude" | "codex" => Ok(normalized),
         _ => Err(format!(
-            "Unsupported Room participant agent: {agent}. Supported: claude, codex, gemini"
+            "Unsupported Room participant agent: {agent}. Supported: claude, codex"
         )),
     }
 }
@@ -333,7 +360,6 @@ fn default_room_execution_path(agent: &str) -> Result<ExecutionPath, String> {
 fn default_participant_label(agent: &str) -> String {
     match agent {
         "codex" => "Codex".to_string(),
-        "gemini" => "Gemini".to_string(),
         _ => "Claude".to_string(),
     }
 }
