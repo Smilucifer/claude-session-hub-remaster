@@ -49,6 +49,7 @@
   let roundtableMessage = $state("");
   let summaryParticipantId = $state("");
   let deletingRoomId = $state("");
+  let showCommandHint = $state(false);
 
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
   let connectionProfiles = $derived(
@@ -119,6 +120,7 @@
     await store.selectRoom(id);
     roundtableMessage = "";
     deletingRoomId = "";
+    showCommandHint = false;
   }
 
   function openCreateDialog() {
@@ -164,6 +166,7 @@
     showCreateDialog = false;
     createName = "Roundtable";
     createDescription = "";
+    showCommandHint = true;
   }
 
   async function handleSendRoundtableMessage() {
@@ -494,6 +497,37 @@
           {/if}
         </div>
       </div>
+
+      {#if showCommandHint && store.room?.kind === "roundtable"}
+        <div
+          class="flex items-start justify-between gap-3 border-b border-primary/30 bg-primary/5 px-5 py-3 text-xs"
+        >
+          <div class="flex flex-col gap-1">
+            <span class="font-semibold text-foreground">{t("room_commandHint_title")}</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+              <span><code class="rounded bg-muted px-1">@debate</code> {t("room_commandHint_debate")}</span>
+              <span><code class="rounded bg-muted px-1">@summary @Name</code> {t("room_commandHint_summary")}</span>
+              <span><code class="rounded bg-muted px-1">/dm @Name</code> {t("room_commandHint_dm")}</span>
+              <span><code class="rounded bg-muted px-1">@Name</code> {t("room_commandHint_target")}</span>
+            </div>
+          </div>
+          <button
+            class="shrink-0 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onclick={() => (showCommandHint = false)}
+            title={t("room_commandHint_dismiss")}
+          >
+            <svg
+              class="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg
+            >
+          </button>
+        </div>
+      {/if}
 
       <div class="min-h-0 flex-1 flex flex-col">
         <div class="min-h-0 flex-1 grid grid-cols-1 gap-3 p-3 xl:grid-cols-3">

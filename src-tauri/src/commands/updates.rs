@@ -4,7 +4,7 @@ use std::time::Duration;
 
 // ── Constants ──
 
-const GITHUB_API_URL: &str = "https://api.github.com/repos/AnyiWang/OpenCovibe/releases/latest";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/Smilucifer/claude-session-hub-remaster/releases/latest";
 
 // ── HTTP client (reuse across requests) ──
 

@@ -405,41 +405,48 @@ fn summarize_events(events_path: &std::path::Path) -> (Option<String>, u32, Opti
         }
     }
 
-    // Parse only last 5 lines for timestamp + preview
+    // Single reverse scan for both timestamp and latest message preview.
+    // Scanning from the end guarantees we find the most recent message even when
+    // trailing tool/state events push it beyond a fixed window.
     let last_lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-    let tail_start = if last_lines.len() > 5 {
-        last_lines.len() - 5
-    } else {
-        0
-    };
-    for line in &last_lines[tail_start..] {
+    for line in last_lines.iter().rev() {
         if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
-            if event.get("_bus").and_then(|v| v.as_bool()).unwrap_or(false) {
-                if let Some(ts) = event.get("ts").and_then(|v| v.as_str()) {
+            // Extract timestamp from the most recent event
+            if last_ts.is_none() {
+                if event.get("_bus").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Some(ts) = event.get("ts").and_then(|v| v.as_str()) {
+                        last_ts = Some(ts.to_string());
+                    }
+                } else if let Some(ts) = event.get("timestamp").and_then(|v| v.as_str()) {
                     last_ts = Some(ts.to_string());
                 }
-                if let Some(inner) = event.get("event") {
-                    let inner_type = inner.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if inner_type == "user_message" || inner_type == "message_complete" {
-                        if let Some(text) = inner.get("text").and_then(|t| t.as_str()) {
+            }
+            // Extract message preview from the most recent user/assistant message
+            if last_preview.is_none() {
+                if event.get("_bus").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if let Some(inner) = event.get("event") {
+                        let inner_type = inner.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if inner_type == "user_message" || inner_type == "message_complete" {
+                            if let Some(text) = inner.get("text").and_then(|t| t.as_str()) {
+                                last_preview = Some(truncate_preview(text));
+                            }
+                        }
+                    }
+                } else {
+                    let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if event_type == "user" || event_type == "assistant" {
+                        if let Some(text) = event
+                            .get("payload")
+                            .and_then(|p| p.get("text"))
+                            .and_then(|t| t.as_str())
+                        {
                             last_preview = Some(truncate_preview(text));
                         }
                     }
                 }
-            } else {
-                if let Some(ts) = event.get("timestamp").and_then(|v| v.as_str()) {
-                    last_ts = Some(ts.to_string());
-                }
-                let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if event_type == "user" || event_type == "assistant" {
-                    if let Some(text) = event
-                        .get("payload")
-                        .and_then(|p| p.get("text"))
-                        .and_then(|t| t.as_str())
-                    {
-                        last_preview = Some(truncate_preview(text));
-                    }
-                }
+            }
+            if last_ts.is_some() && last_preview.is_some() {
+                break;
             }
         }
     }

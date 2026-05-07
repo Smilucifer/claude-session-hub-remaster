@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 8 complete (2026-05-08). Gemini removed entirely (~54 files). Roundtable enhancements: Stepper mini-map replaces History strip for turn-by-turn replay with snapshot loading, `@DisplayName msg` sends public SingleTarget turn to the named participant (`/dm @Name msg` preserves private turns), virtual "Rooms" sidebar folder groups room participant runs separately from project runs, seat prompt includes English evidence constraint. Context events verified across all session types (Claude + compatible API full events; Codex PTY is protocol-limited). Code review findings addressed: snapshot content renders in panes, activeSnapshot resets on room switch/send/delete, Private handler uses ambiguity-safe lookup. MSVC injection enhancements: extended auto-detection (CMake/vcpkg/VS/Qt markers), chat/room policy split (`MsvcPolicy`), `msvc_injected` propagated via `SessionInit`, MSVC badge in status bar, `RoomPolicy` skip reason for diagnostics. Code review fixes: stale value leak patched, boundary tests added, aria-label for badge, known limits documented. 4 svelte-check errors (CodeEditor false positives + pre-existing MessageKey), 22 a11y warnings, 275 session store tests passing, cargo check clean.
+**Current phase:** Phase 8.x complete (2026-05-08). UX optimizations: sidebar preview reverse-scan fix (latest message instead of earliest), update checker GitHub URL corrected to fork repo, provider switch auto-updates model (removes stale value bug), roundtable post-creation command quick-reference banner. 4 svelte-check errors (CodeEditor false positives + pre-existing MessageKey), 22 a11y warnings, 1218 frontend tests passing, cargo check clean.
 
 ## Standard workflow
 
@@ -314,6 +314,7 @@ Key phases and their status:
 | 7.x | Provider config dynamization, per-session JSON, MiMo Pro | [done] |
 | 7.y | Room optimizations: delete cleanup, incremental turns, status labels, context menu | [done] |
 | 8 | Gemini removal, Stepper mini-map, @Name SingleTarget, Room sidebar grouping, prompt constraint | [done] |
+| 8.x | UX optimizations: sidebar preview fix, update URL, provider model auto-switch, room command hints | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

@@ -244,6 +244,8 @@
     store.permissionMode = "";
     store.permissionModeSetByUser = false;
     store.permissionModePersistFailed = false;
+    // Always overwrite model to avoid stale values from a previous provider.
+    // Priority: credential.models[0] > provider.defaultModel > CLI current model (Anthropic) > ""
     if (provider.mode === "claude_compatible_api") {
       const cred = provider.platformId
         ? findCredential(settings?.platform_credentials ?? [], provider.platformId)
@@ -251,8 +253,16 @@
       store.model = cred?.models?.[0] ?? provider.defaultModel ?? "";
     } else if (agent !== "claude") {
       store.model = "";
-    } else if (!store.model && settings?.default_model && store.platformId === "anthropic") {
-      store.model = settings.default_model;
+    } else {
+      // Anthropic/Claude — restore CLI model only (don't use settings.default_model
+      // which may be contaminated by a previous third-party provider session)
+      store.model = getCliCurrentModel() || "";
+    }
+    // Persist platform selection (matching handlePlatformChange behavior)
+    if (store.platformId) {
+      void api.updateUserSettings({ active_platform_id: store.platformId }).catch((e) => {
+        dbgWarn("chat", "failed to persist provider change", e);
+      });
     }
     void loadAgentSettingsFor(agent).then((loaded) => {
       if (store.run || store.agent !== agent || store.permissionModeSetByUser) return;
