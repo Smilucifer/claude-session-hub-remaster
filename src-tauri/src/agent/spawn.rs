@@ -42,36 +42,6 @@ fn build_codex_base_args(settings: &AdapterSettings) -> Vec<String> {
     args
 }
 
-fn build_gemini_base_args(settings: &AdapterSettings) -> Vec<String> {
-    let plan_mode = settings.permission_mode.as_deref() == Some("plan");
-    let mut args: Vec<String> = vec![];
-    if let Some(ref m) = settings.model {
-        if !m.is_empty() {
-            args.push("--model".to_string());
-            args.push(m.to_string());
-        }
-    }
-    if plan_mode {
-        args.push("--approval-mode".to_string());
-        args.push("default".to_string());
-    } else {
-        args.push("--approval-mode".to_string());
-        args.push("yolo".to_string());
-        args.push("--skip-trust".to_string());
-    }
-    for dir in &settings.add_dirs {
-        args.push("--include-directories".to_string());
-        args.push(dir.to_string());
-    }
-    append_extra_args_without_controlled_flags(
-        &mut args,
-        &settings.extra_args,
-        &["--skip-trust", "--yolo"],
-        &["--approval-mode"],
-    );
-    args
-}
-
 fn append_extra_args_without_controlled_flags(
     args: &mut Vec<String>,
     extra_args: &[String],
@@ -138,17 +108,8 @@ pub fn build_agent_command(
             log::debug!("[spawn] codex command: codex {}", args.join(" "));
             Ok((native_command("codex", settings), args))
         }
-        "gemini" => {
-            let mut args = build_gemini_base_args(settings);
-            if !prompt.is_empty() {
-                args.push("--prompt-interactive".to_string());
-                args.push(prompt.to_string());
-            }
-            log::debug!("[spawn] gemini command: gemini {}", args.join(" "));
-            Ok((native_command("gemini", settings), args))
-        }
         _ => Err(format!(
-            "Unsupported agent: {}. Supported: claude, codex, gemini",
+            "Unsupported agent: {}. Supported: claude, codex",
             agent
         )),
     }
@@ -168,16 +129,6 @@ pub fn build_agent_resume_command(
                 args.push(prompt.to_string());
             }
             Ok((native_command("codex", settings), args))
-        }
-        "gemini" => {
-            let mut args = build_gemini_base_args(settings);
-            args.push("--resume".to_string());
-            args.push("latest".to_string());
-            if !prompt.is_empty() {
-                args.push("--prompt-interactive".to_string());
-                args.push(prompt.to_string());
-            }
-            Ok((native_command("gemini", settings), args))
         }
         _ => Err(format!("Resume latest is unsupported for agent: {}", agent)),
     }
@@ -211,31 +162,6 @@ mod tests {
             extra_args: vec![],
             yolo_mode: None,
         }
-    }
-
-    #[test]
-    fn builds_gemini_native_interactive_command() {
-        let (command, args) = build_agent_command(
-            "gemini",
-            "Explain this repo",
-            &settings(Some("gemini-2.5-pro")),
-            true,
-        )
-        .unwrap();
-
-        assert_eq!(command, "gemini");
-        assert_eq!(
-            args,
-            vec![
-                "--model",
-                "gemini-2.5-pro",
-                "--approval-mode",
-                "yolo",
-                "--skip-trust",
-                "--prompt-interactive",
-                "Explain this repo"
-            ]
-        );
     }
 
     #[test]
@@ -286,23 +212,6 @@ mod tests {
     }
 
     #[test]
-    fn builds_gemini_yolo_and_include_directories_args() {
-        let mut s = settings(Some("gemini-2.5-pro"));
-        s.add_dirs = vec!["D:/shared".to_string()];
-        s.yolo_mode = Some(false);
-
-        let (_command, args) =
-            build_agent_command("gemini", "Explain this repo", &s, true).expect("gemini command");
-
-        assert!(args.windows(2).any(|w| w == ["--approval-mode", "yolo"]));
-        assert!(args.contains(&"--skip-trust".to_string()));
-        assert!(args
-            .windows(2)
-            .any(|w| w == ["--include-directories", "D:/shared"]));
-        assert_eq!(args.last().map(String::as_str), Some("Explain this repo"));
-    }
-
-    #[test]
     fn native_agents_force_elevated_permission_policy() {
         let mut s = settings(None);
         s.permission_mode = Some("auto_read".to_string());
@@ -311,13 +220,6 @@ mod tests {
         let (_codex_command, codex_args) =
             build_agent_command("codex", "Fix it", &s, true).expect("codex command");
         assert!(codex_args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
-
-        let (_gemini_command, gemini_args) =
-            build_agent_command("gemini", "Fix it", &s, true).expect("gemini command");
-        assert!(gemini_args
-            .windows(2)
-            .any(|w| w == ["--approval-mode", "yolo"]));
-        assert!(gemini_args.contains(&"--skip-trust".to_string()));
     }
 
     #[test]
@@ -333,21 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn builds_gemini_resume_latest_with_prompt_interactive() {
-        let (command, args) =
-            build_agent_resume_command("gemini", "Continue work", &settings(None))
-                .expect("gemini resume command");
-
-        assert_eq!(command, "gemini");
-        assert!(args.windows(2).any(|w| w == ["--approval-mode", "yolo"]));
-        assert!(args.contains(&"--skip-trust".to_string()));
-        assert!(args.windows(2).any(|w| w == ["--resume", "latest"]));
-        assert!(args
-            .windows(2)
-            .any(|w| w == ["--prompt-interactive", "Continue work"]));
-    }
-
-    #[test]
     fn codex_plan_mode_omits_bypass_flag() {
         let mut s = settings(Some("gpt-5.5"));
         s.permission_mode = Some("plan".to_string());
@@ -360,15 +247,4 @@ mod tests {
         assert!(args.windows(2).any(|w| w == ["--model", "gpt-5.5"]));
     }
 
-    #[test]
-    fn gemini_plan_mode_uses_default_approval() {
-        let mut s = settings(Some("gemini-2.5-pro"));
-        s.permission_mode = Some("plan".to_string());
-
-        let (_command, args) =
-            build_agent_command("gemini", "Analyze this", &s, true).expect("gemini command");
-
-        assert!(args.windows(2).any(|w| w == ["--approval-mode", "default"]));
-        assert!(!args.contains(&"--skip-trust".to_string()));
-    }
 }

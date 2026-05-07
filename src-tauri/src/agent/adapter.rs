@@ -200,7 +200,6 @@ pub fn build_adapter_settings(
 fn default_api_key_env(agent: &str) -> &'static str {
     match agent {
         "codex" => "OPENAI_API_KEY",
-        "gemini" => "GEMINI_API_KEY",
         _ => "ANTHROPIC_API_KEY",
     }
 }
@@ -208,7 +207,6 @@ fn default_api_key_env(agent: &str) -> &'static str {
 fn default_base_url_env(agent: &str) -> &'static str {
     match agent {
         "codex" => "OPENAI_BASE_URL",
-        "gemini" => "GEMINI_BASE_URL",
         _ => "ANTHROPIC_BASE_URL",
     }
 }

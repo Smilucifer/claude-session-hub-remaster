@@ -36,7 +36,6 @@ impl std::error::Error for AgentAdapterError {}
 pub enum AgentKind {
     Claude,
     Codex,
-    Gemini,
     Unknown,
 }
 
@@ -45,7 +44,6 @@ impl AgentKind {
         match agent.to_ascii_lowercase().as_str() {
             "claude" => Self::Claude,
             "codex" => Self::Codex,
-            "gemini" => Self::Gemini,
             _ => Self::Unknown,
         }
     }
@@ -117,10 +115,10 @@ impl AgentCapabilities {
                 context_usage: false,
                 permission_protocol: false,
             },
-            AgentKind::Gemini | AgentKind::Unknown => Self {
+            AgentKind::Unknown => Self {
                 kind,
                 stream_session: false,
-                pipe_exec: matches!(kind, AgentKind::Gemini),
+                pipe_exec: false,
                 interactive_pty: false,
                 resume: ResumeCapability::None,
                 prompt_injection: None,
@@ -351,7 +349,7 @@ mod tests {
                 "run-fail",
                 "hello",
                 "D:/work/app",
-                "gemini",
+                "codex",
                 RunStatus::Failed,
                 None,
                 None,
@@ -395,11 +393,6 @@ mod tests {
         assert!(!codex.context_usage);
         assert!(!codex.permission_protocol);
 
-        let gemini = AgentCapabilities::for_kind(AgentKind::Gemini);
-        assert!(!gemini.stream_session);
-        assert!(gemini.pipe_exec);
-        assert_eq!(gemini.resume, ResumeCapability::None);
-        assert_eq!(gemini.prompt_injection, None);
     }
 
     #[test]

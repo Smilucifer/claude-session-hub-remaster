@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn process_exit_before_transcript_completion_resolves_to_failed() {
         let terminal = resolve_native_turn_terminal(
-            "gemini",
+            "codex",
             "run-failed",
             NativeWaitOutcome::ProcessExited(23),
         );
@@ -135,7 +135,7 @@ mod tests {
             terminal,
             NativeTurnTerminal::Failed {
                 exit_code: 23,
-                error: "Native gemini process exited with code 23 before transcript completion"
+                error: "Native codex process exited with code 23 before transcript completion"
                     .to_string()
             }
         );
@@ -435,7 +435,7 @@ pub async fn run_native_pty_agent(
     };
 
     // If the process exited before the transcript was detected, do a final one-shot
-    // scan. Codex/Gemini sometimes write the transcript just before exiting, and the
+    // scan. Codex sometimes writes the transcript just before exiting, and the
     // polling loop above may race past it.
     let wait_outcome = match wait_outcome {
         NativeWaitOutcome::ProcessExited(code) => {

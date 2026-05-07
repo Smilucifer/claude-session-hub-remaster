@@ -23,7 +23,7 @@ fn canonicalize_for_prefix(path: &std::path::Path) -> PathBuf {
 ///
 /// Allowed directories:
 /// - `~/.opencovibe/` (data dir)
-/// - `~/.claude/`, `~/.codex/`, `~/.gemini/` (official CLI config dirs)
+/// - `~/.claude/`, `~/.codex/` (official CLI config dirs)
 /// - The global `working_directory` from user settings (if set)
 /// - Any per-agent `working_directory` from agent settings
 /// - The caller-provided `extra_allowed` directory (e.g. frontend project cwd)
@@ -93,20 +93,17 @@ pub(crate) fn validate_file_path(
     let home = crate::storage::home_dir().unwrap_or_default();
     let claude_dir = PathBuf::from(&home).join(".claude");
     let codex_dir = PathBuf::from(&home).join(".codex");
-    let gemini_dir = PathBuf::from(&home).join(".gemini");
 
     // Canonicalize allowed directories for reliable comparison on Windows
     // (fs::canonicalize normalizes case; raw paths from home_dir() may differ)
     let data_dir_c = canonicalize_for_prefix(&data_dir);
     let claude_dir_c = canonicalize_for_prefix(&claude_dir);
     let codex_dir_c = canonicalize_for_prefix(&codex_dir);
-    let gemini_dir_c = canonicalize_for_prefix(&gemini_dir);
 
     // Allow: ~/.opencovibe/* and official CLI config dirs.
     if canonical.starts_with(&data_dir_c)
         || canonical.starts_with(&claude_dir_c)
         || canonical.starts_with(&codex_dir_c)
-        || canonical.starts_with(&gemini_dir_c)
     {
         log::debug!("[files] path allowed (config dir): {}", canonical.display());
         return Ok(canonical);
@@ -375,11 +372,6 @@ pub fn list_memory_files(
             label_prefix: "Codex",
             path: "AGENTS.md",
         },
-        ProjectMemorySpec {
-            provider: "gemini",
-            label_prefix: "Gemini",
-            path: "GEMINI.md",
-        },
     ];
     let global_names = [
         GlobalMemorySpec {
@@ -399,12 +391,6 @@ pub fn list_memory_files(
             label_prefix: "Codex",
             dir: ".codex",
             file: "AGENTS.md",
-        },
-        GlobalMemorySpec {
-            provider: "gemini",
-            label_prefix: "Gemini",
-            dir: ".gemini",
-            file: "GEMINI.md",
         },
     ];
 
@@ -563,15 +549,12 @@ mod tests {
         let files = result.unwrap();
 
         let project_files: Vec<_> = files.iter().filter(|f| f.scope == "project").collect();
-        assert_eq!(project_files.len(), 6);
+        assert_eq!(project_files.len(), 5);
         assert!(project_files[0].exists);
         assert_eq!(project_files[0].label, "Claude · CLAUDE.md");
         assert_eq!(project_files[0].provider.as_deref(), Some("claude"));
         assert!(project_files.iter().any(|file| {
             file.label == "Codex · AGENTS.md" && file.provider.as_deref() == Some("codex")
-        }));
-        assert!(project_files.iter().any(|file| {
-            file.label == "Gemini · GEMINI.md" && file.provider.as_deref() == Some("gemini")
         }));
         assert!(!project_files[1].exists);
     }
@@ -583,7 +566,6 @@ mod tests {
         let files = result.unwrap();
         assert!(files.iter().all(|f| f.scope == "global"));
         assert!(files.iter().any(|file| file.label == "Codex · AGENTS.md"));
-        assert!(files.iter().any(|file| file.label == "Gemini · GEMINI.md"));
     }
 
     #[test]

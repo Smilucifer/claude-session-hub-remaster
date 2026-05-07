@@ -4,7 +4,6 @@ use std::path::PathBuf;
 pub enum ManagedCliApp {
     Claude,
     Codex,
-    Gemini,
 }
 
 impl ManagedCliApp {
@@ -12,9 +11,8 @@ impl ManagedCliApp {
         match value.unwrap_or("claude") {
             "claude" | "cc" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
-            "gemini" => Ok(Self::Gemini),
             other => Err(format!(
-                "Unsupported managed app '{}'. Supported: claude, codex, gemini",
+                "Unsupported managed app '{}'. Supported: claude, codex",
                 other
             )),
         }
@@ -24,7 +22,6 @@ impl ManagedCliApp {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
-            Self::Gemini => "gemini",
         }
     }
 
@@ -32,7 +29,6 @@ impl ManagedCliApp {
         match self {
             Self::Claude => ".claude",
             Self::Codex => ".codex",
-            Self::Gemini => ".gemini",
         }
     }
 

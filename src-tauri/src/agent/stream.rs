@@ -56,12 +56,6 @@ fn resolve_windows_npm_shim(command: &str) -> Option<(String, Vec<String>)> {
                 .join("codex")
                 .join("bin")
                 .join("codex.js")
-        } else if stem == "gemini" {
-            base.join("node_modules")
-                .join("@google")
-                .join("gemini-cli")
-                .join("bundle")
-                .join("gemini.js")
         } else {
             return None;
         };
@@ -134,7 +128,7 @@ pub async fn run_agent(
     let display_command = format_started_command(&command, &args);
     let process_command = resolve_process_command(&command);
     let (process_command, args) = resolve_spawn_invocation(process_command, args);
-    let native_transcript_mode = agent == "codex" || agent == "gemini";
+    let native_transcript_mode = agent == "codex";
     if process_command != command {
         log::debug!(
             "[stream] resolved command for spawn: {} -> {}",
@@ -487,7 +481,6 @@ mod tests {
     #[test]
     fn bare_cli_names_are_resolved_before_spawn_but_paths_are_left_intact() {
         assert!(should_resolve_command_from_path("codex"));
-        assert!(should_resolve_command_from_path("gemini.cmd"));
         assert!(!should_resolve_command_from_path(
             "C:\\Users\\InBlu\\AppData\\Roaming\\npm\\codex.cmd"
         ));
@@ -517,25 +510,4 @@ mod tests {
         assert!(resolved.1[0].ends_with("codex.js"));
     }
 
-    #[cfg(windows)]
-    #[test]
-    fn gemini_npm_shim_invocation_prefers_node_without_shelling_out_to_cmd() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        std::fs::write(base.join("node.exe"), "").unwrap();
-        let gemini_js = base
-            .join("node_modules")
-            .join("@google")
-            .join("gemini-cli")
-            .join("bundle");
-        std::fs::create_dir_all(&gemini_js).unwrap();
-        std::fs::write(gemini_js.join("gemini.js"), "").unwrap();
-
-        let shim = base.join("gemini.cmd");
-        std::fs::write(&shim, "@echo off").unwrap();
-
-        let resolved = resolve_windows_npm_shim(&shim.to_string_lossy()).expect("shim");
-        assert!(resolved.0.ends_with("node.exe"));
-        assert!(resolved.1[0].ends_with("gemini.js"));
-    }
 }

@@ -308,8 +308,6 @@ mod tests {
         assert!(validate_agent_path("claude", &ExecutionPath::PipeExec).is_ok());
         assert!(validate_agent_path("codex", &ExecutionPath::PipeExec).is_ok());
         assert!(validate_agent_path("codex", &ExecutionPath::SessionActor).is_err());
-        assert!(validate_agent_path("gemini", &ExecutionPath::PipeExec).is_ok());
-        assert!(validate_agent_path("gemini", &ExecutionPath::SessionActor).is_err());
     }
 
     #[test]
@@ -320,10 +318,6 @@ mod tests {
         );
         assert_eq!(
             default_execution_path_for_agent("codex").unwrap(),
-            ExecutionPath::PipeExec
-        );
-        assert_eq!(
-            default_execution_path_for_agent("gemini").unwrap(),
             ExecutionPath::PipeExec
         );
     }

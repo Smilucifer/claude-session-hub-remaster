@@ -256,7 +256,6 @@ pub fn list_configured_for_app(app: ManagedCliApp, cwd: Option<&str>) -> Vec<Con
     match app {
         ManagedCliApp::Claude => list_configured_claude(cwd),
         ManagedCliApp::Codex => list_configured_codex(),
-        ManagedCliApp::Gemini => list_configured_gemini(),
     }
 }
 
@@ -394,32 +393,6 @@ fn list_configured_codex() -> Vec<ConfiguredMcpServer> {
                 let value = codex_table_to_json(server_table);
                 servers.push(parse_mcp_entry(name, &value, "user"));
             }
-        }
-    }
-    servers
-}
-
-fn list_configured_gemini() -> Vec<ConfiguredMcpServer> {
-    let home = match crate::storage::dirs_next() {
-        Some(h) => h,
-        None => return vec![],
-    };
-    let path = home.join(".gemini").join("settings.json");
-    let content = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(_) => return vec![],
-    };
-    let root = match serde_json::from_str::<serde_json::Value>(&content) {
-        Ok(root) => root,
-        Err(e) => {
-            log::warn!("[mcp_registry] failed to parse {}: {}", path.display(), e);
-            return vec![];
-        }
-    };
-    let mut servers = Vec::new();
-    if let Some(mcp_servers) = root.get("mcpServers").and_then(|v| v.as_object()) {
-        for (name, config) in mcp_servers {
-            servers.push(parse_mcp_entry(name, config, "user"));
         }
     }
     servers
@@ -634,12 +607,6 @@ fn codex_config_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".codex").join("config.toml"))
 }
 
-fn gemini_settings_path() -> Result<std::path::PathBuf, String> {
-    let home = crate::storage::dirs_next()
-        .ok_or_else(|| "Could not determine home directory".to_string())?;
-    Ok(home.join(".gemini").join("settings.json"))
-}
-
 fn read_codex_doc(path: &std::path::Path) -> Result<toml_edit::DocumentMut, String> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -704,69 +671,6 @@ fn toggle_codex_server(name: &str, enabled: bool) -> Result<(), String> {
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
-fn read_gemini_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str::<serde_json::Value>(&content)
-            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
-        Err(e) => Err(format!("Failed to read {}: {}", path.display(), e)),
-    }
-}
-
-fn write_gemini_settings(path: &std::path::Path, root: &serde_json::Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
-    }
-    let content = serde_json::to_string_pretty(root)
-        .map_err(|e| format!("Failed to serialize Gemini settings: {}", e))?;
-    std::fs::write(path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
-}
-
-fn write_gemini_mcp_server(name: &str, spec: &serde_json::Value) -> Result<(), String> {
-    let path = gemini_settings_path()?;
-    let mut root = read_gemini_settings(&path)?;
-    let root_obj = root
-        .as_object_mut()
-        .ok_or_else(|| "Gemini settings root must be an object".to_string())?;
-    let servers = root_obj
-        .entry("mcpServers".to_string())
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or_else(|| "Gemini mcpServers must be an object".to_string())?;
-    servers.insert(name.to_string(), spec.clone());
-    write_gemini_settings(&path, &root)
-}
-
-fn remove_gemini_mcp_server(name: &str) -> Result<(), String> {
-    let path = gemini_settings_path()?;
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut root = read_gemini_settings(&path)?;
-    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        servers.remove(name);
-    }
-    write_gemini_settings(&path, &root)
-}
-
-fn toggle_gemini_server(name: &str, enabled: bool) -> Result<(), String> {
-    let path = gemini_settings_path()?;
-    let mut root = read_gemini_settings(&path)?;
-    let server = root
-        .get_mut("mcpServers")
-        .and_then(|v| v.as_object_mut())
-        .and_then(|servers| servers.get_mut(name))
-        .and_then(|v| v.as_object_mut())
-        .ok_or_else(|| format!("MCP server '{}' not found", name))?;
-    if enabled {
-        server.remove("disabled");
-    } else {
-        server.insert("disabled".to_string(), serde_json::Value::Bool(true));
-    }
-    write_gemini_settings(&path, &root)
-}
-
 /// Add an MCP server via Claude CLI.
 #[allow(clippy::too_many_arguments)]
 pub async fn add_server(
@@ -817,9 +721,7 @@ pub async fn add_server_for_app(
     }
 
     if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
-        return Err(
-            "Codex and Gemini MCP management currently support user scope only".to_string(),
-        );
+        return Err("Codex MCP management currently supports user scope only".to_string());
     }
 
     if matches!(app, ManagedCliApp::Claude) {
@@ -875,11 +777,7 @@ pub async fn add_server_for_app(
         }
     }
 
-    if matches!(app, ManagedCliApp::Codex) {
-        write_codex_mcp_server(&local_name, &spec)?;
-    } else {
-        write_gemini_mcp_server(&local_name, &spec)?;
-    }
+    write_codex_mcp_server(&local_name, &spec)?;
 
     Ok(PluginOperationResult {
         success: true,
@@ -1053,18 +951,12 @@ pub async fn remove_server_for_app(
     }
 
     if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
-        return Err(
-            "Codex and Gemini MCP management currently support user scope only".to_string(),
-        );
+        return Err("Codex MCP management currently supports user scope only".to_string());
     }
 
     if !matches!(app, ManagedCliApp::Claude) {
         let local_name = to_cli_name(name);
-        if matches!(app, ManagedCliApp::Codex) {
-            remove_codex_mcp_server(&local_name)?;
-        } else {
-            remove_gemini_mcp_server(&local_name)?;
-        }
+        remove_codex_mcp_server(&local_name)?;
         return Ok(PluginOperationResult {
             success: true,
             message: format!("Removed MCP server '{}'", name),
@@ -1169,18 +1061,12 @@ pub fn toggle_server_config_for_app(
     cwd: Option<&str>,
 ) -> Result<PluginOperationResult, String> {
     if !matches!(app, ManagedCliApp::Claude) && scope != "user" {
-        return Err(
-            "Codex and Gemini MCP management currently support user scope only".to_string(),
-        );
+        return Err("Codex MCP management currently supports user scope only".to_string());
     }
 
     if !matches!(app, ManagedCliApp::Claude) {
         let local_name = to_cli_name(name);
-        if matches!(app, ManagedCliApp::Codex) {
-            toggle_codex_server(&local_name, enabled)?;
-        } else {
-            toggle_gemini_server(&local_name, enabled)?;
-        }
+        toggle_codex_server(&local_name, enabled)?;
         let action = if enabled { "Enabled" } else { "Disabled" };
         return Ok(PluginOperationResult {
             success: true,

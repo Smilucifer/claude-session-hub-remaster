@@ -16,7 +16,6 @@ pub async fn check_agent_cli(agent: String) -> Result<CliCheckResult, String> {
     let binary = match agent.as_str() {
         "claude" => "claude",
         "codex" => "codex",
-        "gemini" => "gemini",
         _ => return Err(format!("Unknown agent: {}", agent)),
     };
 
