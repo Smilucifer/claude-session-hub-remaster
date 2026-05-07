@@ -1165,6 +1165,8 @@ pub enum BusEvent {
         plugin_errors: Vec<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fast_mode_state: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        msvc_injected: Option<bool>,
     },
     MessageDelta {
         run_id: String,

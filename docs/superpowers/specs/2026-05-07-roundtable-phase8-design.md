@@ -1,7 +1,7 @@
 # Phase 8 Design: Roundtable Enhancements + Gemini Cleanup + Context Events
 
 **Date:** 2026-05-07
-**Status:** Draft v2 (incorporating cx2cc + deepseek review feedback)
+**Status:** Draft v2
 
 ---
 
@@ -13,7 +13,7 @@ Six coordinated changes to the Claude Session Hub Tauri app:
 2. **Stepper Mini-Map** — Replace History strip with a turn-by-turn stepper for room replay
 3. **@Name SingleTarget** — `@DisplayName msg` sends a public turn to only the named participant
 4. **Room Session Grouping** — Virtual "Rooms" folder in sidebar for room participant runs
-5. **Roundtable Prompt Constraint** — Bilingual "discussable judgment, not actionable plan" constraint
+5. **Roundtable Prompt Constraint** — English "discussable judgment, not actionable plan" constraint
 6. **Context Events Verification** — Ensure all CC session types correctly display context events in the UI
 
 ---
@@ -351,31 +351,22 @@ The roundtable prompts in `orchestrator.rs` instruct participants to "answer ind
 
 ### Design
 
-Add a **bilingual** constraint to the default seat prompt (frontend) and the fanout/debate/summary prompt builders (backend):
+Add an **English** constraint to the default seat prompt (frontend) and the fanout/debate/summary prompt builders (backend):
 
-### Constraint Text (shared constant)
+### Constraint Text
 
-Define a Rust const in `orchestrator.rs`:
+Append to the existing seat prompt in `defaultSeatPromptWithLabel()` (`rooms/+page.svelte`):
 
-```rust
-const ROUNDTABLE_SCOPE_CONSTRAINT: &str = "\
-重要：圆桌输出属于「讨论性判断」——非研究报告，非可执行方案。当需要实际行动时，建议切换到独立会话执行。\n\
-IMPORTANT: Roundtable outputs are \"discussable judgments\" — not research reports, \
-not executable plans. When the user needs to take action, suggest switching to an \
-independent session for implementation.";
 ```
+IMPORTANT: Roundtable outputs are "discussable judgments" — not research reports, not executable plans. When the user needs to take action, suggest switching to an independent session for implementation.
+```
+
+No separate Rust const needed — the constraint is inlined into the frontend seat prompt string only. The per-turn prompt builders (`build_fanout_prompt`, `build_debate_prompt`, `build_summary_prompt`) are NOT modified — the LLM carries the seat prompt context through subsequent turns.
 
 ### Modified Locations
 
 **Frontend (`rooms/+page.svelte`):**
-- `defaultSeatPromptWithLabel()` — append constraint (verify line number at implementation time)
-
-**Backend (`orchestrator.rs`):**
-- `build_fanout_prompt()` (line 810-821) — append constraint after the "请独立回答" instruction
-- `build_debate_prompt()` (line 739-808) — append constraint after the debate instruction
-- `build_summary_prompt()` (line 823-860) — append constraint after the summary instruction
-
-Append this to each prompt template with a blank line separator.
+- `defaultSeatPromptWithLabel()` — append the constraint sentence to the existing prompt text
 
 ---
 
@@ -451,5 +442,5 @@ Two-phase approach: investigation spikes first, then implementation.
 - **Stepper:** Test with a multi-turn room, verify snapshot loads correct data, banner appears, exit works
 - **SingleTarget:** Test `@Alice hello` produces a public turn with only Alice responding; test `/dm @Alice hello` produces private turn; test `@UnknownName` returns error
 - **Room Grouping:** Create a room, verify runs appear in "Rooms" folder, not in cwd folder; verify pinned runs stay in their pinned position
-- **Prompt Constraint:** Verify generated prompts include the bilingual constraint text
+- **Prompt Constraint:** Verify `defaultSeatPromptWithLabel()` output includes the constraint sentence
 - **Context Events:** Test with Claude native and provider-based session, verify context % displays for both

@@ -234,6 +234,10 @@ struct SessionActor {
     /// Set when emitting PermissionPrompt / HookCallback(PreToolUse) / ElicitationPrompt.
     /// Cleared when the response is received. Retained during quarantine for diagnostics.
     pending_interactive_request: Option<PendingInteractiveRequest>,
+
+    /// Whether MSVC environment was actually injected for this chat session.
+    /// Derived from SpawnEnvPlan.status at spawn time. None = unknown/not applicable.
+    msvc_injected: Option<bool>,
 }
 
 // ── Spawn entry point ──
@@ -259,6 +263,7 @@ pub fn spawn_actor(
     cancel: CancellationToken,
     initial_turn_index: u32,
     initial_auto_ctx_id: u32,
+    msvc_injected: Option<bool>,
 ) -> SessionActorHandle {
     let tag = Arc::new(());
     let (cmd_tx, cmd_rx) = mpsc::channel::<ActorCommand>(64);
@@ -304,6 +309,7 @@ pub fn spawn_actor(
         ralph_loop: None,
         ralph_needs_dispatch: false,
         pending_interactive_request: None,
+        msvc_injected,
     };
 
     let join_handle = tokio::spawn(async move {
@@ -1616,7 +1622,16 @@ impl SessionActor {
                             e
                         );
                     }
-                    self.persist_and_emit(&event);
+                    // Inject msvc_injected field into SessionInit event
+                    let mut enriched = event.clone();
+                    if let BusEvent::SessionInit {
+                        ref mut msvc_injected,
+                        ..
+                    } = enriched
+                    {
+                        *msvc_injected = self.msvc_injected;
+                    }
+                    self.persist_and_emit(&enriched);
                 }
                 _ => {
                     // Inject backend-authoritative turn_index into UsageUpdate for user turns

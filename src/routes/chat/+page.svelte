@@ -3886,6 +3886,7 @@
       authSourceLabel={store.authSourceLabel}
       authSourceCategory={store.authSourceCategory}
       apiKeySource={store.apiKeySource}
+      msvcInjected={store.msvcInjected}
       {previewOpen}
       onPreviewToggle={() => {
         if (previewOpen && !previewUrlBarOpen) {

@@ -677,5 +677,70 @@ Result: shared spawn-plan regression `cargo test spawn_env` passes and Codex pip
 
 - Is `auto` the right default, or should first release default to `off` with an opt-in status prompt?
 - Are the Rust-native markers conservative enough, or should the first MVP only auto-detect `src-tauri/`, `binding.gyp`, and native npm dependencies?
+
+---
+
+## Phase 8 Enhancements (2026-05-08)
+
+**Status:** Done. Merged to `master`.
+
+### Changes
+
+1. **Extended auto detection for Qt/CMake/vcpkg/VS projects**
+   - Added root-only detection for: `CMakeLists.txt`, `vcpkg.json`, `*.sln`, `*.vcxproj`, `*.pro`, `*.pri`
+   - Detection is intentionally root-only to avoid false positives from build/, cache dirs, or submodules
+   - Projects with solution files in subdirectories may need `always` mode
+
+2. **Chat/Room MSVC injection policy split**
+   - Added `MsvcPolicy` enum (`AllowByMode` / `Disabled`)
+   - Added `resolve_spawn_env_plan_with_policy()` function
+   - Chat sessions: continue using `AllowByMode` (existing behavior)
+   - Room participant sessions: explicitly use `Disabled` policy (backend truly disables injection, not just UI hiding)
+
+3. **Real injection status propagated to frontend**
+   - Added `msvc_injected: Option<bool>` field to `BusEvent::SessionInit`
+   - Derived from `SpawnEnvPlan.status` at spawn time (`Injected` → `true`, others → `false`)
+   - Frontend `SessionStore` tracks `msvcInjected` state (null = unknown, true/false = actual status)
+   - Status resets to `null` on `_clearContentState()` and is not guessed from historical runs
+
+4. **MSVC badge in chat status bar**
+   - Added `MSVC` badge in `SessionStatusBar` component, positioned left of `bypass` badge
+   - Same styling as `bypass`: `bg-amber-500/15 text-amber-500`
+   - Only shown when `msvcInjected === true`
+   - Added i18n: `statusbar_msvcTitle` (en: "MSVC build environment injected", zh-CN: "MSVC 编译环境已注入")
+
+### Key Design Decisions
+
+- **Root-only detection**: Avoids false positives from build/, cache dirs, or submodules. Trade-off: some projects with solution files in subdirectories may need `always` mode.
+- **Backend-enforced room policy**: Room participant sessions truly skip MSVC injection at the backend level, not just UI hiding. This ensures consistent behavior regardless of frontend state.
+- **Ephemeral session fact**: `msvc_injected` is a chat-only session state, not a global setting or run metadata. Historical runs don't carry this field unless explicitly replayed with it.
+
+### Known Limits / Intentional Scope
+
+These behaviors are by design, not bugs:
+
+1. **Auto detection is root-only**: `project_needs_msvc()` only checks markers in the project root directory. It does not recurse into subdirectories. If a project has `.sln` or `.vcxproj` in a subdirectory (e.g., `vendor/` or `third_party/`), auto mode will not detect it. Users should switch to `always` mode for such projects.
+
+2. **MSVC badge only reflects chat sessions**: The `msvcInjected` badge in `SessionStatusBar` only appears for chat sessions with confirmed injection. Room participant sessions never show this badge, even if the underlying project could use MSVC. This is intentional: room participants use `MsvcPolicy::Disabled`.
+
+3. **Badge is ephemeral**: The `msvc_injected` field is not persisted to run metadata. Historical runs replayed from storage will show `null` (no badge), not the original injection status. This is a session-time fact, not a project property.
+
+4. **`RoomPolicy` skip reason**: When MSVC injection is skipped due to `MsvcPolicy::Disabled` (room participants), the skip reason is `RoomPolicy`, distinct from `DisabledByUser` (user turned off MSVC mode in settings). This distinction aids diagnostics.
+
+### Files Modified
+
+- `src-tauri/src/agent/windows_msvc_env.rs`: Extended `project_needs_msvc()`, added `MsvcPolicy` enum and `resolve_spawn_env_plan_with_policy()`
+- `src-tauri/src/room/orchestrator.rs`: Changed to use `MsvcPolicy::Disabled`
+- `src-tauri/src/models.rs`: Added `msvc_injected` field to `BusEvent::SessionInit`
+- `src-tauri/src/commands/session.rs`: Refactored `spawn_cli_process` to return `SpawnCliResult` with `msvc_injected`
+- `src-tauri/src/agent/session_actor.rs`: Added `msvc_injected` field, injects into `SessionInit` event
+- `src-tauri/src/agent/claude_protocol.rs`: Added `msvc_injected: None` to `SessionInit` construction
+- `src/lib/types.ts`: Added `msvc_injected` to `BusEvent` type
+- `src/lib/stores/session-store.svelte.ts`: Added `msvcInjected` state, reducer handling, and clear logic
+- `src/lib/stores/session-store.test.ts`: Added tests for `msvc_injected` handling
+- `src/lib/components/SessionStatusBar.svelte`: Added `msvcInjected` prop and MSVC badge
+- `src/routes/chat/+page.svelte`: Passes `msvcInjected` to `SessionStatusBar`
+- `messages/en.json`: Added `statusbar_msvcTitle`
+- `messages/zh-CN.json`: Added `statusbar_msvcTitle`
 - Should status live in settings only, or also near session launch errors?
 - Should warning snapshots be persisted across app restarts, or only held in process memory?

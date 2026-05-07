@@ -390,6 +390,7 @@ impl ProtocolState {
                         plugins,
                         plugin_errors,
                         fast_mode_state,
+                        msvc_injected: None, // injected by session_actor from SpawnEnvPlan
                     });
                     // Only emit RunState on the FIRST system/init:
                     // - New session: CLI is processing the initial prompt → "running"

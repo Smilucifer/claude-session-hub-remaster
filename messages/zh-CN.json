@@ -358,6 +358,7 @@
   "statusbar_fastMode": "快速",
   "statusbar_fastModeTitle": "快速模式已启用",
   "statusbar_permissionMode": "权限模式：{mode}",
+  "statusbar_msvcTitle": "MSVC 编译环境已注入",
   "statusbar_sshLabel": "SSH：{name}",
   "statusbar_sshTitle": "在远程主机上运行：{name}",
   "statusbar_sessionTitle": "点击重命名",

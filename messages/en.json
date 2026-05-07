@@ -358,6 +358,7 @@
   "statusbar_fastMode": "Fast",
   "statusbar_fastModeTitle": "Fast mode is enabled",
   "statusbar_permissionMode": "Permission mode: {mode}",
+  "statusbar_msvcTitle": "MSVC build environment injected",
   "statusbar_sshLabel": "SSH: {name}",
   "statusbar_sshTitle": "Running on remote host: {name}",
   "statusbar_sessionTitle": "Click to rename",

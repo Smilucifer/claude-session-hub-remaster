@@ -85,6 +85,7 @@ pub enum MsvcEnvSkipReason {
     NonWindows,
     RemoteSession,
     DisabledByUser,
+    RoomPolicy,
     ProjectDoesNotNeedNativeToolchain,
 }
 
@@ -121,6 +122,12 @@ pub enum MsvcEnvStatus {
 pub enum SpawnPathPolicy {
     InheritUnlessInjected,
     AlwaysUseAugmentedPath,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MsvcPolicy {
+    AllowByMode,
+    Disabled,
 }
 
 static MSVC_ENV_CACHE: Lazy<Mutex<HashMap<MsvcEnvCacheKey, HashMap<String, String>>>> =
@@ -424,6 +431,9 @@ pub fn filter_msvc_env(raw: HashMap<String, String>) -> HashMap<String, String> 
         .collect()
 }
 
+// Root-only detection: only checks files in the project root, not recursively.
+// This avoids false positives from build/, cache dirs, or submodules.
+// Projects with solution files in subdirectories may need `always` mode.
 pub fn project_needs_msvc(cwd: &Path) -> bool {
     if cwd.join("src-tauri").is_dir() || cwd.join("binding.gyp").is_file() {
         return true;
@@ -433,7 +443,16 @@ pub fn project_needs_msvc(cwd: &Path) -> bool {
         return true;
     }
 
-    rust_project_has_native_marker(cwd)
+    if rust_project_has_native_marker(cwd) {
+        return true;
+    }
+
+    // Qt/CMake/vcpkg/Visual Studio project markers
+    if cwd.join("CMakeLists.txt").is_file() || cwd.join("vcpkg.json").is_file() {
+        return true;
+    }
+
+    has_root_visual_studio_marker(cwd)
 }
 
 pub fn merge_path_like(base: &str, injected: &str) -> PathMergeResult {
@@ -546,6 +565,26 @@ pub fn resolve_spawn_env_plan(
     path_policy: SpawnPathPolicy,
     base_path: Option<&str>,
 ) -> SpawnEnvPlan {
+    resolve_spawn_env_plan_with_policy(cwd, is_remote, mode, path_policy, base_path, MsvcPolicy::AllowByMode)
+}
+
+pub fn resolve_spawn_env_plan_with_policy(
+    cwd: &Path,
+    is_remote: bool,
+    mode: WindowsMsvcEnvMode,
+    path_policy: SpawnPathPolicy,
+    base_path: Option<&str>,
+    policy: MsvcPolicy,
+) -> SpawnEnvPlan {
+    if policy == MsvcPolicy::Disabled {
+        let plan = skipped_plan(
+            MsvcEnvSkipReason::RoomPolicy,
+            path_policy,
+            base_path,
+        );
+        record_msvc_status_snapshot(cwd, mode, &plan);
+        return plan;
+    }
     let decision = if is_remote {
         MsvcEnvDecision::Skip {
             reason: MsvcEnvSkipReason::RemoteSession,
@@ -744,6 +783,11 @@ fn skipped_status(
             Some("MSVC environment injection is disabled.".to_string()),
             Some("Set MSVC environment mode to auto or always to enable it for local Windows CLI sessions.".to_string()),
         ),
+        MsvcEnvSkipReason::RoomPolicy => (
+            WindowsMsvcEnvStatusState::NotNeeded,
+            Some("MSVC environment injection is not available for room participants.".to_string()),
+            None,
+        ),
         MsvcEnvSkipReason::ProjectDoesNotNeedNativeToolchain => (
             WindowsMsvcEnvStatusState::NotNeeded,
             Some("This project does not match the native Windows build-tool signals used by auto mode.".to_string()),
@@ -838,6 +882,25 @@ fn default_arch_pair() -> Option<(&'static str, &'static str)> {
         "aarch64" => Some(("arm64", "arm64")),
         _ => None,
     }
+}
+
+fn has_root_visual_studio_marker(cwd: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(cwd) else {
+        return false;
+    };
+
+    entries
+        .filter_map(|entry| entry.ok())
+        .any(|entry| {
+            let path = entry.path();
+            if !path.is_file() {
+                return false;
+            }
+            matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("sln" | "vcxproj" | "pro" | "pri")
+            )
+        })
 }
 
 fn package_json_has_native_hint(path: &Path) -> bool {
@@ -1046,6 +1109,79 @@ mod tests {
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname='native'\n").unwrap();
         fs::write(tmp.path().join("build.rs"), "fn main() {}").unwrap();
         assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_cmake_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.10)\n").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_vcpkg_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("vcpkg.json"), r#"{"name":"test"}"#).unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_solution_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("MyProject.sln"), "").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_vcxproj_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("MyProject.vcxproj"), "").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_qt_project_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("MyApp.pro"), "QT += core gui\n").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("MyLib.pri"), "HEADERS += mylib.h\n").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_ignores_markers_in_subdirectories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("subdir");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("MyProject.vcxproj"), "").unwrap();
+        assert!(!project_needs_msvc(tmp.path()));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("vendor");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("MyLib.pro"), "QT += core\n").unwrap();
+        assert!(!project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_detects_combined_old_and_new_markers() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src-tauri")).unwrap();
+        fs::write(tmp.path().join("CMakeLists.txt"), "").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("Cargo.toml"), "[package]\nname='n'\n[build-dependencies]\ncc='1'\n").unwrap();
+        fs::write(tmp.path().join("MyProject.sln"), "").unwrap();
+        assert!(project_needs_msvc(tmp.path()));
+    }
+
+    #[test]
+    fn project_needs_msvc_returns_false_for_nonexistent_path() {
+        let nonexistent = std::path::PathBuf::from("C:\\nonexistent_project_dir_12345");
+        assert!(!project_needs_msvc(&nonexistent));
     }
 
     #[test]
@@ -1556,6 +1692,27 @@ mod tests {
         assert!(matches!(
             plan.status,
             MsvcEnvStatus::Skipped(MsvcEnvSkipReason::RemoteSession)
+        ));
+    }
+
+    #[test]
+    fn resolve_spawn_env_plan_with_policy_disabled_returns_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("src-tauri")).unwrap();
+
+        let plan = resolve_spawn_env_plan_with_policy(
+            tmp.path(),
+            false,
+            WindowsMsvcEnvMode::Always,
+            SpawnPathPolicy::AlwaysUseAugmentedPath,
+            Some("C:\\App\\bin"),
+            MsvcPolicy::Disabled,
+        );
+
+        assert!(!matches!(plan.status, MsvcEnvStatus::Injected(_)));
+        assert!(matches!(
+            plan.status,
+            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::RoomPolicy)
         ));
     }
 }

@@ -59,6 +59,7 @@
     previewOpen = false,
     onStatusClick,
     onExportHtml,
+    msvcInjected = null,
   }: {
     run?: TaskRun | null;
     agent?: string;
@@ -109,6 +110,7 @@
     previewOpen?: boolean;
     onStatusClick?: () => void;
     onExportHtml?: () => void;
+    msvcInjected?: boolean | null;
   } = $props();
 
   $effect(() => {
@@ -816,6 +818,14 @@
 
       <!-- Right: secondary controls -->
       <div class="flex items-center gap-1.5 shrink-0">
+        {#if msvcInjected === true}
+          <span
+            class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-500"
+            title={t("statusbar_msvcTitle")}
+            aria-label={t("statusbar_msvcTitle")}>MSVC</span
+          >
+        {/if}
+
         {#if permissionBadge}
           <span
             class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium {permissionBadge.cls}"

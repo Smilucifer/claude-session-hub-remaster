@@ -1036,6 +1036,7 @@ export type BusEvent =
       plugins?: unknown[];
       plugin_errors?: unknown[];
       fast_mode_state?: string;
+      msvc_injected?: boolean;
     }
   | {
       type: "rate_limit_event";

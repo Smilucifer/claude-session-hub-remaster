@@ -746,7 +746,7 @@ pub(crate) async fn start_session_impl(
 
     // 6. Spawn CLI process (no initial stdin write — actor handles it)
     let effective_cwd = meta.remote_cwd.as_deref().unwrap_or(&meta.cwd);
-    let (child, stdin, stdout, stderr) = spawn_cli_process(
+    let spawn_result = spawn_cli_process(
         effective_cwd,
         &meta.prompt,
         &adapter_settings,
@@ -766,6 +766,11 @@ pub(crate) async fn start_session_impl(
         provider_config.as_ref().map(|c| c.json_path.as_path()),
     )
     .await?;
+    let child = spawn_result.child;
+    let stdin = spawn_result.stdin;
+    let stdout = spawn_result.stdout;
+    let stderr = spawn_result.stderr;
+    let msvc_injected = spawn_result.msvc_injected;
 
     // 7. Compute turn baselines — 1-based: next_turn_index = N means next message gets turnIndex=N.
     // New session: first message gets turnIndex=1. Resume: first new message gets total+1.
@@ -794,6 +799,7 @@ pub(crate) async fn start_session_impl(
         cancel_token.clone(),
         initial_turn_index,
         initial_auto_ctx_id,
+        msvc_injected,
     );
     let cmd_tx = actor_handle.cmd_tx.clone();
     sessions.lock().await.insert(run_id.clone(), actor_handle);
@@ -1334,7 +1340,7 @@ pub(crate) async fn approve_session_tool_impl(
     storage::runs::update_status(&run_id, RunStatus::Running, None, None).ok();
 
     // 8. Spawn CLI with Continue mode (audit #3: SSH path if remote)
-    let (child, stdin, stdout, stderr) = spawn_cli_process(
+    let spawn_result = spawn_cli_process(
         &effective_cwd,
         &prompt,
         &adapter,
@@ -1354,6 +1360,11 @@ pub(crate) async fn approve_session_tool_impl(
         None,
     )
     .await?;
+    let child = spawn_result.child;
+    let stdin = spawn_result.stdin;
+    let stdout = spawn_result.stdout;
+    let stderr = spawn_result.stderr;
+    let msvc_injected = spawn_result.msvc_injected;
 
     // 8. Compute turn baselines from existing events (1-based: next message gets total+1)
     let (total, normal) = crate::storage::events::count_user_messages(&run_id);
@@ -1378,6 +1389,7 @@ pub(crate) async fn approve_session_tool_impl(
         cancel_token.clone(),
         total + 1,
         normal + 1,
+        msvc_injected,
     );
     sessions.lock().await.insert(run_id.clone(), actor_handle);
 
@@ -1761,6 +1773,14 @@ fn augment_with_shell_auth(
 /// Spawn a Claude CLI process and return (Child, ChildStdin, ChildStdout, ChildStderr).
 /// Sends the initial prompt via stdin for new sessions.
 /// For remote sessions, wraps the CLI command in SSH.
+struct SpawnCliResult {
+    child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    msvc_injected: Option<bool>,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_cli_process(
     cwd: &str,
@@ -1780,15 +1800,7 @@ async fn spawn_cli_process(
     windows_msvc_env_mode: WindowsMsvcEnvMode,
     extra_env: Option<&std::collections::HashMap<String, String>>,
     provider_config_path: Option<&std::path::Path>,
-) -> Result<
-    (
-        tokio::process::Child,
-        tokio::process::ChildStdin,
-        tokio::process::ChildStdout,
-        tokio::process::ChildStderr,
-    ),
-    String,
-> {
+) -> Result<SpawnCliResult, String> {
     // Build CLI args (shared between local and remote)
     let mut claude_args: Vec<String> = vec![
         "--output-format".into(),
@@ -1839,6 +1851,7 @@ async fn spawn_cli_process(
         remote_host.map(|r| &r.name),
     );
 
+    let mut msvc_injected: Option<bool> = None;
     let mut child = if let Some(remote) = remote_host {
         // SSH branch: wrap claude command in ssh
         let effective_remote_cwd = remote_cwd.unwrap_or(cwd);
@@ -1891,6 +1904,7 @@ async fn spawn_cli_process(
             SpawnPathPolicy::AlwaysUseAugmentedPath,
             Some(&base_path),
         );
+        msvc_injected = Some(matches!(spawn_env_plan.status, MsvcEnvStatus::Injected(_)));
         log_msvc_spawn_plan("session", &spawn_env_plan.status, &spawn_env_plan.warnings);
         log::debug!(
             "[session] cwd: {}, prompt: {:?}",
@@ -1992,7 +2006,13 @@ async fn spawn_cli_process(
     // Initial prompt is now sent via ActorCommand::SendMessage after actor spawn.
     // This ensures ALL user messages go through the Turn Transaction Engine.
 
-    Ok((child, stdin, stdout, stderr))
+    Ok(SpawnCliResult {
+        child,
+        stdin,
+        stdout,
+        stderr,
+        msvc_injected,
+    })
 }
 
 // ── Side question (BTW) ──

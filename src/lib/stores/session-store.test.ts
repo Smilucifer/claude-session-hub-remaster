@@ -3023,6 +3023,72 @@ describe("SessionStore reducer", () => {
     });
   });
 
+  // ── MSVC injected status from session_init ──
+
+  describe("session_init msvc_injected", () => {
+    it("sets msvcInjected from session_init event", () => {
+      store.run = makeRun("run-1");
+      store.phase = "running";
+      const events: BusEvent[] = [
+        {
+          type: "session_init",
+          run_id: "run-1",
+          session_id: "sess-1",
+          model: "claude-opus-4-6",
+          tools: ["Bash"],
+          cwd: "/",
+          msvc_injected: true,
+        },
+      ];
+      store.applyEventBatch(events as BusEvent[]);
+      expect(store.msvcInjected).toBe(true);
+    });
+
+    it("sets msvcInjected to false when session_init has msvc_injected=false", () => {
+      store.run = makeRun("run-1");
+      store.phase = "running";
+      const events: BusEvent[] = [
+        {
+          type: "session_init",
+          run_id: "run-1",
+          session_id: "sess-1",
+          model: "claude-opus-4-6",
+          tools: ["Bash"],
+          cwd: "/",
+          msvc_injected: false,
+        },
+      ];
+      store.applyEventBatch(events as BusEvent[]);
+      expect(store.msvcInjected).toBe(false);
+    });
+
+    it("keeps msvcInjected null when session_init has no msvc_injected field", () => {
+      store.run = makeRun("run-1");
+      store.phase = "running";
+      const events: BusEvent[] = [
+        {
+          type: "session_init",
+          run_id: "run-1",
+          session_id: "sess-1",
+          model: "claude-opus-4-6",
+          tools: ["Bash"],
+          cwd: "/",
+        },
+      ];
+      store.applyEventBatch(events as BusEvent[]);
+      expect(store.msvcInjected).toBeNull();
+    });
+
+    it("resets msvcInjected to null on _clearContentState()", () => {
+      store.run = makeRun("run-1");
+      store.phase = "running";
+      store.msvcInjected = true;
+      // Access private method for testing
+      (store as unknown as { _clearContentState: () => void })._clearContentState();
+      expect(store.msvcInjected).toBeNull();
+    });
+  });
+
   // ── isKnownSlashCommand ──
 
   describe("isKnownSlashCommand", () => {

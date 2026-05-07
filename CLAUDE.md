@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 8 complete (2026-05-08). Gemini removed entirely (~54 files). Roundtable enhancements: Stepper mini-map replaces History strip for turn-by-turn replay with snapshot loading, `@DisplayName msg` sends public SingleTarget turn to the named participant (`/dm @Name msg` preserves private turns), virtual "Rooms" sidebar folder groups room participant runs separately from project runs, seat prompt includes English evidence constraint. Context events verified across all session types (Claude + compatible API full events; Codex PTY is protocol-limited). Code review findings addressed: snapshot content renders in panes, activeSnapshot resets on room switch/send/delete, Private handler uses ambiguity-safe lookup. 4 svelte-check errors (CodeEditor false positives + pre-existing MessageKey), 22 a11y warnings, 1214 frontend tests passing, cargo check clean.
+**Current phase:** Phase 8 complete (2026-05-08). Gemini removed entirely (~54 files). Roundtable enhancements: Stepper mini-map replaces History strip for turn-by-turn replay with snapshot loading, `@DisplayName msg` sends public SingleTarget turn to the named participant (`/dm @Name msg` preserves private turns), virtual "Rooms" sidebar folder groups room participant runs separately from project runs, seat prompt includes English evidence constraint. Context events verified across all session types (Claude + compatible API full events; Codex PTY is protocol-limited). Code review findings addressed: snapshot content renders in panes, activeSnapshot resets on room switch/send/delete, Private handler uses ambiguity-safe lookup. MSVC injection enhancements: extended auto-detection (CMake/vcpkg/VS/Qt markers), chat/room policy split (`MsvcPolicy`), `msvc_injected` propagated via `SessionInit`, MSVC badge in status bar, `RoomPolicy` skip reason for diagnostics. Code review fixes: stale value leak patched, boundary tests added, aria-label for badge, known limits documented. 4 svelte-check errors (CodeEditor false positives + pre-existing MessageKey), 22 a11y warnings, 275 session store tests passing, cargo check clean.
 
 ## Standard workflow
 
@@ -246,6 +246,12 @@ Important backend support already exists for Windows-native CLI execution:
 - automatic MSVC developer environment injection for native-toolchain projects.
 - special handling for npm `.cmd` shims so Codex can launch as `node.exe + CLI js`.
 - code in `src-tauri/src/agent/windows_msvc_env.rs` and related session/chat spawn paths.
+
+**MSVC injection enhancements (Phase 8):**
+- Auto-detection extended: `CMakeLists.txt`, `vcpkg.json`, `*.sln`, `*.vcxproj`, `*.pro`, `*.pri` (root-only).
+- Chat/Room policy split: `MsvcPolicy` enum — chat uses `AllowByMode`, rooms use `Disabled` (backend-enforced).
+- `msvc_injected: Option<bool>` propagated via `BusEvent::SessionInit` to frontend; MSVC badge in `SessionStatusBar`.
+- `MsvcEnvSkipReason::RoomPolicy` (distinct from `DisabledByUser`) for diagnostics.
 
 When changing spawn behavior, PATH handling, or provider launch commands, preserve Windows desktop compatibility.
 

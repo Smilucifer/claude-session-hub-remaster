@@ -159,6 +159,20 @@ Claude-compatible API profiles can still be represented under `user.cc_agent_pro
 
 On Windows, when the app is launched from the normal desktop environment, Claude / Codex child processes usually do not inherit the `cl`, `link`, Windows SDK, and related variables from a Visual Studio Developer Prompt. This version can automatically add an MSVC developer environment for local CLI child processes when the current project clearly needs native tooling. When Codex is installed through npm `.cmd` shims, the app launches `node.exe + the CLI js` directly on Windows to avoid transient `cmd` windows during chat.
 
+**Auto-detection markers**（`auto` 模式下的项目根目录检测）：
+
+- Tauri 项目：`src-tauri/` 目录、`binding.gyp`
+- Node native 依赖：`package.json` 中含 `sharp`、`node-sass`、`bcrypt` 等
+- Rust native 项目：`Cargo.toml` 含 `cc` build-dependency、`build.rs` 存在
+- CMake / vcpkg：`CMakeLists.txt`、`vcpkg.json`
+- Visual Studio / Qt：`*.sln`、`*.vcxproj`、`*.pro`、`*.pri`
+
+检测仅限项目根目录，不递归子目录。若项目在子目录中有 `.sln` 等文件，请切换到 `always` 模式。
+
+**Chat / Room 策略分离**：Chat 会话允许 MSVC 注入（按模式判断）；Room participant 会话由后端策略强制禁用注入（`MsvcPolicy::Disabled`），确保隔离。
+
+**MSVC 状态徽标**：Chat 状态栏会在确认注入成功时显示 `MSVC` 徽标（amber 样式），鼠标悬停可查看 tooltip。Room 会话不显示此徽标。
+
 模式：
 
 - `auto`：默认，仅在保守 native project 信号下启用。

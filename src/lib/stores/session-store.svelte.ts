@@ -281,6 +281,9 @@ export class SessionStore {
   sessionTools = $state<string[]>([]);
   /** CLI's output style (updated from session_init). */
   outputStyle = $state<string>("");
+  /** Whether MSVC environment was actually injected for this chat session.
+   *  Derived from SpawnEnvPlan.status at spawn time. null = unknown/not applicable. */
+  msvcInjected = $state<boolean | null>(null);
   /** Saved permission mode before plan mode (restored on ExitPlanMode). */
   previousPermissionMode = $state<string>("");
   /** Override mode after ExitPlanMode completes (user chose specific mode via approval card). */
@@ -1229,6 +1232,7 @@ export class SessionStore {
     }
     this.fastModeState = "";
     this.apiKeySource = "";
+    this.msvcInjected = null;
     this.rateLimitStatus = "";
     this.rateLimitType = "";
     this.rateLimitUtilization = null;
@@ -2544,6 +2548,9 @@ export class SessionStore {
         this.sessionCwd = ev.cwd ?? "";
         this.sessionTools = ev.tools ?? [];
         this.outputStyle = ev.output_style ?? "";
+        // MSVC injection status: explicit overwrite — true/false from backend, null for old runs/unknown.
+        // This prevents stale values from previous sessions leaking when session_init lacks the field.
+        this.msvcInjected = typeof ev.msvc_injected === "boolean" ? ev.msvc_injected : null;
         this.sessionInitReceived = true;
         dbg("store", "session_init: cli verbose fields", {
           cliVersion: this.cliVersion,
@@ -2556,6 +2563,7 @@ export class SessionStore {
           sessionCwd: this.sessionCwd,
           sessionTools: this.sessionTools.length,
           outputStyle: this.outputStyle,
+          msvcInjected: this.msvcInjected,
         });
         break;
 

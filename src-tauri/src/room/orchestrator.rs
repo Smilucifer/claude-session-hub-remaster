@@ -3,7 +3,8 @@ use crate::agent::session_actor::ActorCommand;
 use crate::agent::spawn::build_agent_command;
 use crate::agent::stream::{run_agent, ProcessMap};
 use crate::agent::windows_msvc_env::{
-    merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan, SpawnPathPolicy,
+    merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan_with_policy, MsvcPolicy,
+    SpawnPathPolicy,
 };
 use crate::room::adapter::{
     adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
@@ -392,12 +393,13 @@ async fn execute_pipe_turn(
         };
 
     let inherited_path = crate::agent::claude_stream::augmented_path();
-    let mut spawn_env_plan = resolve_spawn_env_plan(
+    let mut spawn_env_plan = resolve_spawn_env_plan_with_policy(
         Path::new(&run.cwd),
         false,
         user_settings.windows_msvc_env_mode,
         SpawnPathPolicy::AlwaysUseAugmentedPath,
         Some(&inherited_path),
+        MsvcPolicy::Disabled,
     );
     if !profile_env.is_empty() {
         merge_extra_env_into_spawn_env_plan(&mut spawn_env_plan, &profile_env);
