@@ -47,7 +47,7 @@
     (sectionCtx?.active ?? "skills") as "skills" | "mcp" | "hooks" | "plugins" | "agents",
   );
 
-  type ManagedApp = "claude" | "codex" | "gemini";
+  type ManagedApp = "claude" | "codex";
   const managedApps: Array<{
     id: ManagedApp;
     label: string;
@@ -68,13 +68,6 @@
       skillsPath: "~/.codex/skills",
       mcpPath: "~/.codex/config.toml",
       pluginsPath: "~/.codex/plugins",
-    },
-    {
-      id: "gemini",
-      label: "Gemini",
-      skillsPath: "~/.gemini/skills",
-      mcpPath: "~/.gemini/settings.json",
-      pluginsPath: "~/.gemini/plugins",
     },
   ];
   let managedApp = $state<ManagedApp>("claude");

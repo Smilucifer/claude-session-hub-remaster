@@ -21,7 +21,7 @@
     operationLoading = $bindable<string | null>(null),
     showToast,
   }: {
-    app?: "claude" | "codex" | "gemini";
+    app?: "claude" | "codex";
     projectCwd: string;
     visible?: boolean;
     operationLoading: string | null;

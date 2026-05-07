@@ -90,16 +90,14 @@
   let showApiKey = $state(false);
   let platformCredentials = $state<PlatformCredential[]>([]);
 
-  type ConnectionAgentTab = "claude" | "codex" | "gemini";
+  type ConnectionAgentTab = "claude" | "codex";
   const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
     { id: "claude", label: "Claude", command: "claude" },
     { id: "codex", label: "Codex", command: "codex" },
-    { id: "gemini", label: "Gemini", command: "gemini" },
   ];
   let connectionCliChecks = $state<Record<ConnectionAgentTab, CliCheckResult | null>>({
     claude: null,
     codex: null,
-    gemini: null,
   });
   let connectionCliChecking = $state(false);
   let msvcEnvMode = $state<WindowsMsvcEnvMode>("auto");

@@ -16,7 +16,7 @@
       onConfirm: () => void;
     } | null>(null),
   }: {
-    app?: "claude" | "codex" | "gemini";
+    app?: "claude" | "codex";
     projectCwd: string;
     visible?: boolean;
     operationLoading: string | null;

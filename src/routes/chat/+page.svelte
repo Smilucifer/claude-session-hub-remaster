@@ -43,7 +43,7 @@
 
   const EMPTY_BATCH_MAP = new Map();
   const EMPTY_BURST_MAP = new Map() as Map<number, ToolBurst>;
-  const CHAT_AGENTS = new Set(["claude", "codex", "gemini", "deepseek", "glm"]);
+  const CHAT_AGENTS = new Set(["claude", "codex", "deepseek", "glm"]);
   import XTerminal from "$lib/components/XTerminal.svelte";
   import ChatMessage from "$lib/components/ChatMessage.svelte";
   import InlineToolCard from "$lib/components/InlineToolCard.svelte";
@@ -148,10 +148,9 @@
   let preloadGen = 0;
   /** Local proxy running statuses for AuthSourceBadge. */
   let localProxyStatuses = $state<Record<string, { running: boolean; needsAuth: boolean }>>({});
-  let startupCliChecks = $state<Record<"claude" | "codex" | "gemini", CliCheckResult | null>>({
+  let startupCliChecks = $state<Record<"claude" | "codex", CliCheckResult | null>>({
     claude: null,
     codex: null,
-    gemini: null,
   });
 
   // ── Preview state ──
@@ -273,7 +272,7 @@
 
   async function refreshStartupCliChecks() {
     const entries = await Promise.all(
-      (["claude", "codex", "gemini"] as const).map(async (agent) => {
+      (["claude", "codex"] as const).map(async (agent) => {
         try {
           return [agent, await api.checkAgentCli(agent)] as const;
         } catch {
@@ -282,7 +281,7 @@
       }),
     );
     startupCliChecks = Object.fromEntries(entries) as Record<
-      "claude" | "codex" | "gemini",
+      "claude" | "codex",
       CliCheckResult | null
     >;
   }
@@ -1072,7 +1071,7 @@
   let folderParam = $derived($page.url.searchParams.get("folder"));
   let agentParam = $derived($page.url.searchParams.get("agent") ?? "");
 
-  // Consume ?agent=codex/gemini from command palette shortcuts for a new chat.
+  // Consume ?agent=codex from command palette shortcuts for a new chat.
   $effect(() => {
     const agent = normalizeChatAgent(agentParam);
     if (!agent || runId || store.run) return;

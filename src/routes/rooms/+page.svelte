@@ -259,13 +259,13 @@
         role: "participant",
       },
       {
-        agent: "gemini",
+        agent: "codex",
         profileId: "",
         connectionProfileId: "",
-        label: "Gemini",
+        label: "Codex",
         model: "",
         platformId: "",
-        prompt: defaultSeatPrompt(2, "gemini"),
+        prompt: defaultSeatPrompt(2, "codex"),
         role: "participant",
       },
     ];
@@ -303,7 +303,7 @@
   }
 
   function profileAgent(profile?: CcAgentProfile | null): SeatAgent {
-    if (profile?.agent === "codex" || profile?.agent === "gemini") return profile.agent;
+    if (profile?.agent === "codex") return profile.agent;
     return "claude";
   }
 

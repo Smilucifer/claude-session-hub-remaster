@@ -1609,7 +1609,7 @@ export class SessionStore {
       } else {
         this._isLoadingReplay = false;
         // Pipe-exec mode: replay run events into the chat timeline by default.
-        // The terminal replay was too noisy for native Codex/Gemini sessions.
+        // The terminal replay was too noisy for native Codex sessions.
         const events = await api.getRunEvents(id);
         if (gen !== this._loadGen) {
           dbg("store", "stale after getRunEvents, gen=", gen);
@@ -2090,7 +2090,7 @@ export class SessionStore {
       if (mode === "fork") {
         targetRunId = await this._handleFork(runId);
       } else if (!isStream) {
-        this._pendingNativeResumeLatest = run.agent === "codex" || run.agent === "gemini";
+        this._pendingNativeResumeLatest = run.agent === "codex";
         this._setPhase("idle");
       } else {
         const sessionId = run.session_id;

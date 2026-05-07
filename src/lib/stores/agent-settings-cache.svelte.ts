@@ -29,15 +29,13 @@ export async function loadAgentSettingsCache(): Promise<void> {
   if (_loading) return;
   _loading = true;
   try {
-    const [claude, codex, gemini] = await Promise.all([
+    const [claude, codex] = await Promise.all([
       api.getAgentSettings("claude").catch(() => null),
       api.getAgentSettings("codex").catch(() => null),
-      api.getAgentSettings("gemini").catch(() => null),
     ]);
     _cache = {
       claude: { noSessionPersistence: claude?.no_session_persistence ?? false },
       codex: { noSessionPersistence: codex?.no_session_persistence ?? false },
-      gemini: { noSessionPersistence: gemini?.no_session_persistence ?? false },
     };
     _loaded = true;
   } catch (e) {
