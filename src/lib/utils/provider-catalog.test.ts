@@ -51,7 +51,7 @@ describe("Phase 7 provider catalog", () => {
       mode: "claude_compatible_api",
       executionAgent: "claude",
       platformId: "mimo-pro",
-      defaultModel: "MiMo-V2.5-Pro",
+      defaultModel: "mimo-v2.5-pro",
       requiredConfig: ["api_key"],
       defaultPermissionMode: "bypass",
     });

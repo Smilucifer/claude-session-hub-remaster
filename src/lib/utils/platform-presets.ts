@@ -127,7 +127,7 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
     description: "Xiaomi MiMo Pro",
     key_placeholder: "your-mimo-pro-key",
     category: "provider",
-    models: ["MiMo-V2.5-Pro"],
+    models: ["mimo-v2.5-pro"],
   },
 
   // ── API Proxy ──

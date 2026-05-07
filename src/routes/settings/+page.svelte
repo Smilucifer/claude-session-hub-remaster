@@ -1757,34 +1757,25 @@
                       />
                     {/if}
                     {#if fieldRules.showModel}
+                      <input
+                        class="h-9 rounded-md border border-border bg-background px-3 text-sm"
+                        placeholder="Model"
+                        value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
+                        list="model-list-{provider.id}"
+                        oninput={(event) =>
+                          updateApiProviderField(
+                            provider,
+                            "model",
+                            (event.currentTarget as HTMLInputElement).value,
+                          )}
+                        onblur={persistApiProviderConfig}
+                      />
                       {#if fieldRules.modelOptions}
-                        <select
-                          class="h-9 rounded-md border border-border bg-background px-3 text-sm"
-                          value={credential?.models?.[0] ?? provider.defaultModel ?? fieldRules.modelOptions[0]}
-                          oninput={(event) =>
-                            updateApiProviderField(
-                              provider,
-                              "model",
-                              (event.currentTarget as HTMLSelectElement).value,
-                            )}
-                          onblur={persistApiProviderConfig}
-                        >
+                        <datalist id="model-list-{provider.id}">
                           {#each fieldRules.modelOptions as model}
-                            <option value={model}>{model}</option>
+                            <option value={model} />
                           {/each}
-                        </select>
-                      {:else}
-                        <Input
-                          placeholder="Model"
-                          value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
-                          oninput={(event) =>
-                            updateApiProviderField(
-                              provider,
-                              "model",
-                              (event.currentTarget as HTMLInputElement).value,
-                            )}
-                          onblur={persistApiProviderConfig}
-                        />
+                        </datalist>
                       {/if}
                     {/if}
                   </div>

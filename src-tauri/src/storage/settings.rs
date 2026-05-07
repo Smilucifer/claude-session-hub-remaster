@@ -173,7 +173,7 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
         }),
         "mimo-pro" => Some(ProviderDefaults {
             base_url: Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
-            models: Some(vec!["MiMo-V2.5-Pro".to_string()]),
+            models: Some(vec!["mimo-v2.5-pro".to_string()]),
             extra_env: None,
             key_optional: false,
             auth_env_var: None,

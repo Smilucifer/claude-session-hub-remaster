@@ -100,7 +100,7 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     mode: "claude_compatible_api",
     executionAgent: "claude",
     platformId: "mimo-pro",
-    defaultModel: "MiMo-V2.5-Pro",
+    defaultModel: "mimo-v2.5-pro",
     defaultBaseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
     requiredConfig: ["api_key"],
     defaultPermissionMode: "bypass",
