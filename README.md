@@ -18,16 +18,16 @@ Claude Session Hub Remaster is not a rewrite of OpenCovibe and not a direct port
 当前架构原则：
 
 - `Run` 继续作为最小执行单元。
-- `Room` 作为后续协作编排层，建立在 `Run` 之上。
-- Memo、Room、Roundtable、Driver/Copilot、Research、Arena Memory 等能力分阶段落地。
-- 不在早期破坏现有 `/chat` 路径。
+- `Room` 作为协作编排层，建立在 `Run` 之上。
+- Memo、Room、Roundtable、Driver/Copilot、Research 已落地；Arena Memory 候选提升仍在后续阶段。
+- 现有 `/chat` 路径保持稳定。
 
 Current architecture principles:
 
 - `Run` remains the smallest execution unit.
-- `Room` will become an orchestration layer above `Run`.
-- Memo, Room, Roundtable, Driver/Copilot, Research, and Arena Memory will land in phases.
-- The existing `/chat` path should not be disrupted early.
+- `Room` serves as the orchestration layer above `Run`.
+- Memo, Room, Roundtable, Driver/Copilot, and Research are implemented; Arena Memory promotion is planned.
+- The existing `/chat` path remains stable.
 
 ## 当前功能 / Current Features
 
@@ -60,7 +60,6 @@ Rooms are the entry point for multi-agent collaboration. You can create a Room, 
 当前适合用来：
 
 - 把相关 Run 聚合到一个 Room 中查看。
-- 为 Room 保存局部 memo。
 - 在 Roundtable 时间线里向多个活跃 participant 分发同一个问题。
 - 使用 `@debate` 让 participant 基于上一轮公开回复互相比较观点。
 - 使用 `@summary @name` 指定一个 participant 总结公开 Room 历史。
@@ -74,7 +73,6 @@ Rooms are the entry point for multi-agent collaboration. You can create a Room, 
 Currently useful for:
 
 - Grouping related Runs in a Room.
-- Keeping Room-local memos.
 - Sending one prompt to multiple active participants in a Roundtable timeline.
 - Using `@debate` to ask participants to compare positions based on previous public replies.
 - Using `@summary @name` to ask one participant to summarize the public Room history.
@@ -95,32 +93,32 @@ The current primary providers are: Claude, Codex, DeepSeek, GLM, QWEN, KIMI, and
 
 The settings page provides independent model and auth configuration per provider. Claude and Codex use official CLI authentication. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro support dynamic API key / base URL / model configuration, generating a per-session temp config from the latest settings on each launch. Codex uses a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics. Gemini-related settings have been removed.
 
-Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. DeepSeek/GLM should keep provider identity separate from the Claude execution agent:
+Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. API providers should keep provider identity separate from the Claude execution agent:
 
-为了向后兼容，Claude-compatible API profile 仍可保留在 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles` 下。DeepSeek/GLM 应保持 provider identity 和 Claude execution agent 分离：
+为了向后兼容，Claude-compatible API profile 仍可保留在 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles` 下。API provider 应保持 provider identity 和 Claude execution agent 分离：
 
 ```json
 {
   "user": {
     "cc_agent_profiles": [
       {
-        "id": "gemini-via-ccr",
-        "label": "Gemini via CCR",
+        "id": "qwen-via-claude",
+        "label": "QWEN via Claude",
         "agent": "claude",
-        "platform_id": "ccr",
-        "model": "gemini-2.5-pro",
-        "prompt": "You are the Gemini seat in this roundtable.",
-        "role": "researcher",
+        "platform_id": "qwen",
+        "model": "qwen3-coder-plus",
+        "prompt": "You are the QWEN seat in this roundtable.",
+        "role": "participant",
         "enabled": true
       },
       {
-        "id": "codex-via-ccswitch",
-        "label": "Codex via CCSwitch",
+        "id": "kimi-via-claude",
+        "label": "KIMI via Claude",
         "agent": "claude",
-        "platform_id": "ccswitch",
-        "model": "gpt-5.5",
-        "prompt": "You are the Codex seat in this roundtable.",
-        "role": "participant",
+        "platform_id": "kimi",
+        "model": "kimi2",
+        "prompt": "You are the KIMI seat in this roundtable.",
+        "role": "researcher",
         "enabled": true
       },
       {
@@ -133,12 +131,13 @@ Claude-compatible API profiles can still be represented under `user.cc_agent_pro
         "enabled": true
       },
       {
-        "id": "native-gemini",
-        "label": "Native Gemini",
-        "agent": "gemini",
-        "model": "gemini-2.5-pro",
-        "prompt": "You are the Gemini CLI seat in this roundtable.",
-        "role": "researcher",
+        "id": "mimo-via-claude",
+        "label": "MiMo Pro via Claude",
+        "agent": "claude",
+        "platform_id": "mimo",
+        "model": "mimo-pro",
+        "prompt": "You are the MiMo Pro seat in this roundtable.",
+        "role": "participant",
         "enabled": true
       }
     ]
@@ -146,9 +145,9 @@ Claude-compatible API profiles can still be represented under `user.cc_agent_pro
 }
 ```
 
-`agent` 可为 `claude`、`codex` 或 `gemini`，省略时默认 `claude`。DeepSeek/GLM 通过 `agent: "claude"` 加 `platform_id` 表达。`model` 只应在用户明确选择模型或 API provider 需要模型时作为 per-run snapshot；不要把官方 CLI provider 的展示默认值强塞进启动参数。
+`agent` 可为 `claude` 或 `codex`，省略时默认 `claude`。API provider（DeepSeek/GLM/QWEN/KIMI/MiMo Pro）通过 `agent: "claude"` 加 `platform_id` 表达。`model` 只应在用户明确选择模型或 API provider 需要模型时作为 per-run snapshot；不要把官方 CLI provider 的展示默认值强塞进启动参数。
 
-`agent` can be `claude`, `codex`, or `gemini`; omitted values default to `claude`. DeepSeek/GLM are represented as `agent: "claude"` plus `platform_id`. `model` should become a per-run snapshot only when explicitly selected by the user or required by an API provider; do not inject display defaults into official CLI launches.
+`agent` can be `claude` or `codex`; omitted values default to `claude`. API providers (DeepSeek/GLM/QWEN/KIMI/MiMo Pro) are represented as `agent: "claude"` plus `platform_id`. `model` should become a per-run snapshot only when explicitly selected by the user or required by an API provider; do not inject display defaults into official CLI launches.
 
 ### Windows Native Toolchain Support
 
@@ -176,22 +175,28 @@ You can switch the mode in Settings and view the MSVC environment status for the
 
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - Research Room 支持研究分发、artifact 历史归档和标记式 Arena Memory 候选抽取；候选提升为永久项目 Arena Memory 仍在后续阶段。
-- 仍有部分上游基线检查需要后续清理。
+- Gemini 已在 UI 和设置页中移除，但后端 agent/commands/storage 中仍保留相关代码，待后续清理。
+- 余额查询仅覆盖 DeepSeek（API key 认证）和 MiMo（cookie 认证），其余 provider 暂无余额检查。
+- Rust 单元测试受限于本地 VCRUNTIME140.dll 版本不匹配（VS 18 BuildTools vs System32），需用 `cargo check` 替代 `cargo test`。
 
 Current limitations:
 
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Research Room can fan out research, keep artifact history, and extract marked Arena Memory candidates; promotion into permanent project Arena Memory remains later work.
-- Some upstream baseline checks still need cleanup.
+- Gemini has been removed from the UI and settings, but backend code (agent/commands/storage) still contains Gemini references pending cleanup.
+- Balance queries only cover DeepSeek (API key auth) and MiMo (cookie auth); other providers lack balance checking.
+- Rust unit tests are blocked by a local VCRUNTIME140.dll version mismatch (VS 18 BuildTools vs System32); use `cargo check` instead of `cargo test`.
 
 ## 后续计划 / Roadmap
 
 已完成：
 
 - Phase 7：Codex PTY 原生 CLI 适配器、provider 设置页动态化、Roundtable 三栏布局重设计、全局备忘面板重构。
+- Phase 7.x：Provider 配置完全动态化（从设置页读取而非硬编码）、per-session 临时配置 JSON、MiMo Pro provider、MiMo 余额/用量检查器（cookie 认证，琥珀色主题卡片）。
+- Phase 7.y：Room 删除时停止 participant 并软删除 runs、Roundtable 增量回合推送（JSONL 去重 + 1500ms 前端轮询）、右键"移除会话"上下文菜单、participant 状态本地化、seat label 修改自动同步 prompt。
 - Multi-CLI capability matrix（Phase 5.5 / Phase 7，七个 provider 能力矩阵）。
 - 全局快速备忘入口统一（所有页面顶栏）。
-- Room 优化：删除时停止 participant 并软删除 runs、Roundtable 增量回合推送、右键上下文菜单、participant 状态本地化。
+- 1217 前端测试通过，cargo check 干净。
 
 计划：
 
@@ -203,9 +208,11 @@ Current limitations:
 Completed:
 
 - Phase 7: Codex PTY native CLI adapter, dynamic provider settings, Roundtable three-pane layout redesign, global memo panel refactor.
+- Phase 7.x: Fully dynamic provider config (reads from settings page instead of hardcoded), per-session temp JSON, MiMo Pro provider, MiMo balance/usage checker (cookie-based auth, amber-themed card).
+- Phase 7.y: Room delete stops participants + soft-deletes runs, incremental roundtable turns (JSONL dedup + 1500ms frontend polling), right-click "Remove Session" context menu, localized participant status labels, seat label auto-syncs prompt.
 - Multi-CLI capability matrix (Phase 5.5 / Phase 7, seven providers).
 - Unified global Quick Memo entry point (all page top bars).
-- Room optimizations: delete stops participants + soft-deletes runs, incremental roundtable turns, right-click context menu, localized participant status labels.
+- 1217 frontend tests passing, cargo check clean.
 
 Plan:
 
@@ -215,6 +222,8 @@ Plan:
 - Roundtable Debate/Summary interaction polish.
 
 ## 开发 / Development
+
+当前版本：**v1.1.2** · Current version: **v1.1.2**
 
 ```bash
 npm install
@@ -226,6 +235,20 @@ npm run dev
 
 ```bash
 npm run tauri dev
+```
+
+打包（生成 `.exe` / `.msi` 安装包）：
+
+```bash
+npm run tauri build
+```
+
+产物路径：`src-tauri/target/release/bundle/`
+
+版本号统一更新：
+
+```bash
+npm run release <version|patch|minor|major>
 ```
 
 全量验证（lint + format + i18n + test + build + Rust check）：
@@ -250,6 +273,20 @@ Desktop run:
 
 ```bash
 npm run tauri dev
+```
+
+Packaging (produces `.exe` / `.msi` installers):
+
+```bash
+npm run tauri build
+```
+
+Output: `src-tauri/target/release/bundle/`
+
+Version bumping across all config files:
+
+```bash
+npm run release <version|patch|minor|major>
 ```
 
 Full verification (lint + format + i18n + test + build + Rust check):
