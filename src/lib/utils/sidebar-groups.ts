@@ -9,6 +9,12 @@ import type { TaskRun } from "$lib/types";
 
 // ── Public types ──
 
+export interface RoomRunMapping {
+  roomId: string;
+  roomName: string;
+  roomKind: string;
+}
+
 export interface ConversationGroup {
   groupKey: string; // "s:<session_id>" or "r:<run.id>"
   runs: TaskRun[]; // sorted by started_at desc
@@ -61,17 +67,36 @@ export function buildProjectFolders(
   pinnedCwds: string[],
   removedCwds: string[] = [],
   pinnedConversationKeys: Set<string> = new Set(),
+  roomRunMap: Map<string, RoomRunMapping> = new Map(),
 ): ProjectFolder[] {
-  // 1. Build removed set (empty string excluded — Uncategorized never removed)
+  // 1. Partition runs: room runs vs regular runs
+  const regularRuns: TaskRun[] = [];
+  const roomRunsByRoom = new Map<string, { mapping: RoomRunMapping; runs: TaskRun[] }>();
+
+  for (const run of runs) {
+    const mapping = roomRunMap.get(run.id);
+    if (mapping) {
+      const existing = roomRunsByRoom.get(mapping.roomId);
+      if (existing) {
+        existing.runs.push(run);
+      } else {
+        roomRunsByRoom.set(mapping.roomId, { mapping, runs: [run] });
+      }
+    } else {
+      regularRuns.push(run);
+    }
+  }
+
+  // 2. Build removed set (empty string excluded — Uncategorized never removed)
   const removedSet = new Set(removedCwds.map(normalizeCwd));
   removedSet.delete("");
 
-  // 2. Clean pinnedCwds — normalize + filter empty + filter removed
+  // 3. Clean pinnedCwds — normalize + filter empty + filter removed
   const cleanPinned = pinnedCwds.map(normalizeCwd).filter((c) => c !== "" && !removedSet.has(c));
 
-  // 3. Bucket runs by normalized cwd
+  // 4. Bucket regular runs by normalized cwd
   const cwdBuckets = new Map<string, TaskRun[]>();
-  for (const run of runs) {
+  for (const run of regularRuns) {
     const cwd = normalizeCwd(run.cwd);
     let bucket = cwdBuckets.get(cwd);
     if (!bucket) {
@@ -182,6 +207,40 @@ export function buildProjectFolders(
     if (!a.isUncategorized && b.isUncategorized) return -1;
     return b.latestActivityAt.localeCompare(a.latestActivityAt);
   });
+
+  // 8. Build virtual "Rooms" folder if there are any room runs
+  if (roomRunsByRoom.size > 0) {
+    const roomConversations: ConversationGroup[] = [];
+    for (const [, { mapping, runs: roomRuns }] of roomRunsByRoom) {
+      roomRuns.sort((a, b) => b.started_at.localeCompare(a.started_at));
+      const latestRun = roomRuns[0];
+      const title = mapping.roomName || "Unnamed Room";
+      const isFavorite = roomRuns.some((r) => favoriteRunIds.has(r.id));
+      const totalMessages = roomRuns.reduce((sum, r) => sum + (r.message_count ?? 0), 0);
+
+      roomConversations.push({
+        groupKey: `room:${mapping.roomId}`,
+        runs: roomRuns,
+        title,
+        latestRun,
+        isFavorite,
+        totalMessages,
+      });
+    }
+
+    roomConversations.sort((a, b) => sortKey(b.latestRun).localeCompare(sortKey(a.latestRun)));
+
+    const latestActivity = roomConversations[0] ? sortKey(roomConversations[0].latestRun) : "";
+    const roomsFolder: ProjectFolder = {
+      cwd: "__rooms__",
+      folderKey: "cwd:__rooms__",
+      isUncategorized: false,
+      conversations: roomConversations,
+      conversationCount: roomConversations.length,
+      latestActivityAt: latestActivity,
+    };
+    folders.unshift(roomsFolder); // pin at top
+  }
 
   return folders;
 }

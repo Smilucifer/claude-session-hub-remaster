@@ -305,6 +305,7 @@
   "sidebar_members": "{count} members",
   "sidebar_tasks": "{count} tasks",
   "sidebar_uncategorized": "Uncategorized",
+  "sidebar_rooms": "Rooms",
   "sidebar_conversations": "{count} conversations",
   "sidebar_newChatInFolder": "New chat",
   "sidebar_showMore": "Show {count} more...",

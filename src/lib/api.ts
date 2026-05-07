@@ -129,6 +129,18 @@ export async function listRooms(): Promise<RoomSummary[]> {
   return invoke<RoomSummary[]>("list_rooms");
 }
 
+export interface RoomRunIndexEntry {
+  room_id: string;
+  room_name: string;
+  room_kind: string;
+  run_ids: string[];
+}
+
+export async function listRoomRunIndex(): Promise<RoomRunIndexEntry[]> {
+  dbg("api", "listRoomRunIndex");
+  return invoke<RoomRunIndexEntry[]>("list_room_run_index");
+}
+
 export async function getRoom(id: string): Promise<RoomDetail> {
   dbg("api", "getRoom", { id });
   return invoke<RoomDetail>("get_room", { id });

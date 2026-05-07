@@ -12,6 +12,7 @@
     listMemoryFiles,
     softDeleteRuns,
     stopSession,
+    listRoomRunIndex,
   } from "$lib/api";
   import ProjectFolderItem from "$lib/components/ProjectFolderItem.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
@@ -39,6 +40,7 @@
     expandForProjectChange,
     normalizeCwd,
     type ConversationGroup,
+    type RoomRunMapping,
   } from "$lib/utils/sidebar-groups";
   import {
     buildResumeLastActiveCommand,
@@ -130,6 +132,7 @@
   let pinnedCwds = $state<string[]>([]);
   let removedCwds = $state<string[]>([]);
   let pinnedConversationKeys = $state<Set<string>>(new Set());
+  let roomRunMap = $state<Map<string, RoomRunMapping>>(new Map());
   let seenMessageCounts = $state<SeenMessageCounts>({});
   let seenMessageCountsLoaded = $state(false);
 
@@ -460,6 +463,25 @@
     }
   }
 
+  async function loadRoomRunMap() {
+    try {
+      const index = await listRoomRunIndex();
+      const map = new Map<string, RoomRunMapping>();
+      for (const entry of index) {
+        for (const runId of entry.run_ids) {
+          map.set(runId, {
+            roomId: entry.room_id,
+            roomName: entry.room_name || "Unnamed Room",
+            roomKind: entry.room_kind,
+          });
+        }
+      }
+      roomRunMap = map;
+    } catch {
+      // Silently fail
+    }
+  }
+
   async function loadSidebarFavorites() {
     try {
       sidebarFavorites = await listPromptFavorites();
@@ -590,6 +612,7 @@
     loadSettings();
     loadSidebarFavorites();
     loadAgentSettingsCache();
+    loadRoomRunMap();
 
     // Load saved CWD and pinned folders from localStorage
     const saved = localStorage.getItem("ocv:project-cwd");
@@ -1032,7 +1055,7 @@
 
   // Build project folder tree for chats tab
   let projectFolders = $derived.by(() =>
-    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds, pinnedConversationKeys),
+    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds, pinnedConversationKeys, roomRunMap),
   );
 
   // Selectable folders: real project folders (exclude Uncategorized)
@@ -2296,13 +2319,22 @@
                 {#each projectFolders as folder (folder.folderKey)}
                   <ProjectFolderItem
                     {folder}
-                    label={folder.isUncategorized
-                      ? t("sidebar_uncategorized")
-                      : cwdDisplayLabel(folder.cwd)}
+                    label={folder.folderKey === "cwd:__rooms__"
+                      ? t("sidebar_rooms")
+                      : folder.isUncategorized
+                        ? t("sidebar_uncategorized")
+                        : cwdDisplayLabel(folder.cwd)}
                     expanded={expandedProjects.has(folder.folderKey)}
                     {selectedRunId}
                     onToggle={() => toggleProject(folder.folderKey)}
-                    onSelectConversation={(runId) => goto(`/chat?run=${runId}`)}
+                    onSelectConversation={(runId) => {
+                      const mapping = roomRunMap.get(runId);
+                      if (mapping) {
+                        goto(`/rooms?room=${mapping.roomId}`);
+                      } else {
+                        goto(`/chat?run=${runId}`);
+                      }
+                    }}
                     onResume={(runId, mode) => goto(`/chat?run=${runId}&resume=${mode}`)}
                     onDelete={requestDeleteConversation}
                     onForceRemove={forceRemoveConversation}

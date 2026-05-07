@@ -305,6 +305,7 @@
   "sidebar_members": "{count} 个成员",
   "sidebar_tasks": "{count} 个任务",
   "sidebar_uncategorized": "未分类",
+  "sidebar_rooms": "会议室",
   "sidebar_conversations": "{count} 个对话",
   "sidebar_newChatInFolder": "新对话",
   "sidebar_showMore": "显示更多 ({count})...",

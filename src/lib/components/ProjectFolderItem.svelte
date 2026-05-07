@@ -65,6 +65,8 @@
 
   let visibleCount = $state(PAGE_SIZE);
 
+  const isRoomsFolder = $derived(folder.folderKey === "cwd:__rooms__");
+
   // Reset visible count when folder collapses
   $effect(() => {
     if (!expanded) visibleCount = PAGE_SIZE;
@@ -146,7 +148,23 @@
       <path d="M9 18l6-6-6-6" />
     </svg>
     <!-- Icon -->
-    {#if folder.isUncategorized}
+    {#if isRoomsFolder}
+      <!-- Layout/Grid icon for Rooms -->
+      <svg
+        class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+      </svg>
+    {:else if folder.isUncategorized}
       <!-- Inbox icon -->
       <svg
         class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
@@ -188,8 +206,8 @@
         {folder.conversationCount}
       </span>
     {/if}
-    <!-- Remove button (×) -->
-    {#if onRemove}
+    <!-- Remove button (×) — hidden for Rooms folder -->
+    {#if onRemove && !isRoomsFolder}
       <button
         class="ml-auto shrink-0 flex h-4 w-4 items-center justify-center rounded opacity-0 text-muted-foreground hover:text-destructive hover:opacity-100 focus-visible:opacity-100 group-hover/folder:opacity-100 transition-opacity"
         aria-label={t("sidebar_removeProject")}
