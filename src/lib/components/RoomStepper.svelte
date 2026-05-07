@@ -73,7 +73,7 @@
         <span class="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 {statusColor(status)}"></span>
         <span class="flex flex-col gap-0.5 min-w-0">
           <span class="text-xs font-medium">
-            Turn {turn.idx} · {t(roomTurnModeKey(turn.mode))}
+            Turn {turn.idx} · {t(roomTurnModeKey(turn.mode) as any)}
           </span>
           <span class="text-xs text-muted-foreground truncate">
             {turn.user_input.slice(0, 60)}{turn.user_input.length > 60 ? "…" : ""}
