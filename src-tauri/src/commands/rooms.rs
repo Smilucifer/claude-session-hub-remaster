@@ -88,6 +88,85 @@ pub fn list_room_run_index() -> Result<Vec<RoomRunIndexEntry>, String> {
     Ok(entries)
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ParticipantSnapshot {
+    pub participant_id: String,
+    pub label: String,
+    pub content: String,
+    pub status: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RoomTurnSnapshot {
+    pub turn: crate::room::models::RoomTurn,
+    pub participant_contents: Vec<ParticipantSnapshot>,
+}
+
+#[tauri::command]
+pub fn get_room_turn_snapshot(
+    room_id: String,
+    turn_id: String,
+) -> Result<RoomTurnSnapshot, String> {
+    let room =
+        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
+    let turns = storage::rooms::list_public_turns(&room_id)?;
+    let turn = turns
+        .iter()
+        .find(|t| t.id == turn_id)
+        .ok_or_else(|| format!("Turn {turn_id} not found"))?;
+
+    let mut participant_contents = Vec::new();
+    for response in &turn.responses {
+        let label = room
+            .participants
+            .iter()
+            .find(|p| p.id == response.participant_id)
+            .map(|p| p.label.clone())
+            .unwrap_or_else(|| response.participant_id.clone());
+
+        let content = if response.status == "deleted" {
+            response.preview.clone().unwrap_or_default()
+        } else {
+            let events = storage::events::list_events(&response.run_id, 0);
+            let filtered: Vec<_> = events
+                .into_iter()
+                .filter(|e| e.seq >= response.event_seq_start && e.seq <= response.event_seq_end)
+                .collect();
+            extract_assistant_text(&filtered)
+                .or_else(|| response.preview.clone())
+                .unwrap_or_default()
+        };
+
+        participant_contents.push(ParticipantSnapshot {
+            participant_id: response.participant_id.clone(),
+            label,
+            content,
+            status: response.status.clone(),
+            error: response.error.clone(),
+        });
+    }
+
+    Ok(RoomTurnSnapshot {
+        turn: turn.clone(),
+        participant_contents,
+    })
+}
+
+fn extract_assistant_text(events: &[crate::models::RunEvent]) -> Option<String> {
+    let mut texts = Vec::new();
+    for event in events {
+        if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
+            texts.push(text.to_string());
+        }
+    }
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join("\n"))
+    }
+}
+
 fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
     match kind
         .unwrap_or("roundtable")
