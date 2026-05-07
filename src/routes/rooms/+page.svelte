@@ -17,7 +17,6 @@
     roomParticipantBadge,
     roomParticipantMetaLabel,
     roomMessagePlaceholderKey,
-    roomTurnModeLabel,
   } from "$lib/utils/room-ui";
   import RoomStepper from "$lib/components/RoomStepper.svelte";
 
@@ -63,11 +62,6 @@
     }
     return participants.map((p, index) => ({ index, participant: p }));
   });
-  let participantLabelMap = $derived(
-    Object.fromEntries(
-      (store.room?.participants ?? []).map((p) => [p.participant.id, p.participant.label]),
-    ),
-  );
   let roomComposerPlaceholderKey = $derived(
     store.room ? roomMessagePlaceholderKey(store.room.kind) : "room_roundtablePlaceholder",
   );
