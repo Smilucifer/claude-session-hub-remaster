@@ -53,9 +53,9 @@ Supported:
 
 ### Rooms, Roundtable, and Driver/Copilot
 
-Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude / Codex participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。
+Rooms 是多智能体协作的入口。你可以创建 Room、添加 Claude / Codex participant，并把 participant 关联到已有或新建的 Run。Room 删除不会删除对应 Run。Research Room 作为 Room kind 在同一入口中创建。Room participant 会话在侧边栏中以虚拟"会议室"文件夹单独分组，与项目会话分离。
 
-Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude / Codex participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point.
+Rooms are the entry point for multi-agent collaboration. You can create a Room, add a Claude / Codex participant, and link that participant to an existing or newly created Run. Deleting a Room does not delete the linked Run. Research Room is available as another Room kind from the same entry point. Room participant sessions are grouped in a virtual "Rooms" folder in the sidebar, separate from project sessions.
 
 当前适合用来：
 
@@ -63,7 +63,9 @@ Rooms are the entry point for multi-agent collaboration. You can create a Room, 
 - 在 Roundtable 时间线里向多个活跃 participant 分发同一个问题。
 - 使用 `@debate` 让 participant 基于上一轮公开回复互相比较观点。
 - 使用 `@summary @name` 指定一个 participant 总结公开 Room 历史。
-- 使用 `@name message` 发送私有回合，私有内容不会出现在公开时间线中。
+- 使用 `@DisplayName message`（SingleTarget）发送公开回合，仅由被点名的 participant 回答。
+- 使用 `/dm @Name message` 发送私有回合，私有内容不会出现在公开时间线中。
+- 通过 Stepper mini-map 逐轮回放——点击任意回合加载快照，紫色横幅 + pane 内容叠加显示。
 - 创建 Driver Room，让一个 Driver 通过 `/review` 向一个或多个 Copilot 请求只读审查。
 - Driver review 会生成 room-local `.arena/context.md`、`.arena/state.md` 和 `.arena/memory`，用于稳定引用 room / run 上下文。
 - `.arena` 文件是本地运行上下文镜像，可能包含 run references、memo 和最近的公开 preview；不要把它当成对外分享材料。
@@ -76,7 +78,9 @@ Currently useful for:
 - Sending one prompt to multiple active participants in a Roundtable timeline.
 - Using `@debate` to ask participants to compare positions based on previous public replies.
 - Using `@summary @name` to ask one participant to summarize the public Room history.
-- Using `@name message` for private turns that do not appear in the public timeline.
+- Using `@DisplayName message` (SingleTarget) to send a public turn answered only by the named participant.
+- Using `/dm @Name message` for private turns that do not appear in the public timeline.
+- Turn-by-turn Stepper mini-map for room replay — click any turn to load its snapshot with purple banner and pane content overlay.
 - Creating a Driver Room where one Driver asks one or more Copilots for read-only review with `/review`.
 - Driver review generates room-local `.arena/context.md`, `.arena/state.md`, and `.arena/memory` files for stable room / run context references.
 - `.arena` files are local runtime context mirrors and may include run references, memo text, and recent public previews; do not treat them as shareable artifacts.
@@ -192,9 +196,10 @@ Current limitations:
 - Phase 7：Codex PTY 原生 CLI 适配器、provider 设置页动态化、Roundtable 三栏布局重设计、全局备忘面板重构。
 - Phase 7.x：Provider 配置完全动态化（从设置页读取而非硬编码）、per-session 临时配置 JSON、MiMo Pro provider、MiMo 余额/用量检查器（cookie 认证，琥珀色主题卡片）。
 - Phase 7.y：Room 删除时停止 participant 并软删除 runs、Roundtable 增量回合推送（JSONL 去重 + 1500ms 前端轮询）、右键"移除会话"上下文菜单、participant 状态本地化、seat label 修改自动同步 prompt。
+- Phase 8：Gemini 彻底移除（~54 文件）、Stepper mini-map 逐轮回放替换 History strip、`@DisplayName` SingleTarget 公开点名、Room sidebar 虚拟分组、seat prompt 英文约束、context events 验证、code review 修复。
 - Multi-CLI capability matrix（Phase 5.5 / Phase 7，七个 provider 能力矩阵）。
 - 全局快速备忘入口统一（所有页面顶栏）。
-- 1217 前端测试通过，cargo check 干净。
+- 1214 前端测试通过，cargo check 干净。
 
 计划：
 
@@ -207,9 +212,10 @@ Completed:
 - Phase 7: Codex PTY native CLI adapter, dynamic provider settings, Roundtable three-pane layout redesign, global memo panel refactor.
 - Phase 7.x: Fully dynamic provider config (reads from settings page instead of hardcoded), per-session temp JSON, MiMo Pro provider, MiMo balance/usage checker (cookie-based auth, amber-themed card).
 - Phase 7.y: Room delete stops participants + soft-deletes runs, incremental roundtable turns (JSONL dedup + 1500ms frontend polling), right-click "Remove Session" context menu, localized participant status labels, seat label auto-syncs prompt.
+- Phase 8: Gemini removal (~54 files), Stepper mini-map replaces History strip, `@DisplayName` SingleTarget public targeting, Room sidebar virtual grouping, seat prompt English constraint, context events verification, code review fixes.
 - Multi-CLI capability matrix (Phase 5.5 / Phase 7, seven providers).
 - Unified global Quick Memo entry point (all page top bars).
-- 1217 frontend tests passing, cargo check clean.
+- 1214 frontend tests passing, cargo check clean.
 
 Plan:
 

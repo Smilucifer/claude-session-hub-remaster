@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 7 complete (2026-05-06). Post-phase additions (2026-05-07): provider config fully dynamized (reads from settings page instead of hardcoded models/URLs), per-session temp JSON (`--settings session-{run_id}.json`), MiMo Pro provider added, and MiMo balance/usage checker (cookie-based auth to platform.xiaomimimo.com, dual API: `/api/v1/balance` + `/api/v1/tokenPlan/usage`, amber-themed card on usage page). Room optimizations (2026-05-07): delete active room now stops participant sessions and soft-deletes runs, roundtable turns stream incrementally via JSONL dedup + 1500ms frontend polling, right-click "Remove Session" context menu with force-stop, participant status labels localized (pending→Starting..., running→Thinking..., etc.), seat label change auto-syncs prompt. 3 svelte-check errors (CodeEditor false positive), 22 a11y warnings, 1217 frontend tests passing, cargo check clean. Installers built at `src-tauri/target/release/bundle/`.
+**Current phase:** Phase 8 complete (2026-05-08). Gemini removed entirely (~54 files). Roundtable enhancements: Stepper mini-map replaces History strip for turn-by-turn replay with snapshot loading, `@DisplayName msg` sends public SingleTarget turn to the named participant (`/dm @Name msg` preserves private turns), virtual "Rooms" sidebar folder groups room participant runs separately from project runs, seat prompt includes English evidence constraint. Context events verified across all session types (Claude + compatible API full events; Codex PTY is protocol-limited). Code review findings addressed: snapshot content renders in panes, activeSnapshot resets on room switch/send/delete, Private handler uses ambiguity-safe lookup. 4 svelte-check errors (CodeEditor false positives + pre-existing MessageKey), 22 a11y warnings, 1214 frontend tests passing, cargo check clean.
 
 ## Standard workflow
 
@@ -107,12 +107,12 @@ If narrowing Rust tests further, use the module path pattern accepted by `cargo 
 
 - `src/`: SvelteKit frontend (Svelte 5 runes).
 - `src/lib/stores/`: stateful frontend stores; the main app behavior is coordinated here.
-- `src/lib/components/`: shared UI components — GlobalMemoPanel, ChatMessage, CommandPalette, modals, and provider/settings panels.
+- `src/lib/components/`: shared UI components — GlobalMemoPanel, ChatMessage, CommandPalette, RoomStepper, modals, and provider/settings panels.
 - `src/lib/utils/`: frontend utilities — provider-catalog, room-ui, format, agent-capabilities, and i18n helpers.
 - `src/lib/transport/`: transport abstraction between desktop Tauri IPC and browser/WebSocket mode.
 - `src/routes/`: route-level UI pages — chat, rooms, memory, explorer, plugins, usage, history, settings. (`/memo` now redirects to `/chat`; memo is a global pop-out panel.)
 - `src-tauri/src/commands/`: Tauri IPC command surface consumed by the frontend.
-- `src-tauri/src/agent/`: agent launch, session, stream, PTY (including native PTY for Codex/Gemini), native transcript parsing, and Windows toolchain handling.
+- `src-tauri/src/agent/`: agent launch, session, stream, PTY (including native PTY for Codex), native transcript parsing, and Windows toolchain handling.
 - `src-tauri/src/room/`: room orchestration, room-specific execution adapters, and roundtable prompts.
 - `src-tauri/src/storage/`: local-first persistence for runs, rooms, memos, settings, artifacts, events, and indexes.
 - `messages/`: i18n resources. When adding UI text, update both `messages/en.json` and `messages/zh-CN.json`.
@@ -127,7 +127,7 @@ The frontend is not organized around thin pages with all logic inline. The impor
 
 Key stores:
 - `src/lib/stores/session-store.svelte.ts`: the single source of truth for chat session state. It owns the session phase/state machine, timeline, tool events, usage, permissions, elicitation prompts, task notifications, and session metadata.
-- `src/lib/stores/room-store.svelte.ts`: manages room list/detail state, room creation, participant creation, run attachment, roundtable messaging, and one-click Debate/Summary actions.
+- `src/lib/stores/room-store.svelte.ts`: manages room list/detail state, room creation, participant creation, run attachment, roundtable messaging, one-click Debate/Summary actions, and stepper snapshot state.
 - `src/lib/stores/memo-store.svelte.ts`: handles global-only memos in the pop-out panel (project-scoped memo was removed from the visible UI in Phase 7; the backend still supports it for backward compatibility).
 
 When debugging UI behavior, check stores before editing route components.
@@ -147,7 +147,7 @@ The frontend mainly talks to Rust through Tauri commands in `src-tauri/src/comma
 Important command groups:
 - `commands/chat.rs`: chat send path for `pipe_exec` runs, attachment staging, and spawn flow.
 - `commands/session.rs`: actor-backed session lifecycle, auth/env resolution, resume/stop flow, provider-native launch config generation, and Windows MSVC env injection.
-- `commands/rooms.rs`: room CRUD, participant creation, run attachment, and room capability checks.
+- `commands/rooms.rs`: room CRUD, participant creation, run attachment, room capability checks, `list_room_run_index` (sidebar grouping), and `get_room_turn_snapshot` (stepper replay).
 - `commands/balance.rs`: DeepSeek, Packy, and MiMo balance/usage queries (Phase 7 balance helper with cookie-based auth for MiMo).
 - `commands/runs.rs`, `commands/history.rs`, `commands/memos.rs`, `commands/settings.rs`: persistence-backed app features.
 
@@ -157,12 +157,12 @@ If a frontend API call seems to "just update UI", verify whether it actually map
 
 A run can execute through:
 - `SessionActor` / stream-session path (Claude Code sessions and Claude-compatible providers).
-- `PipeExec` path (deprecated for Codex/Gemini; used for print/pipe workflows).
-- **Native PTY path** (Phase 7): Codex and Gemini use PTY-backed native CLI execution with transcript-based completion detection instead of process-exit semantics.
+- `PipeExec` path (used for print/pipe workflows).
+- **Native PTY path** (Phase 7): Codex uses PTY-backed native CLI execution with transcript-based completion detection instead of process-exit semantics.
 
 Relevant code lives in `src-tauri/src/agent/`:
 - `native_pty.rs`: PTY spawn and terminal-state classification (Completed/Stopped/Failed).
-- `native_transcript.rs`: transcript file watching, baseline tracking for resume, and Codex/Gemini completion extraction.
+- `native_transcript.rs`: transcript file watching, baseline tracking for resume, and Codex completion extraction.
 
 When fixing bugs around chat, resume, room participation, or provider support, always confirm which execution path is in play.
 
@@ -171,7 +171,7 @@ When fixing bugs around chat, resume, room participation, or provider support, a
 This codebase intentionally separates what the UI presents as a provider from which execution agent actually runs the work.
 
 Current providers (Phase 7):
-- **Official CLI providers** (subscription): Claude, Codex, Gemini — use their native CLI with bypass/yolo permissions.
+- **Official CLI providers** (subscription): Claude, Codex — use their native CLI with bypass/yolo permissions.
 - **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
 
 Key files:
@@ -208,14 +208,16 @@ Rooms are not just folders for runs. The backend actively orchestrates room turn
 - fanout turns
 - `@debate`
 - `@summary @name`
-- private turns like `@name message`
+- `@DisplayName message` (SingleTarget — public turn to only the named participant)
+- `/dm @Name message` (Private — private turn, content hidden from public timeline)
 - driver/review and research-oriented room flows
 
-The frontend Room page (Phase 7) uses a three-pane workspace layout:
+The frontend Room page uses a three-pane workspace layout:
 - Three equal-width, scrollable participant panes fill the primary space.
 - Pane headers show participant label, provider/model metadata, status badge, and elapsed time.
-- A collapsible turn-history strip sits below the panes with color-coded turn chips and per-participant status dots.
+- A `RoomStepper` component below the panes replaces the old History strip, showing turn-by-turn status with clickable snapshot replay (purple banner + pane content overlay).
 - The action toolbar (Debate/Summary/summarizer selector) and composer are fixed at the bottom.
+- Room participant runs appear in a virtual "Rooms" folder in the sidebar, separate from project-grouped runs.
 
 If changing room behavior, inspect both:
 - `src/lib/stores/room-store.svelte.ts`
@@ -242,7 +244,7 @@ This repository is explicitly Windows-first. Do not assume WSL/macOS/Linux workf
 
 Important backend support already exists for Windows-native CLI execution:
 - automatic MSVC developer environment injection for native-toolchain projects.
-- special handling for npm `.cmd` shims so Codex/Gemini can launch as `node.exe + CLI js`.
+- special handling for npm `.cmd` shims so Codex can launch as `node.exe + CLI js`.
 - code in `src-tauri/src/agent/windows_msvc_env.rs` and related session/chat spawn paths.
 
 When changing spawn behavior, PATH handling, or provider launch commands, preserve Windows desktop compatibility.
@@ -305,6 +307,7 @@ Key phases and their status:
 | 7 | Native CLI auth, provider settings, roundtable layout | [done] |
 | 7.x | Provider config dynamization, per-session JSON, MiMo Pro | [done] |
 | 7.y | Room optimizations: delete cleanup, incremental turns, status labels, context menu | [done] |
+| 8 | Gemini removal, Stepper mini-map, @Name SingleTarget, Room sidebar grouping, prompt constraint | [done] |
 
 Detailed plans and review responses are in `docs/`.
 
@@ -315,4 +318,4 @@ Detailed plans and review responses are in `docs/`.
 - SvelteKit uses `adapter-static` with `fallback: "index.html"`.
 - Frontend test environment is `node`, configured in `vitest.config.ts`.
 - Provider-native launch config templates are in `src-tauri/src/commands/session.rs` (builder boundary).
-- The PTY-based native adapter (`native_pty.rs` + `native_transcript.rs`) is the canonical execution path for Codex/Gemini. Do not reintroduce `codex exec` or pipe-based Gemini execution.
+- The PTY-based native adapter (`native_pty.rs` + `native_transcript.rs`) is the canonical execution path for Codex. Do not reintroduce `codex exec` or pipe-based execution for native CLI providers.
