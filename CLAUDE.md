@@ -172,7 +172,7 @@ This codebase intentionally separates what the UI presents as a provider from wh
 
 Current providers (Phase 9.y):
 - **Official CLI providers** (subscription): Claude, Codex — use their native CLI with bypass/yolo permissions.
-- **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
+- **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro, Packy CX2CC — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
 
 Key files:
 - `src/lib/utils/provider-catalog.ts`: PHASE7_PROVIDERS array, provider metadata, and label resolution.
