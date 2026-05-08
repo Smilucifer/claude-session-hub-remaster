@@ -1,5 +1,17 @@
 # Changelog / 更新日志
 
+## Phase 9.y (2026-05-09)
+
+- 移除 5 个无后端支持的 provider 预设：kimi-coding、doubao、minimax、minimax-cn、mimo（前端 platform-presets.ts + 后端 onboarding.rs/settings.rs 同步清理）
+- `PlatformCredential.extra_env` 白名单机制：`ALLOWED_EXTRA_ENV_KEYS` 限制用户可覆盖的环境变量（模型 tier + effort level），防止误覆盖稳定性变量
+- `merge_extra_env` 合并函数：stability_env_vars → extra_env 覆盖顺序，空值过滤，6 个单元测试覆盖
+- Settings 页 CC Session provider 卡片重设计：API Key 始终可见 + 可折叠高级配置面板（6 个 env var 字段：5 文本框 + 1 effort level 下拉框）
+- Chat 页模型下拉菜单显示 tier 标签（Opus/Sonnet/Haiku），使用 `expandModelsToTiers` 展开，支持 extra_env 覆盖
+- 第三方 provider 模型热切换：移除 `!isThirdParty` 限制，`set_model` control protocol 经 DeepSeek 和 MiMo Pro 实测有效
+- extra_env 输入框统一为 `onblur` 持久化，与 API Key 字段行为一致
+- EFFORT_LEVEL 下拉框改用 Svelte 受控 `value` 绑定
+- placeholder 使用 tier 展开结果，修复 2 模型配置下 sonnet/haiku 显示错误的问题
+
 ## Phase 9.x (2026-05-09)
 
 - Room adapter timeout 重构：固定 5 分钟 `max_polls` 改为活动感知双层超时（10 分钟不活跃 + 30 分钟硬截止）

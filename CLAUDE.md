@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 9.x (2026-05-09). Room adapter timeout fix: activity-aware dual-deadline (10min inactivity + 30min hard limit), throttled `active_at` persistence, cancel turn button, frontend long-running warning and last-activity display.
+**Current phase:** Phase 9.y (2026-05-09). Provider presets cleanup, extra_env whitelist mechanism, tier-labeled model dropdown, collapsible advanced config panel, third-party model hot-switching.
 
 ## Standard workflow
 
@@ -170,7 +170,7 @@ When fixing bugs around chat, resume, room participation, or provider support, a
 
 This codebase intentionally separates what the UI presents as a provider from which execution agent actually runs the work.
 
-Current providers (Phase 7):
+Current providers (Phase 9.y):
 - **Official CLI providers** (subscription): Claude, Codex — use their native CLI with bypass/yolo permissions.
 - **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
 
@@ -178,10 +178,12 @@ Key files:
 - `src/lib/utils/provider-catalog.ts`: PHASE7_PROVIDERS array, provider metadata, and label resolution.
 - `src/lib/utils/platform-presets.ts`: platform-specific base URLs and configuration defaults.
 
-Provider-native launch config generation (Phase 7):
+Provider-native launch config generation (Phase 9.y):
 - DeepSeek and MiMo Pro use a fixed-URL template (API key only; default model and base_url from preset).
 - GLM, QWEN, KIMI use a shared parameterized template (API key + base URL + model).
 - All providers use per-session temp JSON (`session-{run_id}.json`) generated fresh from the latest credential in settings, passed via `claude --settings <temp-json>` to override global `~/.claude/settings.json`.
+- User-configurable env vars are stored in `PlatformCredential.extra_env` and merged via a whitelist (`ALLOWED_EXTRA_ENV_KEYS` in `provider_claude_config.rs`). Only model tier overrides and effort level are allowed; stability vars cannot be overwritten.
+- Chat page model dropdown shows tier-labeled models (Opus/Sonnet/Haiku) via `expandModelsToTiers`, with extra_env overrides applied. Model hot-switching via `set_model` control protocol works for both Anthropic and third-party providers.
 
 Do not collapse provider selection, model display, and actual CLI spawn logic into a single assumption.
 
@@ -334,6 +336,7 @@ Key phases and their status:
 | 8.x | UX optimizations: sidebar preview fix, update URL, provider model auto-switch, room command hints | [done] |
 | 9 | History page rewrite: CC native sessions, subagent filtering, simplified UI | [done] |
 | 9.x | Room adapter timeout fix: activity-aware timeout, cancel turn, frontend UX | [done] |
+| 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel | [done] |
 
 Detailed plans and review responses are in `docs/`.
 
