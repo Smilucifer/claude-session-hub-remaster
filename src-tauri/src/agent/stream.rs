@@ -6,6 +6,7 @@ use crate::models::{ChatDelta, ChatDone, RunEventType};
 use crate::process_ext::HideConsole;
 use crate::storage;
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ fn resolve_process_command(command: &str) -> String {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn resolve_windows_npm_shim(command: &str) -> Option<(String, Vec<String>)> {
     #[cfg(windows)]
     {
@@ -76,9 +78,10 @@ fn resolve_windows_npm_shim(command: &str) -> Option<(String, Vec<String>)> {
     }
 }
 
-fn resolve_spawn_invocation(command: String, mut args: Vec<String>) -> (String, Vec<String>) {
+fn resolve_spawn_invocation(command: String, args: Vec<String>) -> (String, Vec<String>) {
     #[cfg(windows)]
     if let Some((node, mut shim_args)) = resolve_windows_npm_shim(&command) {
+        let mut args = args;
         shim_args.append(&mut args);
         return (node, shim_args);
     }
