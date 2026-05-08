@@ -88,7 +88,7 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
   },
   {
     id: "mimo-plan",
-    label: "Xiaomi",
+    label: "Xiaomi (Plan)",
     mode: "claude_compatible_api",
     executionAgent: "claude",
     platformId: "mimo-plan",
@@ -129,8 +129,8 @@ export function providerIdForRun(agent: string, platformId?: string | null): Pha
   if (platformId === "zhipu" || platformId === "zhipu-intl") return "glm";
   if (platformId === "bailian") return "qwen";
   if (platformId === "kimi") return "kimi";
-  if (platformId === "mimo-pro" || platformId === "mimo-plan") return "mimo-plan";
-  if (platformId === "xiaomi" || platformId === "mimo-api") return "mimo-api";
+  if (platformId === "mimo-plan") return "mimo-plan";
+  if (platformId === "mimo-api") return "mimo-api";
   if (platformId === "packy-cx2cc") return "packy-cx2cc";
   if (agent === "codex") return "codex";
   return "claude";

@@ -511,7 +511,14 @@ fn resolve_auth_env_for_platform(
 fn is_phase7_claude_compatible_api_platform(platform_id: &str) -> bool {
     matches!(
         platform_id,
-        "deepseek" | "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-pro" | "mimo-plan" | "xiaomi" | "mimo-api" | "packy-cx2cc"
+        "deepseek"
+            | "zhipu"
+            | "zhipu-intl"
+            | "bailian"
+            | "kimi"
+            | "mimo-plan"
+            | "mimo-api"
+            | "packy-cx2cc"
     )
 }
 
@@ -616,8 +623,7 @@ pub(crate) async fn start_session_impl(
     // env vars are injected from the same materialized config into the CLI process.
     let provider_config = match effective_pid {
         Some(pid) => {
-            let provider_id =
-                crate::agent::provider_claude_config::platform_to_provider_id(pid);
+            let provider_id = crate::agent::provider_claude_config::platform_to_provider_id(pid);
             let cred_lookup = provider_id.and_then(|id| {
                 user_settings
                     .platform_credentials
@@ -628,7 +634,10 @@ pub(crate) async fn start_session_impl(
             match cred_lookup {
                 Some((provider_id, cred)) => {
                     match crate::agent::provider_claude_config::write_provider_claude_config(
-                        provider_id, pid, cred, &run_id,
+                        provider_id,
+                        pid,
+                        cred,
+                        &run_id,
                     ) {
                         Ok(materialized) => {
                             log::info!(
@@ -638,9 +647,7 @@ pub(crate) async fn start_session_impl(
                             Some(materialized)
                         }
                         Err(e) => {
-                            log::warn!(
-                                "[session] failed to write provider Claude config: {e}"
-                            );
+                            log::warn!("[session] failed to write provider Claude config: {e}");
                             return Err(e);
                         }
                     }
@@ -658,7 +665,9 @@ pub(crate) async fn start_session_impl(
         &meta.cwd,
     );
     if let Some(config) = provider_config.as_ref() {
-        let extra_env = resolved.extra_env.get_or_insert_with(std::collections::HashMap::new);
+        let extra_env = resolved
+            .extra_env
+            .get_or_insert_with(std::collections::HashMap::new);
         for (key, value) in &config.env {
             extra_env.insert(key.clone(), value.clone());
         }
@@ -1817,10 +1826,7 @@ async fn spawn_cli_process(
     if let Some(config_path) = provider_config_path {
         claude_args.push("--settings".into());
         claude_args.push(config_path.to_string_lossy().into_owned());
-        log::info!(
-            "[session] --settings {}",
-            config_path.display()
-        );
+        log::info!("[session] --settings {}", config_path.display());
     }
 
     // Session mode args

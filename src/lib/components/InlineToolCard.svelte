@@ -988,73 +988,75 @@
                       text={pq.question}
                       class="text-sm text-foreground mb-1.5 [&>*:last-child]:mb-0"
                     />
-                    <div class="flex flex-wrap gap-1.5">
-                      {#each pq.options as option}
+                    <div class="space-y-1.5">
+                      <div class="grid gap-1.5 sm:grid-cols-2">
+                        {#each pq.options as option}
+                          <button
+                            type="button"
+                            class="w-full min-w-0 break-words rounded-md border px-3 py-1 text-left text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {questionAnswers[
+                              pq.question
+                            ] === option.label
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border bg-background text-foreground hover:bg-accent hover:border-ring/30'}"
+                            disabled={submitting}
+                            onclick={() => {
+                              otherActive = { ...otherActive, [pq.question]: false };
+                              selectQuestionAnswer(pq.question, option.label);
+                            }}
+                          >
+                            {#if questionAnswers[pq.question] === option.label}
+                              <svg
+                                class="inline h-3 w-3 mr-0.5 -mt-0.5"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg
+                              >
+                            {/if}
+                            <span class="break-words">{option.label}</span>
+                            {#if option.description}
+                              <span
+                                class="mt-0.5 block break-words text-[10px] font-normal text-muted-foreground/70"
+                              >
+                                <MarkdownContent
+                                  text={option.description}
+                                  class="[&>*:last-child]:mb-0 [&_p]:break-words [&_p]:text-[10px] [&_p]:leading-snug"
+                                />
+                              </span>
+                            {/if}
+                          </button>
+                        {/each}
+                        <!-- Other option -->
                         <button
                           type="button"
-                          class="rounded-md border px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed text-left {questionAnswers[
+                          class="w-full min-w-0 rounded-md border border-dashed px-3 py-1 text-left text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {otherActive[
                             pq.question
-                          ] === option.label
+                          ] && questionAnswers[pq.question] === 'Other'
                             ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background text-foreground hover:bg-accent hover:border-ring/30'}"
+                            : 'border-border bg-background text-muted-foreground hover:bg-accent hover:border-ring/30'}"
                           disabled={submitting}
                           onclick={() => {
-                            otherActive = { ...otherActive, [pq.question]: false };
-                            selectQuestionAnswer(pq.question, option.label);
+                            const wasActive = otherActive[pq.question];
+                            otherActive = { ...otherActive, [pq.question]: !wasActive };
+                            if (!wasActive) {
+                              selectQuestionAnswer(pq.question, "Other");
+                            } else if (questionAnswers[pq.question] === "Other") {
+                              const { [pq.question]: _, ...rest } = questionAnswers;
+                              questionAnswers = rest;
+                            }
                           }}
                         >
-                          {#if questionAnswers[pq.question] === option.label}
-                            <svg
-                              class="inline h-3 w-3 mr-0.5 -mt-0.5"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2.5"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg
-                            >
-                          {/if}
-                          <span>{option.label}</span>
-                          {#if option.description}
-                            <span
-                              class="block text-[10px] text-muted-foreground/70 font-normal mt-0.5"
-                            >
-                              <MarkdownContent
-                                text={option.description}
-                                class="[&>*:last-child]:mb-0 [&_p]:text-[10px] [&_p]:leading-snug"
-                              />
-                            </span>
-                          {/if}
+                          {t("inline_other")}
                         </button>
-                      {/each}
-                      <!-- Other option -->
-                      <button
-                        type="button"
-                        class="rounded-md border border-dashed px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {otherActive[
-                          pq.question
-                        ] && questionAnswers[pq.question] === 'Other'
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border bg-background text-muted-foreground hover:bg-accent hover:border-ring/30'}"
-                        disabled={submitting}
-                        onclick={() => {
-                          const wasActive = otherActive[pq.question];
-                          otherActive = { ...otherActive, [pq.question]: !wasActive };
-                          if (!wasActive) {
-                            selectQuestionAnswer(pq.question, "Other");
-                          } else if (questionAnswers[pq.question] === "Other") {
-                            const { [pq.question]: _, ...rest } = questionAnswers;
-                            questionAnswers = rest;
-                          }
-                        }}
-                      >
-                        {t("inline_other")}
-                      </button>
+                      </div>
                       {#if otherActive[pq.question]}
                         <input
                           type="text"
                           bind:value={otherText[pq.question]}
                           placeholder={t("inline_otherPlaceholder")}
-                          class="w-full mt-0.5 rounded-md border border-border bg-transparent px-2 py-1 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                          class="mt-1 w-full rounded-md border border-border bg-transparent px-2 py-1 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       {/if}
                     </div>

@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 9.y (2026-05-09). Provider presets cleanup, extra_env whitelist mechanism, tier-labeled model dropdown, collapsible advanced config panel, third-party model hot-switching.
+**Current phase:** Phase 9.y (2026-05-09). Provider presets cleanup, extra_env whitelist, tier-labeled model dropdown, collapsible advanced config panel, third-party model hot-switching, old ID removal (mimo-pro/xiaomi/mimo), provider label disambiguation.
 
 ## Standard workflow
 
@@ -337,7 +337,7 @@ Key phases and their status:
 | 8.x | UX optimizations: sidebar preview fix, update URL, provider model auto-switch, room command hints | [done] |
 | 9 | History page rewrite: CC native sessions, subagent filtering, simplified UI | [done] |
 | 9.x | Room adapter timeout fix: activity-aware timeout, cancel turn, frontend UX | [done] |
-| 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel | [done] |
+| 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel, old ID removal, label disambiguation | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

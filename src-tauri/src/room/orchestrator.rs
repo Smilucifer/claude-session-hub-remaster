@@ -853,11 +853,7 @@ pub fn build_fanout_prompt(turn_num: u64, user_input: &str, data_pack: Option<&s
     body
 }
 
-pub fn build_singletarget_prompt(
-    turn_num: u64,
-    target_label: &str,
-    user_message: &str,
-) -> String {
+pub fn build_singletarget_prompt(turn_num: u64, target_label: &str, user_message: &str) -> String {
     format!(
         "[通用圆桌 · 第 {turn_num} 轮 · @single-target → {target_label}]\n\n\
          ## 用户指名提问\n\
@@ -1404,23 +1400,23 @@ fn run_preview(run_id: &str) -> Option<String> {
         run_events.len(),
         assistant_count
     );
-    if let Some(text) = run_events
-        .into_iter()
-        .rev()
-        .find_map(|event| {
-            if !matches!(event.event_type, crate::models::RunEventType::Assistant) {
-                return None;
-            }
-            event
-                .payload
-                .get("text")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-                .map(ToString::to_string)
-        })
-    {
-        log::debug!("[room] run_preview pass1 hit: run_id={}, len={}", run_id, text.len());
+    if let Some(text) = run_events.into_iter().rev().find_map(|event| {
+        if !matches!(event.event_type, crate::models::RunEventType::Assistant) {
+            return None;
+        }
+        event
+            .payload
+            .get("text")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(ToString::to_string)
+    }) {
+        log::debug!(
+            "[room] run_preview pass1 hit: run_id={}, len={}",
+            run_id,
+            text.len()
+        );
         return Some(text);
     }
 
@@ -1439,7 +1435,9 @@ fn run_preview(run_id: &str) -> Option<String> {
             if v.get("_bus").and_then(|b| b.as_bool()) != Some(true) {
                 continue;
             }
-            let Some(event) = v.get("event") else { continue };
+            let Some(event) = v.get("event") else {
+                continue;
+            };
             let etype = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
             if etype == "message_delta" || etype == "message_complete" {
                 bus_delta_count += 1;
@@ -2296,7 +2294,8 @@ mod tests {
                     )
                     .unwrap();
 
-                    let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+                    let sessions: ActorSessionMap =
+                        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
                     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
                     sessions
                         .lock()
@@ -2332,7 +2331,11 @@ mod tests {
     #[test]
     fn failed_response_marks_room_response_failed_with_error() {
         let participant = participant("p1", "Alice");
-        let response = failed_response(&participant, 7, "Timed out waiting for Codex transcript completion");
+        let response = failed_response(
+            &participant,
+            7,
+            "Timed out waiting for Codex transcript completion",
+        );
 
         assert_eq!(response.participant_id, participant.id);
         assert_eq!(response.run_id, participant.run_id);

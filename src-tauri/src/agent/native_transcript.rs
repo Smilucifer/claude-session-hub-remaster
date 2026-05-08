@@ -320,8 +320,14 @@ mod tests {
             byte_len: 42,
         };
 
-        assert_eq!(matching_baseline_len(Path::new("same.jsonl"), Some(&baseline)), 42);
-        assert_eq!(matching_baseline_len(Path::new("other.jsonl"), Some(&baseline)), 0);
+        assert_eq!(
+            matching_baseline_len(Path::new("same.jsonl"), Some(&baseline)),
+            42
+        );
+        assert_eq!(
+            matching_baseline_len(Path::new("other.jsonl"), Some(&baseline)),
+            0
+        );
     }
 
     #[test]
@@ -332,10 +338,14 @@ mod tests {
             "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"new-1\"}}\n",
             "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"last_agent_message\":\"new-2\"}}\n"
         );
-        let baseline = raw.find("{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\"")
+        let baseline = raw
+            .find("{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\"")
             .unwrap() as u64;
 
-        assert_eq!(parse_codex_turn_after(raw, baseline).as_deref(), Some("new-2"));
+        assert_eq!(
+            parse_codex_turn_after(raw, baseline).as_deref(),
+            Some("new-2")
+        );
     }
 
     #[test]
@@ -362,9 +372,18 @@ mod tests {
         let baseline_2 = turn1.len() as u64;
         let baseline_3 = (turn1.len() + turn2.len()) as u64;
 
-        assert_eq!(parse_codex_turn_after(raw_turn1, baseline_1).as_deref(), Some("answer-1"));
-        assert_eq!(parse_codex_turn_after(&raw_turn2, baseline_2).as_deref(), Some("answer-2"));
-        assert_eq!(parse_codex_turn_after(&raw_turn3, baseline_3).as_deref(), Some("answer-3b"));
+        assert_eq!(
+            parse_codex_turn_after(raw_turn1, baseline_1).as_deref(),
+            Some("answer-1")
+        );
+        assert_eq!(
+            parse_codex_turn_after(&raw_turn2, baseline_2).as_deref(),
+            Some("answer-2")
+        );
+        assert_eq!(
+            parse_codex_turn_after(&raw_turn3, baseline_3).as_deref(),
+            Some("answer-3b")
+        );
     }
 
     #[test]
@@ -397,5 +416,4 @@ mod tests {
             Some("new")
         );
     }
-
 }

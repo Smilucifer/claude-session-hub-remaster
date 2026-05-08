@@ -323,6 +323,56 @@ describe("SessionStore reducer", () => {
       store.applyEventBatch(askUserQuestionEvents as BusEvent[]);
     });
 
+    it("preserves raw multi-question AskUserQuestion options on tool_start", async () => {
+      const events: BusEvent[] = [
+        {
+          type: "tool_start",
+          run_id: "run-ask-raw",
+          tool_use_id: "ask-raw",
+          tool_name: "AskUserQuestion",
+          input: {
+            questions: [
+              {
+                header: "问题",
+                question: "选择参与审查的 provider（可多选）",
+                multiSelect: true,
+                options: [
+                  { label: "Claude (claude-opus-4-7)", description: "" },
+                  { label: "DeepSeek (deepseek-v4-pro)", description: "" },
+                  { label: "GLM (glm-5)", description: "" },
+                  { label: "QWEN (qwen3.5-plus)", description: "" },
+                  { label: "KIMI (kimi-k2.5)", description: "" },
+                  { label: "MiMo Pro (mimo-v2.5-pro)", description: "" },
+                ],
+              },
+            ],
+          },
+        },
+      ];
+
+      store.run = makeRun("run-ask-raw");
+      store.phase = "running";
+      store.applyEventBatch(events);
+
+      const toolEntry = store.timeline.find(
+        (e) => e.kind === "tool" && e.id === "ask-raw",
+      ) as Extract<TimelineEntry, { kind: "tool" }>;
+
+      expect(toolEntry).toBeDefined();
+      expect(toolEntry.tool.input).toEqual(events[0].input);
+      const questions = (toolEntry.tool.input.questions ?? []) as Array<{
+        options?: Array<{ label: string }>;
+      }>;
+      expect(questions[0]?.options?.map((option) => option.label)).toEqual([
+        "Claude (claude-opus-4-7)",
+        "DeepSeek (deepseek-v4-pro)",
+        "GLM (glm-5)",
+        "QWEN (qwen3.5-plus)",
+        "KIMI (kimi-k2.5)",
+        "MiMo Pro (mimo-v2.5-pro)",
+      ]);
+    });
+
     it("initially sets AskUserQuestion tool to ask_pending", () => {
       // After tool_end with AskUserQuestion, the tool should be ask_pending
       // But then user_message resolves it to success

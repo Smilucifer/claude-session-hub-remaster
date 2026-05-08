@@ -122,14 +122,37 @@
 
   function updateMimoApiKey(value: string) {
     const existing = mimoApiCredential();
+    const preset = PLATFORM_PRESETS.find((p) => p.id === "mimo-api");
     const next: PlatformCredential = {
       platform_id: "mimo-api",
       api_key: value || undefined,
-      base_url: existing?.base_url ?? "https://api.xiaomimimo.com/anthropic",
-      auth_env_var: existing?.auth_env_var ?? "ANTHROPIC_AUTH_TOKEN",
-      name: existing?.name ?? "Xiaomi (API)",
-      models: existing?.models ?? ["mimo-v2.5-pro"],
+      base_url: existing?.base_url ?? preset?.base_url,
+      auth_env_var: existing?.auth_env_var ?? (preset?.auth_env_var as string) ?? "ANTHROPIC_AUTH_TOKEN",
+      name: existing?.name ?? preset?.name,
+      models: existing?.models ?? preset?.models,
       extra_env: existing?.extra_env,
+    };
+    const rest = platformCredentials.filter((c) => c.platform_id !== "mimo-api");
+    platformCredentials = [...rest, next];
+  }
+
+  function updateMimoApiExtraEnv(envKey: string, value: string) {
+    const existing = mimoApiCredential();
+    const preset = PLATFORM_PRESETS.find((p) => p.id === "mimo-api");
+    const extraEnv = { ...(existing?.extra_env ?? {}) };
+    if (value.trim() === "") {
+      delete extraEnv[envKey];
+    } else {
+      extraEnv[envKey] = value;
+    }
+    const next: PlatformCredential = {
+      platform_id: "mimo-api",
+      api_key: existing?.api_key,
+      base_url: existing?.base_url ?? preset?.base_url,
+      auth_env_var: existing?.auth_env_var ?? (preset?.auth_env_var as string) ?? "ANTHROPIC_AUTH_TOKEN",
+      name: existing?.name ?? preset?.name,
+      models: existing?.models ?? preset?.models,
+      extra_env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
     };
     const rest = platformCredentials.filter((c) => c.platform_id !== "mimo-api");
     platformCredentials = [...rest, next];
@@ -155,6 +178,12 @@
 
   function providerBadgeLabel(provider: Phase7ProviderEntry): string {
     if (provider.mode === "official_cli") return "订阅";
+    // mimo-plan card: show OK if either mimo-plan OR mimo-api has a key
+    if (provider.id === "mimo-plan") {
+      const planKey = providerCredential(provider)?.api_key;
+      const apiKey = mimoApiCredential()?.api_key;
+      return planKey || apiKey ? "API" : "缺 Key";
+    }
     return providerCredential(provider)?.api_key ? "API" : "缺 Key";
   }
 
@@ -1889,6 +1918,75 @@
                     </svg>
                   </button>
                 </div>
+                <!-- Expanded panel: model config for mimo-plan + mimo-api -->
+                {#if expandedProviderPanels[provider.id]}
+                  {@const [tierOpus, tierSonnet, tierHaiku] = expandModelsToTiers(credential?.models ?? [])}
+                  {@const apiTierOpus = mimoApiCred?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                  <div class="mx-4 mb-4 grid grid-cols-2 gap-2 rounded-md border border-border/50 p-3">
+                    <div class="col-span-2 text-[11px] font-medium text-muted-foreground">Token Plan 模型配置</div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-model">ANTHROPIC_MODEL</label>
+                      <input
+                        id="mimo-plan-model"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        placeholder={tierOpus || provider.defaultModel || "自动"}
+                        value={credential?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderExtraEnv(provider, "ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-opus">OPUS_MODEL</label>
+                      <input
+                        id="mimo-plan-opus"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        placeholder={tierOpus || provider.defaultModel || "自动"}
+                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_OPUS_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-sonnet">SONNET_MODEL</label>
+                      <input
+                        id="mimo-plan-sonnet"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        placeholder={tierSonnet || tierOpus || provider.defaultModel || "自动"}
+                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_SONNET_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-haiku">HAIKU_MODEL</label>
+                      <input
+                        id="mimo-plan-haiku"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        placeholder={tierHaiku || tierOpus || provider.defaultModel || "自动"}
+                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_HAIKU_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                    <div class="col-span-2 mt-2 border-t border-border/50 pt-2 text-[11px] font-medium text-muted-foreground">API 模型配置</div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-api-model">ANTHROPIC_MODEL</label>
+                      <input
+                        id="mimo-api-model"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        placeholder={apiTierOpus || "自动"}
+                        value={mimoApiCred?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                        oninput={(event) =>
+                          updateMimoApiExtraEnv("ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                  </div>
+                {/if}
               {:else}
                 <!-- ── Standard provider card ── -->
                 <div
@@ -2066,6 +2164,7 @@
                     : "CC session"}
                 </div>
               </div>
+              {/if}
             {/each}
           </div>
         </Card>

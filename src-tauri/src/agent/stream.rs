@@ -512,5 +512,4 @@ mod tests {
         assert!(resolved.0.ends_with("node.exe"));
         assert!(resolved.1[0].ends_with("codex.js"));
     }
-
 }

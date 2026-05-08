@@ -3,7 +3,8 @@ use std::time::Duration;
 
 // ── Constants ──
 
-const GITHUB_API_URL: &str = "https://api.github.com/repos/Smilucifer/claude-session-hub-remaster/releases/latest";
+const GITHUB_API_URL: &str =
+    "https://api.github.com/repos/Smilucifer/claude-session-hub-remaster/releases/latest";
 
 // ── Proxy resolution (pure, testable) ──
 
@@ -25,9 +26,10 @@ fn build_client() -> Client {
         .connect_timeout(Duration::from_secs(10))
         .user_agent(format!("OpenCovibe/{}", env!("CARGO_PKG_VERSION")));
 
-    if let Some(proxy_url) =
-        resolve_proxy_url(settings.user.github_proxy_enabled, settings.user.github_proxy_port)
-    {
+    if let Some(proxy_url) = resolve_proxy_url(
+        settings.user.github_proxy_enabled,
+        settings.user.github_proxy_port,
+    ) {
         if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
             builder = builder.proxy(proxy);
             log::debug!("[updates] using proxy: {}", proxy_url);

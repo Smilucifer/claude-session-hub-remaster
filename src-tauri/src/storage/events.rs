@@ -202,8 +202,8 @@ impl EventWriter {
                 "event": event,
             });
             let path = events_path(run_id);
-            let line = serde_json::to_string(&envelope)
-                .map_err(|e| format!("serialize failed: {}", e))?;
+            let line =
+                serde_json::to_string(&envelope).map_err(|e| format!("serialize failed: {}", e))?;
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -255,8 +255,8 @@ impl EventWriter {
                 "event": event,
             });
             let path = events_path(run_id);
-            let line = serde_json::to_string(&envelope)
-                .map_err(|e| format!("serialize failed: {}", e))?;
+            let line =
+                serde_json::to_string(&envelope).map_err(|e| format!("serialize failed: {}", e))?;
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)

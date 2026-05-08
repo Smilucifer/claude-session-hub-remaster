@@ -246,5 +246,4 @@ mod tests {
         assert!(args.contains(&"--no-alt-screen".to_string()));
         assert!(args.windows(2).any(|w| w == ["--model", "gpt-5.5"]));
     }
-
 }

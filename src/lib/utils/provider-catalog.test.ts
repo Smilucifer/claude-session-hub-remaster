@@ -10,7 +10,7 @@ describe("Phase 7 provider catalog", () => {
       "GLM",
       "QWEN",
       "KIMI",
-      "Xiaomi",
+      "Xiaomi (Plan)",
       "Xiaomi (API)",
       "Packy CX2CC",
     ]);
@@ -96,9 +96,7 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude", "zhipu")).toBe("glm");
     expect(providerIdForRun("claude", "bailian")).toBe("qwen");
     expect(providerIdForRun("claude", "kimi")).toBe("kimi");
-    expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-plan");
     expect(providerIdForRun("claude", "mimo-plan")).toBe("mimo-plan");
-    expect(providerIdForRun("claude", "xiaomi")).toBe("mimo-api");
     expect(providerIdForRun("claude", "mimo-api")).toBe("mimo-api");
     expect(providerIdForRun("claude", "packy-cx2cc")).toBe("packy-cx2cc");
     expect(providerIdForRun("codex")).toBe("codex");

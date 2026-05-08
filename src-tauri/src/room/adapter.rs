@@ -222,7 +222,6 @@ impl RunBackedAgentAdapter {
         self.hard_deadline = hard_deadline;
         self
     }
-
 }
 
 impl AgentAdapter for RunBackedAgentAdapter {
@@ -231,8 +230,9 @@ impl AgentAdapter for RunBackedAgentAdapter {
             let started = std::time::Instant::now();
             loop {
                 // Read RunMeta once per iteration (avoids redundant meta.json I/O)
-                let run = storage::runs::get_run(&self.run_id)
-                    .ok_or_else(|| AgentAdapterError::new(format!("Run {} not found", self.run_id)))?;
+                let run = storage::runs::get_run(&self.run_id).ok_or_else(|| {
+                    AgentAdapterError::new(format!("Run {} not found", self.run_id))
+                })?;
 
                 // Check for terminal state
                 let outcome = outcome_from_run(&run);
@@ -259,10 +259,7 @@ impl AgentAdapter for RunBackedAgentAdapter {
                 // This means a run with zero bus events is considered active for up to
                 // inactivity_timeout after creation — the hard_deadline is the only
                 // safety net for truly stuck runs that emit no events at all.
-                let ref_time = run
-                    .active_at
-                    .as_deref()
-                    .or(Some(run.started_at.as_str()));
+                let ref_time = run.active_at.as_deref().or(Some(run.started_at.as_str()));
 
                 let is_active = ref_time
                     .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
@@ -449,7 +446,6 @@ mod tests {
         assert!(!codex.mcp_config);
         assert!(!codex.context_usage);
         assert!(!codex.permission_protocol);
-
     }
 
     #[test]
@@ -547,8 +543,11 @@ mod tests {
             .unwrap();
             let run = crate::storage::runs::get_run("run-timeout").unwrap();
             // 1ms poll, 600s inactivity (won't trigger), 50ms hard deadline
-            let mut adapter = adapter_for_run(&run)
-                .with_deadlines(Duration::from_millis(1), Duration::from_secs(600), Duration::from_millis(50));
+            let mut adapter = adapter_for_run(&run).with_deadlines(
+                Duration::from_millis(1),
+                Duration::from_secs(600),
+                Duration::from_millis(50),
+            );
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(adapter.wait_turn_complete())
@@ -556,8 +555,16 @@ mod tests {
 
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("hard limit"), "expected hard limit timeout, got: {}", msg);
-        assert!(msg.contains("run-timeout"), "expected run id in message, got: {}", msg);
+        assert!(
+            msg.contains("hard limit"),
+            "expected hard limit timeout, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("run-timeout"),
+            "expected run id in message, got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -586,8 +593,11 @@ mod tests {
 
             let run = crate::storage::runs::get_run("run-inactive").unwrap();
             // 1ms poll, 1s inactivity (will trigger since active_at is 2020), 60s hard deadline
-            let mut adapter = adapter_for_run(&run)
-                .with_deadlines(Duration::from_millis(1), Duration::from_secs(1), Duration::from_secs(60));
+            let mut adapter = adapter_for_run(&run).with_deadlines(
+                Duration::from_millis(1),
+                Duration::from_secs(1),
+                Duration::from_secs(60),
+            );
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(adapter.wait_turn_complete())
@@ -595,6 +605,10 @@ mod tests {
 
         let err = result.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("No activity"), "expected inactivity timeout, got: {}", msg);
+        assert!(
+            msg.contains("No activity"),
+            "expected inactivity timeout, got: {}",
+            msg
+        );
     }
 }

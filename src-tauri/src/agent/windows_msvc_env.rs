@@ -565,7 +565,14 @@ pub fn resolve_spawn_env_plan(
     path_policy: SpawnPathPolicy,
     base_path: Option<&str>,
 ) -> SpawnEnvPlan {
-    resolve_spawn_env_plan_with_policy(cwd, is_remote, mode, path_policy, base_path, MsvcPolicy::AllowByMode)
+    resolve_spawn_env_plan_with_policy(
+        cwd,
+        is_remote,
+        mode,
+        path_policy,
+        base_path,
+        MsvcPolicy::AllowByMode,
+    )
 }
 
 pub fn resolve_spawn_env_plan_with_policy(
@@ -577,11 +584,7 @@ pub fn resolve_spawn_env_plan_with_policy(
     policy: MsvcPolicy,
 ) -> SpawnEnvPlan {
     if policy == MsvcPolicy::Disabled {
-        let plan = skipped_plan(
-            MsvcEnvSkipReason::RoomPolicy,
-            path_policy,
-            base_path,
-        );
+        let plan = skipped_plan(MsvcEnvSkipReason::RoomPolicy, path_policy, base_path);
         record_msvc_status_snapshot(cwd, mode, &plan);
         return plan;
     }
@@ -889,18 +892,16 @@ fn has_root_visual_studio_marker(cwd: &Path) -> bool {
         return false;
     };
 
-    entries
-        .filter_map(|entry| entry.ok())
-        .any(|entry| {
-            let path = entry.path();
-            if !path.is_file() {
-                return false;
-            }
-            matches!(
-                path.extension().and_then(|e| e.to_str()),
-                Some("sln" | "vcxproj" | "pro" | "pri")
-            )
-        })
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        let path = entry.path();
+        if !path.is_file() {
+            return false;
+        }
+        matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("sln" | "vcxproj" | "pro" | "pri")
+        )
+    })
 }
 
 fn package_json_has_native_hint(path: &Path) -> bool {
@@ -1114,7 +1115,11 @@ mod tests {
     #[test]
     fn project_needs_msvc_detects_cmake_project() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.10)\n").unwrap();
+        fs::write(
+            tmp.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.10)\n",
+        )
+        .unwrap();
         assert!(project_needs_msvc(tmp.path()));
     }
 
@@ -1173,7 +1178,11 @@ mod tests {
         assert!(project_needs_msvc(tmp.path()));
 
         let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join("Cargo.toml"), "[package]\nname='n'\n[build-dependencies]\ncc='1'\n").unwrap();
+        fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname='n'\n[build-dependencies]\ncc='1'\n",
+        )
+        .unwrap();
         fs::write(tmp.path().join("MyProject.sln"), "").unwrap();
         assert!(project_needs_msvc(tmp.path()));
     }

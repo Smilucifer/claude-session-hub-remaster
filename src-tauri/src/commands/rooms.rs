@@ -520,8 +520,7 @@ pub async fn delete_room(
     spawn_locks: State<'_, SpawnLocks>,
     id: String,
 ) -> Result<(), String> {
-    let room = storage::rooms::get_room(&id)
-        .ok_or_else(|| format!("Room {} not found", id))?;
+    let room = storage::rooms::get_room(&id).ok_or_else(|| format!("Room {} not found", id))?;
 
     let run_ids: Vec<String> = room.participants.iter().map(|p| p.run_id.clone()).collect();
     for run_id in &run_ids {
@@ -537,7 +536,9 @@ pub async fn delete_room(
 
     // Batch soft-delete so runs disappear from sidebar
     if let Err(e) = storage::runs::soft_delete_runs(&run_ids) {
-        log::warn!("[rooms] delete_room: soft_delete_runs failed (runs may still appear in sidebar): {e}");
+        log::warn!(
+            "[rooms] delete_room: soft_delete_runs failed (runs may still appear in sidebar): {e}"
+        );
     }
 
     storage::rooms::delete_room(&id)
@@ -551,8 +552,8 @@ pub async fn cancel_room_turn(
     room_id: String,
 ) -> Result<bool, String> {
     log::debug!("[rooms] cancel_room_turn: room_id={}", room_id);
-    let room = storage::rooms::get_room(&room_id)
-        .ok_or_else(|| format!("Room {} not found", room_id))?;
+    let room =
+        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
 
     for participant in &room.participants {
         // Only stop participants that are actually running

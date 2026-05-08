@@ -30,7 +30,10 @@ enum NativeTurnTerminal {
         conversation_ref: Option<crate::models::ConversationRef>,
     },
     Stopped,
-    Failed { exit_code: i32, error: String },
+    Failed {
+        exit_code: i32,
+        error: String,
+    },
 }
 
 fn resolve_native_turn_terminal(

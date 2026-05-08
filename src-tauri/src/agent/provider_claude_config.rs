@@ -24,8 +24,8 @@ pub fn platform_to_provider_id(platform_id: &str) -> Option<&'static str> {
         "zhipu" | "zhipu-intl" => Some("glm"),
         "bailian" => Some("qwen"),
         "kimi" => Some("kimi"),
-        "mimo-pro" | "mimo-plan" => Some("mimo-plan"),
-        "xiaomi" | "mimo-api" => Some("mimo-api"),
+        "mimo-plan" => Some("mimo-plan"),
+        "mimo-api" => Some("mimo-api"),
         "packy-cx2cc" => Some("packy-cx2cc"),
         _ => None,
     }
@@ -79,8 +79,12 @@ pub(crate) fn provider_env_from_credential(
 ) -> Result<HashMap<String, String>, String> {
     match platform_id {
         "deepseek" => build_deepseek_env(cred),
-        "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-pro" | "mimo-plan" | "xiaomi" | "mimo-api" | "packy-cx2cc" => build_parameterized_env(platform_id, cred),
-        _ => Err(format!("unsupported provider-backed Claude platform: {platform_id}")),
+        "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-plan" | "mimo-api" | "packy-cx2cc" => {
+            build_parameterized_env(platform_id, cred)
+        }
+        _ => Err(format!(
+            "unsupported provider-backed Claude platform: {platform_id}"
+        )),
     }
 }
 
@@ -118,8 +122,8 @@ fn default_base_url(platform_id: &str) -> Option<&'static str> {
         "zhipu-intl" => Some("https://api.z.ai/api/anthropic"),
         "bailian" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic"),
         "kimi" => Some("https://api.moonshot.cn/anthropic"),
-        "mimo-pro" | "mimo-plan" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
-        "xiaomi" | "mimo-api" => Some("https://api.xiaomimimo.com/anthropic"),
+        "mimo-plan" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
+        "mimo-api" => Some("https://api.xiaomimimo.com/anthropic"),
         "packy-cx2cc" => Some("https://www.packyapi.com/anthropic"),
         _ => None,
     }
@@ -164,7 +168,11 @@ fn merge_extra_env(env: &mut HashMap<String, String>, extra_env: &Option<HashMap
     let Some(extra) = extra_env else { return };
     for (key, value) in extra {
         if ALLOWED_EXTRA_ENV_KEYS.contains(&key.as_str()) && !value.trim().is_empty() {
-            log::debug!("[provider_claude_config] extra_env override: {}={}", key, value);
+            log::debug!(
+                "[provider_claude_config] extra_env override: {}={}",
+                key,
+                value
+            );
             env.insert(key.clone(), value.clone());
         }
     }
@@ -203,10 +211,7 @@ fn build_deepseek_env(cred: &PlatformCredential) -> Result<HashMap<String, Strin
         ("ANTHROPIC_BASE_URL".to_string(), base_url),
         ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
         ("ANTHROPIC_MODEL".to_string(), opus.to_string()),
-        (
-            "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-            opus.to_string(),
-        ),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), opus.to_string()),
         (
             "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
             sonnet.to_string(),
@@ -238,11 +243,7 @@ fn build_parameterized_env(
         .base_url
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| {
-            default_base_url(platform_id)
-                .unwrap_or("")
-                .to_string()
-        });
+        .unwrap_or_else(|| default_base_url(platform_id).unwrap_or("").to_string());
     if base_url.is_empty() {
         return Err(format!("{platform_id} base URL is not configured"));
     }
@@ -259,17 +260,18 @@ fn build_parameterized_env(
                 .filter(|m| !m.trim().is_empty())
                 .map(|m| vec![m.trim().to_string()])
         })
-        .ok_or_else(|| format!("{platform_id} model is not configured — set it in extra_env or provider models"))?;
+        .ok_or_else(|| {
+            format!(
+                "{platform_id} model is not configured — set it in extra_env or provider models"
+            )
+        })?;
     let (opus, sonnet, haiku, subagent) = resolve_model_tiers(&models);
 
     let mut env = HashMap::from([
         ("ANTHROPIC_BASE_URL".to_string(), base_url),
         ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
         ("ANTHROPIC_MODEL".to_string(), opus.to_string()),
-        (
-            "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
-            opus.to_string(),
-        ),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), opus.to_string()),
         (
             "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
             sonnet.to_string(),
@@ -315,7 +317,12 @@ mod tests {
     use super::*;
     use crate::models::PlatformCredential;
 
-    fn cred(platform_id: &str, api_key: &str, base_url: Option<&str>, model: Option<&str>) -> PlatformCredential {
+    fn cred(
+        platform_id: &str,
+        api_key: &str,
+        base_url: Option<&str>,
+        model: Option<&str>,
+    ) -> PlatformCredential {
         PlatformCredential {
             platform_id: platform_id.to_string(),
             api_key: Some(api_key.to_string()),
@@ -334,11 +341,12 @@ mod tests {
         assert_eq!(platform_to_provider_id("zhipu-intl"), Some("glm"));
         assert_eq!(platform_to_provider_id("bailian"), Some("qwen"));
         assert_eq!(platform_to_provider_id("kimi"), Some("kimi"));
-        assert_eq!(platform_to_provider_id("mimo-pro"), Some("mimo-plan"));
         assert_eq!(platform_to_provider_id("mimo-plan"), Some("mimo-plan"));
-        assert_eq!(platform_to_provider_id("xiaomi"), Some("mimo-api"));
         assert_eq!(platform_to_provider_id("mimo-api"), Some("mimo-api"));
         assert_eq!(platform_to_provider_id("packy-cx2cc"), Some("packy-cx2cc"));
+        assert_eq!(platform_to_provider_id("mimo"), None);
+        assert_eq!(platform_to_provider_id("mimo-pro"), None);
+        assert_eq!(platform_to_provider_id("xiaomi"), None);
         assert_eq!(platform_to_provider_id("anthropic"), None);
     }
 
@@ -375,9 +383,18 @@ mod tests {
     #[test]
     fn builds_deepseek_env_with_defaults() {
         let env = build_deepseek_env(&cred("deepseek", "sk-deepseek", None, None)).unwrap();
-        assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("sk-deepseek"));
-        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://api.deepseek.com/anthropic"));
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("deepseek-v4-pro"));
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-deepseek")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.deepseek.com/anthropic")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("deepseek-v4-pro")
+        );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
             Some("deepseek-v4-flash")
@@ -386,9 +403,16 @@ mod tests {
 
     #[test]
     fn builds_deepseek_env_with_custom_model() {
-        let env = build_deepseek_env(&cred("deepseek", "sk-ds", None, Some("custom-ds-model"))).unwrap();
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("custom-ds-model"));
-        assert_eq!(env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str), Some("custom-ds-model"));
+        let env =
+            build_deepseek_env(&cred("deepseek", "sk-ds", None, Some("custom-ds-model"))).unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("custom-ds-model")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
+            Some("custom-ds-model")
+        );
     }
 
     #[test]
@@ -407,7 +431,10 @@ mod tests {
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://custom-deepseek.example.com/anthropic")
         );
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("ds-v4"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("ds-v4")
+        );
     }
 
     #[test]
@@ -422,8 +449,14 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("sk-qwen"));
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("qwen3.5-plus"));
+        assert_eq!(
+            env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-qwen")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("qwen3.5-plus")
+        );
         assert_eq!(
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://coding.dashscope.aliyuncs.com/apps/anthropic")
@@ -433,7 +466,8 @@ mod tests {
             Some("qwen3.5-plus")
         );
         assert_eq!(
-            env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").map(String::as_str),
+            env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+                .map(String::as_str),
             Some("1")
         );
         assert_eq!(
@@ -441,7 +475,8 @@ mod tests {
             Some("max")
         );
         assert_eq!(
-            env.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS").map(String::as_str),
+            env.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")
+                .map(String::as_str),
             Some("true")
         );
     }
@@ -462,7 +497,10 @@ mod tests {
             env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://open.bigmodel.cn/api/anthropic")
         );
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("glm-5"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("glm-5")
+        );
     }
 
     #[test]
@@ -473,17 +511,27 @@ mod tests {
             base_url: Some("https://api.moonshot.cn/anthropic".to_string()),
             auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
             name: Some("kimi".to_string()),
-            models: Some(vec![
-                "kimi-k2.5".to_string(),
-                "kimi-k2".to_string(),
-            ]),
+            models: Some(vec!["kimi-k2.5".to_string(), "kimi-k2".to_string()]),
             extra_env: None,
         };
         let env = build_parameterized_env("kimi", &c).unwrap();
-        assert_eq!(env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str), Some("kimi-k2.5"));
-        assert_eq!(env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str), Some("kimi-k2.5"));
-        assert_eq!(env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str), Some("kimi-k2"));
-        assert_eq!(env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str), Some("kimi-k2.5"));
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
+            Some("kimi-k2.5")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+                .map(String::as_str),
+            Some("kimi-k2.5")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
+            Some("kimi-k2")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("kimi-k2.5")
+        );
     }
 
     #[test]
@@ -508,9 +556,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(result
-            .json_path
-            .ends_with(std::path::Path::new("provider-claude-configs/session-test-run-001.json")));
+        assert!(result.json_path.ends_with(std::path::Path::new(
+            "provider-claude-configs/session-test-run-001.json"
+        )));
         let content = fs::read_to_string(&result.json_path).unwrap();
         assert!(content.contains("ANTHROPIC_BASE_URL"));
         assert!(content.contains("qwen3.5-plus"));
@@ -521,7 +569,10 @@ mod tests {
         }
     }
 
-    fn cred_with_extra_env(platform_id: &str, extra_env: Option<HashMap<String, String>>) -> PlatformCredential {
+    fn cred_with_extra_env(
+        platform_id: &str,
+        extra_env: Option<HashMap<String, String>>,
+    ) -> PlatformCredential {
         PlatformCredential {
             platform_id: platform_id.to_string(),
             api_key: Some("sk-test".to_string()),
@@ -537,49 +588,64 @@ mod tests {
     fn merge_extra_env_whitelisted_keys_override() {
         let mut env = HashMap::from([
             ("ANTHROPIC_MODEL".to_string(), "default-model".to_string()),
-            ("ANTHROPIC_BASE_URL".to_string(), "https://base.example.com".to_string()),
+            (
+                "ANTHROPIC_BASE_URL".to_string(),
+                "https://base.example.com".to_string(),
+            ),
         ]);
-        let extra_env = HashMap::from([
-            ("ANTHROPIC_MODEL".to_string(), "override-model".to_string()),
-        ]);
+        let extra_env =
+            HashMap::from([("ANTHROPIC_MODEL".to_string(), "override-model".to_string())]);
         merge_extra_env(&mut env, &Some(extra_env));
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("override-model"));
-        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://base.example.com"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("override-model")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://base.example.com")
+        );
     }
 
     #[test]
     fn merge_extra_env_non_whitelisted_keys_ignored() {
-        let mut env = HashMap::from([
-            ("ANTHROPIC_BASE_URL".to_string(), "https://base.example.com".to_string()),
-        ]);
+        let mut env = HashMap::from([(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://base.example.com".to_string(),
+        )]);
         let extra_env = HashMap::from([
-            ("ANTHROPIC_BASE_URL".to_string(), "https://evil.example.com".to_string()),
+            (
+                "ANTHROPIC_BASE_URL".to_string(),
+                "https://evil.example.com".to_string(),
+            ),
             ("SOME_INTERNAL_KEY".to_string(), "bad".to_string()),
         ]);
         merge_extra_env(&mut env, &Some(extra_env));
-        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://base.example.com"));
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://base.example.com")
+        );
         assert!(!env.contains_key("SOME_INTERNAL_KEY"));
     }
 
     #[test]
     fn merge_extra_env_empty_values_filtered() {
-        let mut env = HashMap::from([
-            ("ANTHROPIC_MODEL".to_string(), "original".to_string()),
-        ]);
-        let extra_env = HashMap::from([
-            ("ANTHROPIC_MODEL".to_string(), "  ".to_string()),
-        ]);
+        let mut env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "original".to_string())]);
+        let extra_env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "  ".to_string())]);
         merge_extra_env(&mut env, &Some(extra_env));
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("original"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("original")
+        );
     }
 
     #[test]
     fn merge_extra_env_none_is_noop() {
-        let mut env = HashMap::from([
-            ("ANTHROPIC_MODEL".to_string(), "original".to_string()),
-        ]);
+        let mut env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "original".to_string())]);
         merge_extra_env(&mut env, &None);
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("original"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("original")
+        );
     }
 
     #[test]
@@ -593,8 +659,14 @@ mod tests {
             ])),
         );
         let env = build_deepseek_env(&c).unwrap();
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("custom-ds-model"));
-        assert_eq!(env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str), Some("low"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("custom-ds-model")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str),
+            Some("low")
+        );
         assert!(!env.contains_key("EVIL_KEY"));
     }
 
@@ -602,12 +674,16 @@ mod tests {
     fn build_parameterized_env_with_extra_env_overrides() {
         let c = cred_with_extra_env(
             "kimi",
-            Some(HashMap::from([
-                ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), "custom-haiku".to_string()),
-            ])),
+            Some(HashMap::from([(
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                "custom-haiku".to_string(),
+            )])),
         );
         let env = build_parameterized_env("kimi", &c).unwrap();
-        assert_eq!(env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str), Some("custom-haiku"));
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
+            Some("custom-haiku")
+        );
     }
 
     #[test]
@@ -619,12 +695,16 @@ mod tests {
             auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
             name: Some("packy-cx2cc".to_string()),
             models: None,
-            extra_env: Some(HashMap::from([
-                ("ANTHROPIC_MODEL".to_string(), "claude-sonnet-4-20250514".to_string()),
-            ])),
+            extra_env: Some(HashMap::from([(
+                "ANTHROPIC_MODEL".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+            )])),
         };
         let env = build_parameterized_env("packy-cx2cc", &c).unwrap();
-        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("claude-sonnet-4-20250514"));
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-sonnet-4-20250514")
+        );
         assert_eq!(
             env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
             Some("claude-sonnet-4-20250514")

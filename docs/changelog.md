@@ -2,6 +2,16 @@
 
 ## Phase 9.y (2026-05-09)
 
+### v1.1.6 — 旧 ID 彻底清理
+
+- 移除所有旧 provider ID 支持：`mimo-pro`、`xiaomi`、`mimo` 从前端 `providerIdForRun` + 后端 `platform_to_provider_id`/`provider_env_from_credential`/`default_base_url`/`is_phase7_claude_compatible_api_platform`/`known_provider_defaults`/`auth_fixes` 同步删除
+- 移除旧 ID 迁移逻辑（`migrate_platform_credentials` 中 mimo-pro→mimo-plan、mimo/xiaomi→mimo-api 的迁移代码）
+- `mimo-plan` provider label 从 `"Xiaomi"` 改为 `"Xiaomi (Plan)"`，与 `"Xiaomi (API)"` 明确区分
+- `session-store.test.ts` 新增 `preserves raw multi-question AskUserQuestion options on tool_start` 测试
+- 全局 `rustfmt` 格式化统一：多行断言、函数签名、match arm 缩进
+
+### v1.1.5 — Provider 预设清理与白名单机制
+
 - 新增 Packy CX2CC API provider（base URL: https://www.packyapi.com/anthropic），模型从设置页读取
 - 移除 5 个无后端支持的 provider 预设：kimi-coding、doubao、minimax、minimax-cn、mimo（前端 platform-presets.ts + 后端 onboarding.rs/settings.rs 同步清理）
 - `PlatformCredential.extra_env` 白名单机制：`ALLOWED_EXTRA_ENV_KEYS` 限制用户可覆盖的环境变量（模型 tier + effort level），防止误覆盖稳定性变量

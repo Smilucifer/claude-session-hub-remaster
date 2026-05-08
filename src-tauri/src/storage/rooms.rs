@@ -509,8 +509,7 @@ fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<RoomTurn>, Strin
     let content = fs::read_to_string(path).map_err(|e| format!("read room timeline: {e}"))?;
     // Dedup by turn_id — incremental snapshots from orchestrator share the
     // same id; the last line for each id carries the completed turn state.
-    let mut dedup: std::collections::HashMap<String, RoomTurn> =
-        std::collections::HashMap::new();
+    let mut dedup: std::collections::HashMap<String, RoomTurn> = std::collections::HashMap::new();
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         if let Ok(turn) = serde_json::from_str::<RoomTurn>(line) {
             dedup.insert(turn.id.clone(), turn);

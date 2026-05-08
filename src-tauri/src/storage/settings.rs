@@ -164,22 +164,15 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
             key_optional: false,
             auth_env_var: None,
         }),
-        "mimo" => Some(ProviderDefaults {
+        "mimo-api" => Some(ProviderDefaults {
             base_url: Some("https://api.xiaomimimo.com/anthropic"),
-            models: Some(vec!["mimo-v2-flash".to_string()]),
-            extra_env: None,
-            key_optional: false,
-            auth_env_var: None,
-        }),
-        "mimo-pro" | "mimo-plan" => Some(ProviderDefaults {
-            base_url: Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
             models: Some(vec!["mimo-v2.5-pro".to_string()]),
             extra_env: None,
             key_optional: false,
             auth_env_var: None,
         }),
-        "xiaomi" | "mimo-api" => Some(ProviderDefaults {
-            base_url: Some("https://api.xiaomimimo.com/anthropic"),
+        "mimo-plan" => Some(ProviderDefaults {
+            base_url: Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
             models: Some(vec!["mimo-v2.5-pro".to_string()]),
             extra_env: None,
             key_optional: false,
@@ -251,9 +244,10 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
 /// Migrate stale platform credential data. Returns true if any changes were made.
 ///
 /// Fixes:
-/// - Incorrect auth_env_var for providers that need ANTHROPIC_API_KEY (x-api-key header)
+/// - Incorrect auth_env_var for providers that need ANTHROPIC_AUTH_TOKEN
 /// - Old "minimax" credentials using minimaxi.com → rename to "minimax-cn" preset
-/// - Missing models/extra_env on existing credentials (needed for ANTHROPIC_MODEL injection)
+/// - Old deepseek-chat model → deepseek-v4-pro / deepseek-v4-flash
+/// - Missing base_url / models / extra_env on existing credentials
 fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
     let auth_fixes: &[(&str, &str)] = &[
         ("deepseek", "ANTHROPIC_AUTH_TOKEN"),
@@ -262,8 +256,6 @@ fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
         ("doubao", "ANTHROPIC_AUTH_TOKEN"),
         ("minimax", "ANTHROPIC_AUTH_TOKEN"),
         ("minimax-cn", "ANTHROPIC_AUTH_TOKEN"),
-        ("mimo", "ANTHROPIC_AUTH_TOKEN"),
-        ("mimo-pro", "ANTHROPIC_AUTH_TOKEN"),
         ("mimo-plan", "ANTHROPIC_AUTH_TOKEN"),
         ("mimo-api", "ANTHROPIC_AUTH_TOKEN"),
         ("bailian", "ANTHROPIC_AUTH_TOKEN"),
@@ -680,7 +672,8 @@ pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, St
         all.user.github_proxy_enabled = v.as_bool().unwrap_or(false);
     }
     if let Some(v) = patch.get("github_proxy_port") {
-        all.user.github_proxy_port = v.as_u64().filter(|&p| p >= 1 && p <= 65535).unwrap_or(7890) as u16;
+        all.user.github_proxy_port =
+            v.as_u64().filter(|&p| p >= 1 && p <= 65535).unwrap_or(7890) as u16;
     }
     all.user.updated_at = crate::models::now_iso();
     save(&all)?;
@@ -941,12 +934,18 @@ mod tests {
             updated.platform_credentials[0].platform_id.as_str(),
             "deepseek"
         );
-        assert_eq!(updated.balance_helper.packy_session.as_deref(), Some("session-secret"));
+        assert_eq!(
+            updated.balance_helper.packy_session.as_deref(),
+            Some("session-secret")
+        );
         assert_eq!(
             updated.balance_helper.packy_tdc_itoken.as_deref(),
             Some("595383047:1776349439")
         );
-        assert_eq!(updated.balance_helper.packy_user_id.as_deref(), Some("98264"));
+        assert_eq!(
+            updated.balance_helper.packy_user_id.as_deref(),
+            Some("98264")
+        );
         assert_eq!(updated.balance_helper.auto_refresh_secs, 180);
     }
 

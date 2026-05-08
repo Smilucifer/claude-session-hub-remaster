@@ -1,6 +1,6 @@
 use crate::models::{BalanceCacheEntry, BalanceHelperSettings};
 use crate::storage;
-use reqwest::header::{COOKIE, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, COOKIE, USER_AGENT};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -197,7 +197,10 @@ fn build_packy_headers(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
         ),
     );
-    headers.insert("Accept", HeaderValue::from_static("application/json, text/plain, */*"));
+    headers.insert(
+        "Accept",
+        HeaderValue::from_static("application/json, text/plain, */*"),
+    );
     headers.insert(
         "Referer",
         HeaderValue::from_static("https://www.packyapi.com/console"),
@@ -275,7 +278,10 @@ fn build_mimo_headers(
 
     let cookie_value = format!(
         "api-platform_serviceToken={}; userId={}; api-platform_slh={}; api-platform_ph={}",
-        trimmed_token, trimmed_user_id, slh.trim(), ph.trim()
+        trimmed_token,
+        trimmed_user_id,
+        slh.trim(),
+        ph.trim()
     );
 
     let mut headers = HeaderMap::new();
@@ -290,7 +296,10 @@ fn build_mimo_headers(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
         ),
     );
-    headers.insert("Accept", HeaderValue::from_static("application/json, text/plain, */*"));
+    headers.insert(
+        "Accept",
+        HeaderValue::from_static("application/json, text/plain, */*"),
+    );
     headers.insert(
         "Referer",
         HeaderValue::from_static("https://platform.xiaomimimo.com/"),
@@ -303,10 +312,7 @@ fn build_mimo_headers(
         "x-kl-ajax-request",
         HeaderValue::from_static("Ajax_Request"),
     );
-    headers.insert(
-        "x-timezone",
-        HeaderValue::from_static("Asia/Shanghai"),
-    );
+    headers.insert("x-timezone", HeaderValue::from_static("Asia/Shanghai"));
     Ok(headers)
 }
 
@@ -350,10 +356,7 @@ fn format_mimo_balance(
     let mut token_plan_limit: Option<i64> = None;
     let mut token_plan_percent: Option<f64> = None;
 
-    let usage_code = usage_body
-        .get("code")
-        .and_then(Value::as_i64)
-        .unwrap_or(-1);
+    let usage_code = usage_body.get("code").and_then(Value::as_i64).unwrap_or(-1);
     if usage_code == 0 {
         if let Some(usage_items) = usage_body
             .get("data")
@@ -446,12 +449,7 @@ async fn query_mimo_balance(
         .map_err(|_| "MiMo balance response was not valid JSON".to_string())?;
 
     let usage_url = format!("{}/api/v1/tokenPlan/usage", MIMO_API_BASE_URL);
-    let usage_body = match client
-        .get(&usage_url)
-        .headers(headers)
-        .send()
-        .await
-    {
+    let usage_body = match client.get(&usage_url).headers(headers).send().await {
         Ok(resp) => resp
             .json::<Value>()
             .await
@@ -513,8 +511,18 @@ async fn refresh_balance_status_inner(
             helper.mimo_ph.as_deref().unwrap_or(""),
         )
         .await;
-        let mapped = result.map(|d| (d.balance_text, d.token_plan_used, d.token_plan_limit, d.token_plan_percent));
-        helper.cache.insert("mimo".to_string(), balance_cache_entry_with_tokens("mimo", mapped));
+        let mapped = result.map(|d| {
+            (
+                d.balance_text,
+                d.token_plan_used,
+                d.token_plan_limit,
+                d.token_plan_percent,
+            )
+        });
+        helper.cache.insert(
+            "mimo".to_string(),
+            balance_cache_entry_with_tokens("mimo", mapped),
+        );
     }
 
     let updated = storage::settings::update_user_settings(serde_json::json!({
