@@ -252,6 +252,7 @@ fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
         ("mimo-pro", "ANTHROPIC_AUTH_TOKEN"),
         ("bailian", "ANTHROPIC_AUTH_TOKEN"),
         ("kimi-coding", "ANTHROPIC_AUTH_TOKEN"),
+        ("kimi", "ANTHROPIC_AUTH_TOKEN"),
         ("aihubmix", "ANTHROPIC_AUTH_TOKEN"),
     ];
     let mut changed = false;
@@ -342,7 +343,6 @@ fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
 
     // If active_platform_id was "minimax" but was migrated to "minimax-cn", update it
     if settings.user.active_platform_id.as_deref() == Some("minimax") {
-        // Check if the minimax credential was migrated to minimax-cn
         let has_minimax_cn = settings
             .user
             .platform_credentials
@@ -658,6 +658,12 @@ pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, St
     if let Some(v) = patch.get("windows_msvc_env_mode") {
         all.user.windows_msvc_env_mode = serde_json::from_value::<WindowsMsvcEnvMode>(v.clone())
             .map_err(|e| format!("Invalid windows_msvc_env_mode: {}", e))?;
+    }
+    if let Some(v) = patch.get("github_proxy_enabled") {
+        all.user.github_proxy_enabled = v.as_bool().unwrap_or(false);
+    }
+    if let Some(v) = patch.get("github_proxy_port") {
+        all.user.github_proxy_port = v.as_u64().filter(|&p| p >= 1 && p <= 65535).unwrap_or(7890) as u16;
     }
     all.user.updated_at = crate::models::now_iso();
     save(&all)?;

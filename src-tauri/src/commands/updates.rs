@@ -1,21 +1,41 @@
 use reqwest::Client;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 // ── Constants ──
 
 const GITHUB_API_URL: &str = "https://api.github.com/repos/Smilucifer/claude-session-hub-remaster/releases/latest";
 
-// ── HTTP client (reuse across requests) ──
+// ── Proxy resolution (pure, testable) ──
 
-static CLIENT: LazyLock<Client> = LazyLock::new(|| {
-    Client::builder()
+/// Returns the proxy URL string if proxy is enabled and port is valid.
+fn resolve_proxy_url(enabled: bool, port: u16) -> Option<String> {
+    if enabled && port >= 1 {
+        Some(format!("http://127.0.0.1:{}", port))
+    } else {
+        None
+    }
+}
+
+// ── HTTP client builder (reads proxy settings per request) ──
+
+fn build_client() -> Client {
+    let settings = crate::storage::settings::load();
+    let mut builder = Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(10))
-        .user_agent(format!("OpenCovibe/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .unwrap_or_default()
-});
+        .user_agent(format!("OpenCovibe/{}", env!("CARGO_PKG_VERSION")));
+
+    if let Some(proxy_url) =
+        resolve_proxy_url(settings.user.github_proxy_enabled, settings.user.github_proxy_port)
+    {
+        if let Ok(proxy) = reqwest::Proxy::all(&proxy_url) {
+            builder = builder.proxy(proxy);
+            log::debug!("[updates] using proxy: {}", proxy_url);
+        }
+    }
+
+    builder.build().unwrap_or_default()
+}
 
 // ── Types ──
 
@@ -126,7 +146,8 @@ pub async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateInfo, Stri
         current_version
     );
 
-    let resp = match CLIENT
+    let client = build_client();
+    let resp = match client
         .get(GITHUB_API_URL)
         .header("Accept", "application/vnd.github+json")
         .send()
@@ -328,6 +349,34 @@ mod tests {
         assert_eq!(
             select_download_url_for_exts(&body, &[".dmg"]),
             "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14"
+        );
+    }
+
+    // ── resolve_proxy_url tests ──
+
+    #[test]
+    fn test_proxy_url_enabled() {
+        assert_eq!(
+            resolve_proxy_url(true, 7890),
+            Some("http://127.0.0.1:7890".to_string())
+        );
+    }
+
+    #[test]
+    fn test_proxy_url_disabled() {
+        assert_eq!(resolve_proxy_url(false, 7890), None);
+    }
+
+    #[test]
+    fn test_proxy_url_zero_port() {
+        assert_eq!(resolve_proxy_url(true, 0), None);
+    }
+
+    #[test]
+    fn test_proxy_url_max_port() {
+        assert_eq!(
+            resolve_proxy_url(true, 65535),
+            Some("http://127.0.0.1:65535".to_string())
         );
     }
 }

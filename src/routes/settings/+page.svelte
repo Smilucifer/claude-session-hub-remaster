@@ -297,6 +297,8 @@
   let webLanIp = $state<string | null>(null);
   let webTunnelUrl = $state("");
   let webTunnelError = $state<string | null>(null);
+  let githubProxyEnabled = $state(false);
+  let githubProxyPort = $state("7890");
   let webTunnelLinkCopied = $state(false);
   let lanIpRequestId = $state(0);
 
@@ -951,6 +953,8 @@
           webBindValue = settings?.web_server_bind ?? "127.0.0.1";
           webOrigins = [...(settings?.web_server_allowed_origins ?? [])];
           webTunnelUrl = settings?.web_server_tunnel_url ?? "";
+          githubProxyEnabled = settings?.github_proxy_enabled ?? false;
+          githubProxyPort = String(settings?.github_proxy_port ?? 7890);
           dbg("settings", "webServer loaded", {
             enabled: status?.enabled,
             hasToken: !!token,
@@ -1227,6 +1231,79 @@
             </div>
           </div>
         </Card>
+
+        <!-- GitHub Update Proxy Card (desktop only) -->
+        {#if getTransport().isDesktop()}
+          <Card class="p-6 space-y-4">
+            <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              {t("settings_general_githubProxy")}
+            </h2>
+
+            <!-- Enabled toggle -->
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium">{t("settings_general_githubProxy")}</p>
+                <p class="text-xs text-muted-foreground">{t("settings_general_githubProxyDesc")}</p>
+              </div>
+              <button
+                role="switch"
+                aria-checked={githubProxyEnabled}
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {githubProxyEnabled
+                  ? 'bg-primary'
+                  : 'bg-muted'}"
+                onclick={async () => {
+                  const prev = githubProxyEnabled;
+                  const newValue = !prev;
+                  githubProxyEnabled = newValue;
+                  try {
+                    await saveGeneralPatch({ github_proxy_enabled: newValue });
+                  } catch {
+                    githubProxyEnabled = prev;
+                  }
+                }}
+              >
+                <span
+                  class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {githubProxyEnabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'}"
+                ></span>
+              </button>
+            </div>
+
+            <!-- Port input (show when enabled) -->
+            {#if githubProxyEnabled}
+              <div class="flex items-center gap-3">
+                <label class="text-sm text-muted-foreground" for="github-proxy-port">
+                  {t("settings_general_githubProxyPort")}
+                </label>
+                <input
+                  id="github-proxy-port"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  class="w-24 rounded-md border bg-background px-3 py-1.5 text-sm"
+                  bind:value={githubProxyPort}
+                  onblur={async () => {
+                    const port = parseInt(githubProxyPort, 10);
+                    if (!isNaN(port) && port >= 1 && port <= 65535) {
+                      const prev = githubProxyPort;
+                      try {
+                        await saveGeneralPatch({ github_proxy_port: port });
+                      } catch {
+                        githubProxyPort = prev;
+                      }
+                    } else {
+                      githubProxyPort = String(settings?.github_proxy_port ?? 7890);
+                    }
+                  }}
+                />
+                <span class="text-xs text-muted-foreground">
+                  http://127.0.0.1:{githubProxyPort}
+                </span>
+              </div>
+            {/if}
+          </Card>
+        {/if}
 
         <!-- Web Server Card (desktop only) -->
         {#if getTransport().isDesktop()}

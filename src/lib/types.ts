@@ -281,6 +281,8 @@ export interface UserSettings {
   web_server_bind?: string;
   web_server_allowed_origins?: string[];
   web_server_tunnel_url?: string;
+  github_proxy_enabled?: boolean;
+  github_proxy_port?: number;
   windows_msvc_env_mode?: WindowsMsvcEnvMode;
   updated_at: string;
 }
@@ -291,6 +293,9 @@ export interface BalanceCacheEntry {
   balance_text?: string;
   error?: string;
   refreshed_at: string;
+  token_plan_used?: number;
+  token_plan_limit?: number;
+  token_plan_percent?: number;
 }
 
 export interface BalanceHelperSettings {

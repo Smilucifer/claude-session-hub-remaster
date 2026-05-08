@@ -11,13 +11,23 @@ const PACKY_QUOTA_PER_UNIT: f64 = 500_000.0;
 const PACKY_DISPLAY_CURRENCY: &str = "USD";
 
 fn balance_cache_entry(source: &str, result: Result<String, String>) -> BalanceCacheEntry {
+    balance_cache_entry_with_tokens(source, result.map(|bt| (bt, None, None, None)))
+}
+
+fn balance_cache_entry_with_tokens(
+    source: &str,
+    result: Result<(String, Option<i64>, Option<i64>, Option<f64>), String>,
+) -> BalanceCacheEntry {
     match result {
-        Ok(balance_text) => BalanceCacheEntry {
+        Ok((balance_text, used, limit, percent)) => BalanceCacheEntry {
             source: source.to_string(),
             status: "ok".to_string(),
             balance_text: Some(balance_text),
             error: None,
             refreshed_at: crate::models::now_iso(),
+            token_plan_used: used,
+            token_plan_limit: limit,
+            token_plan_percent: percent,
         },
         Err(error) => BalanceCacheEntry {
             source: source.to_string(),
@@ -25,6 +35,9 @@ fn balance_cache_entry(source: &str, result: Result<String, String>) -> BalanceC
             balance_text: None,
             error: Some(redacted_operational_error(&error)),
             refreshed_at: crate::models::now_iso(),
+            token_plan_used: None,
+            token_plan_limit: None,
+            token_plan_percent: None,
         },
     }
 }
@@ -297,7 +310,18 @@ fn build_mimo_headers(
     Ok(headers)
 }
 
-fn format_mimo_balance(balance_body: &Value, usage_body: &Value) -> Result<String, String> {
+#[derive(Debug)]
+struct MimoBalanceDetail {
+    balance_text: String,
+    token_plan_used: Option<i64>,
+    token_plan_limit: Option<i64>,
+    token_plan_percent: Option<f64>,
+}
+
+fn format_mimo_balance(
+    balance_body: &Value,
+    usage_body: &Value,
+) -> Result<MimoBalanceDetail, String> {
     let balance_code = balance_body
         .get("code")
         .and_then(Value::as_i64)
@@ -321,7 +345,10 @@ fn format_mimo_balance(balance_body: &Value, usage_body: &Value) -> Result<Strin
         .map(|s| s.trim())
         .unwrap_or("CNY");
 
-    let mut parts = vec![format!("{} {}", currency, balance)];
+    let mut balance_text = format!("{} {}", currency, balance);
+    let mut token_plan_used: Option<i64> = None;
+    let mut token_plan_limit: Option<i64> = None;
+    let mut token_plan_percent: Option<f64> = None;
 
     let usage_code = usage_body
         .get("code")
@@ -343,17 +370,28 @@ fn format_mimo_balance(balance_body: &Value, usage_body: &Value) -> Result<Strin
                 if limit > 0 {
                     let used_str = format_token_compact(used as u64);
                     let limit_str = format_token_compact(limit as u64);
-                    parts.push(format!("套餐 {}/{}", used_str, limit_str));
+                    balance_text = format!("{} | 套餐 {}/{}", balance_text, used_str, limit_str);
+                    token_plan_used = Some(used);
+                    token_plan_limit = Some(limit);
+                    token_plan_percent = plan_item
+                        .get("percent")
+                        .and_then(Value::as_f64)
+                        .or_else(|| Some(used as f64 * 100.0 / limit as f64));
                 }
             }
         }
     }
 
-    if parts.len() == 1 && parts[0] == "CNY 0" {
+    if balance_text == "CNY 0" {
         return Err("MiMo balance response was empty".to_string());
     }
 
-    Ok(parts.join(" | "))
+    Ok(MimoBalanceDetail {
+        balance_text,
+        token_plan_used,
+        token_plan_limit,
+        token_plan_percent,
+    })
 }
 
 fn get_mimo_error(body: &Value, api_name: &str) -> String {
@@ -366,9 +404,9 @@ fn get_mimo_error(body: &Value, api_name: &str) -> String {
 
 fn format_token_compact(n: u64) -> String {
     if n >= 100_000_000 {
-        format!("{}亿", n / 100_000_000)
+        format!("{:.1}亿", n as f64 / 100_000_000.0)
     } else if n >= 10_000 {
-        format!("{}万", n / 10_000)
+        format!("{}万", (n as f64 / 10_000.0).round() as u64)
     } else {
         n.to_string()
     }
@@ -380,7 +418,7 @@ async fn query_mimo_balance(
     user_id: &str,
     slh: &str,
     ph: &str,
-) -> Result<String, String> {
+) -> Result<MimoBalanceDetail, String> {
     let headers = build_mimo_headers(service_token, user_id, slh, ph)?;
 
     let balance_url = format!("{}/api/v1/balance", MIMO_API_BASE_URL);
@@ -478,9 +516,8 @@ async fn refresh_balance_status_inner(
             helper.mimo_ph.as_deref().unwrap_or(""),
         )
         .await;
-        helper
-            .cache
-            .insert("mimo".to_string(), balance_cache_entry("mimo", result));
+        let mapped = result.map(|d| (d.balance_text, d.token_plan_used, d.token_plan_limit, d.token_plan_percent));
+        helper.cache.insert("mimo".to_string(), balance_cache_entry_with_tokens("mimo", mapped));
     }
 
     let updated = storage::settings::update_user_settings(serde_json::json!({
@@ -551,9 +588,13 @@ mod tests {
             "data": { "usage": { "items": [{ "name": "plan_total_token", "used": 10136576, "limit": 700000000, "percent": 0.01 }] } }
         });
 
-        let result = format_mimo_balance(&balance_body, &usage_body).unwrap();
-        assert!(result.contains("CNY 4.80"));
-        assert!(result.contains("套餐 1013万/7亿"));
+        let detail = format_mimo_balance(&balance_body, &usage_body).unwrap();
+        assert!(detail.balance_text.contains("CNY 4.80"));
+        assert!(detail.balance_text.contains("套餐 1014万/7.0亿"));
+        assert_eq!(detail.token_plan_used, Some(10136576));
+        assert_eq!(detail.token_plan_limit, Some(700000000));
+        assert!(detail.token_plan_percent.is_some());
+        assert!((detail.token_plan_percent.unwrap() - 0.01).abs() < 0.001);
     }
 
     #[test]
@@ -567,8 +608,11 @@ mod tests {
             "data": { "usage": { "items": [] } }
         });
 
-        let result = format_mimo_balance(&balance_body, &usage_body).unwrap();
-        assert_eq!(result, "CNY 10.00");
+        let detail = format_mimo_balance(&balance_body, &usage_body).unwrap();
+        assert_eq!(detail.balance_text, "CNY 10.00");
+        assert_eq!(detail.token_plan_used, None);
+        assert_eq!(detail.token_plan_limit, None);
+        assert_eq!(detail.token_plan_percent, None);
     }
 
     #[test]
@@ -597,10 +641,10 @@ mod tests {
         assert_eq!(format_token_compact(0), "0");
         assert_eq!(format_token_compact(500), "500");
         assert_eq!(format_token_compact(10_000), "1万");
-        assert_eq!(format_token_compact(10_136_576), "1013万");
-        assert_eq!(format_token_compact(700_000_000), "7亿");
-        assert_eq!(format_token_compact(100_000_000), "1亿");
-        assert_eq!(format_token_compact(150_000_000), "1亿");
+        assert_eq!(format_token_compact(10_136_576), "1014万");
+        assert_eq!(format_token_compact(700_000_000), "7.0亿");
+        assert_eq!(format_token_compact(100_000_000), "1.0亿");
+        assert_eq!(format_token_compact(150_000_000), "1.5亿");
     }
 
     #[test]

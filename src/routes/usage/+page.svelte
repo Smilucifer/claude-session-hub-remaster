@@ -52,6 +52,7 @@
     balance: string;
     sub: string;
     dotClass: string;
+    tokenPlan?: { used: number; limit: number; percent: number };
   } {
     const entry = balanceHelper?.cache?.[source];
     if (!entry)
@@ -62,11 +63,20 @@
         dotClass: "bg-amber-400",
       };
     if (entry.status === "ok") {
+      const tokenPlan =
+        entry.token_plan_used != null && entry.token_plan_limit != null
+          ? {
+              used: entry.token_plan_used,
+              limit: entry.token_plan_limit,
+              percent: entry.token_plan_percent ?? (entry.token_plan_used * 100 / entry.token_plan_limit),
+            }
+          : undefined;
       return {
         label: entry.balance_text ?? t("settings_balance_ok"),
         balance: entry.balance_text ?? "—",
         sub: entry.refreshed_at,
         dotClass: "bg-emerald-400",
+        tokenPlan,
       };
     }
     return {
@@ -75,6 +85,12 @@
       sub: entry.error ?? "",
       dotClass: "bg-red-400",
     };
+  }
+
+  function formatTokenCompact(n: number): string {
+    if (n >= 1_0000_0000) return `${(n / 1_0000_0000).toFixed(1)}亿`;
+    if (n >= 1_0000) return `${Math.round(n / 1_0000)}万`;
+    return n.toLocaleString();
   }
 
   async function refreshBalanceStatus(source: "all" | "deepseek" | "packy" | "mimo" = "all") {
@@ -698,9 +714,9 @@
             {/if}
           </div>
 
-          <!-- MiMo panel -->
+          <!-- Xiaomi panel (spans 2 columns) -->
           <div
-            class="rounded-xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 p-5 space-y-3"
+            class="rounded-xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 p-5 space-y-3 md:col-span-2"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2.5">
@@ -717,7 +733,7 @@
                   </svg>
                 </div>
                 <div>
-                  <div class="text-sm font-semibold">MiMo</div>
+                  <div class="text-sm font-semibold">{t("settings_balance_xiaomi")}</div>
                   <div
                     class="flex items-center gap-1.5 text-xs text-muted-foreground"
                   >
@@ -735,6 +751,26 @@
                 {/if}
               </div>
             </div>
+
+            <!-- Token plan progress bar -->
+            {#if mimo.tokenPlan}
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{t("usage_tokenPlan")}</span>
+                  <span class="tabular-nums">{mimo.tokenPlan.percent.toFixed(1)}%</span>
+                </div>
+                <div class="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    class="h-full rounded-full bg-amber-500 transition-all"
+                    style="width: {Math.min(mimo.tokenPlan.percent, 100)}%"
+                  ></div>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>{t("usage_tokenPlanUsed")} {formatTokenCompact(mimo.tokenPlan.used)}</span>
+                  <span>{t("usage_tokenPlanTotal")} {formatTokenCompact(mimo.tokenPlan.limit)}</span>
+                </div>
+              </div>
+            {/if}
 
             <!-- MiMo credential inputs (collapsible) -->
             <button

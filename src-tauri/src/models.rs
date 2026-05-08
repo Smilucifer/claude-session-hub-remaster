@@ -345,6 +345,10 @@ pub struct UserSettings {
     pub web_server_allowed_origins: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_server_tunnel_url: Option<String>,
+    #[serde(default)]
+    pub github_proxy_enabled: bool,
+    #[serde(default = "default_github_proxy_port")]
+    pub github_proxy_port: u16,
     #[serde(default = "default_windows_msvc_env_mode")]
     pub windows_msvc_env_mode: WindowsMsvcEnvMode,
     pub updated_at: String,
@@ -356,6 +360,10 @@ fn default_auth_mode() -> String {
 
 fn default_ssh_port() -> u16 {
     22
+}
+
+fn default_github_proxy_port() -> u16 {
+    7890
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -412,7 +420,7 @@ fn default_balance_auto_refresh_secs() -> u64 {
     120
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BalanceCacheEntry {
     pub source: String,
     pub status: String,
@@ -421,9 +429,15 @@ pub struct BalanceCacheEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub refreshed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_plan_used: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_plan_limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_plan_percent: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BalanceHelperSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packy_session: Option<String>,
@@ -491,6 +505,8 @@ impl Default for UserSettings {
             web_server_bind: None,
             web_server_allowed_origins: None,
             web_server_tunnel_url: None,
+            github_proxy_enabled: false,
+            github_proxy_port: 7890,
             windows_msvc_env_mode: WindowsMsvcEnvMode::Auto,
             updated_at: now_iso(),
         }
