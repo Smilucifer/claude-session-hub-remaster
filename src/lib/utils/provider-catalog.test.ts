@@ -10,8 +10,8 @@ describe("Phase 7 provider catalog", () => {
       "GLM",
       "QWEN",
       "KIMI",
-      "Xiaomi MiMo",
-      "Xiaomi MiMo (按量)",
+      "Xiaomi",
+      "Xiaomi (API)",
       "Packy CX2CC",
     ]);
   });
@@ -48,18 +48,18 @@ describe("Phase 7 provider catalog", () => {
       requiredConfig: ["api_key", "base_url", "model"],
       defaultPermissionMode: "bypass",
     });
-    expect(getPhase7Provider("mimo-pro")).toMatchObject({
+    expect(getPhase7Provider("mimo-plan")).toMatchObject({
       mode: "claude_compatible_api",
       executionAgent: "claude",
-      platformId: "mimo-pro",
+      platformId: "mimo-plan",
       defaultModel: "mimo-v2.5-pro",
       requiredConfig: ["api_key"],
       defaultPermissionMode: "bypass",
     });
-    expect(getPhase7Provider("xiaomi")).toMatchObject({
+    expect(getPhase7Provider("mimo-api")).toMatchObject({
       mode: "claude_compatible_api",
       executionAgent: "claude",
-      platformId: "xiaomi",
+      platformId: "mimo-api",
       defaultModel: "mimo-v2.5-pro",
       defaultBaseUrl: "https://api.xiaomimimo.com/anthropic",
       requiredConfig: ["api_key"],
@@ -96,8 +96,10 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude", "zhipu")).toBe("glm");
     expect(providerIdForRun("claude", "bailian")).toBe("qwen");
     expect(providerIdForRun("claude", "kimi")).toBe("kimi");
-    expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-pro");
-    expect(providerIdForRun("claude", "xiaomi")).toBe("xiaomi");
+    expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-plan");
+    expect(providerIdForRun("claude", "mimo-plan")).toBe("mimo-plan");
+    expect(providerIdForRun("claude", "xiaomi")).toBe("mimo-api");
+    expect(providerIdForRun("claude", "mimo-api")).toBe("mimo-api");
     expect(providerIdForRun("claude", "packy-cx2cc")).toBe("packy-cx2cc");
     expect(providerIdForRun("codex")).toBe("codex");
     expect(providerIdForRun("claude")).toBe("claude");

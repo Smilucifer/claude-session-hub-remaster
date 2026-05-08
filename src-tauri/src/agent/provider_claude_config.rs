@@ -24,8 +24,8 @@ pub fn platform_to_provider_id(platform_id: &str) -> Option<&'static str> {
         "zhipu" | "zhipu-intl" => Some("glm"),
         "bailian" => Some("qwen"),
         "kimi" => Some("kimi"),
-        "mimo-pro" => Some("mimo-pro"),
-        "xiaomi" => Some("xiaomi"),
+        "mimo-pro" | "mimo-plan" => Some("mimo-plan"),
+        "xiaomi" | "mimo-api" => Some("mimo-api"),
         "packy-cx2cc" => Some("packy-cx2cc"),
         _ => None,
     }
@@ -79,7 +79,7 @@ pub(crate) fn provider_env_from_credential(
 ) -> Result<HashMap<String, String>, String> {
     match platform_id {
         "deepseek" => build_deepseek_env(cred),
-        "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-pro" | "xiaomi" | "packy-cx2cc" => build_parameterized_env(platform_id, cred),
+        "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-pro" | "mimo-plan" | "xiaomi" | "mimo-api" | "packy-cx2cc" => build_parameterized_env(platform_id, cred),
         _ => Err(format!("unsupported provider-backed Claude platform: {platform_id}")),
     }
 }
@@ -118,8 +118,8 @@ fn default_base_url(platform_id: &str) -> Option<&'static str> {
         "zhipu-intl" => Some("https://api.z.ai/api/anthropic"),
         "bailian" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic"),
         "kimi" => Some("https://api.moonshot.cn/anthropic"),
-        "mimo-pro" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
-        "xiaomi" => Some("https://api.xiaomimimo.com/anthropic"),
+        "mimo-pro" | "mimo-plan" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
+        "xiaomi" | "mimo-api" => Some("https://api.xiaomimimo.com/anthropic"),
         "packy-cx2cc" => Some("https://www.packyapi.com/anthropic"),
         _ => None,
     }
@@ -334,8 +334,10 @@ mod tests {
         assert_eq!(platform_to_provider_id("zhipu-intl"), Some("glm"));
         assert_eq!(platform_to_provider_id("bailian"), Some("qwen"));
         assert_eq!(platform_to_provider_id("kimi"), Some("kimi"));
-        assert_eq!(platform_to_provider_id("mimo-pro"), Some("mimo-pro"));
-        assert_eq!(platform_to_provider_id("xiaomi"), Some("xiaomi"));
+        assert_eq!(platform_to_provider_id("mimo-pro"), Some("mimo-plan"));
+        assert_eq!(platform_to_provider_id("mimo-plan"), Some("mimo-plan"));
+        assert_eq!(platform_to_provider_id("xiaomi"), Some("mimo-api"));
+        assert_eq!(platform_to_provider_id("mimo-api"), Some("mimo-api"));
         assert_eq!(platform_to_provider_id("packy-cx2cc"), Some("packy-cx2cc"));
         assert_eq!(platform_to_provider_id("anthropic"), None);
     }

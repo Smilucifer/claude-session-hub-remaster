@@ -7,8 +7,8 @@ export type Phase7ProviderId =
   | "glm"
   | "qwen"
   | "kimi"
-  | "mimo-pro"
-  | "xiaomi"
+  | "mimo-plan"
+  | "mimo-api"
   | "packy-cx2cc";
 
 export interface Phase7ProviderEntry {
@@ -87,22 +87,22 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     defaultPermissionMode: "bypass",
   },
   {
-    id: "mimo-pro",
-    label: "Xiaomi MiMo",
+    id: "mimo-plan",
+    label: "Xiaomi",
     mode: "claude_compatible_api",
     executionAgent: "claude",
-    platformId: "mimo-pro",
+    platformId: "mimo-plan",
     defaultModel: "mimo-v2.5-pro",
     defaultBaseUrl: "https://token-plan-cn.xiaomimimo.com/anthropic",
     requiredConfig: ["api_key"],
     defaultPermissionMode: "bypass",
   },
   {
-    id: "xiaomi",
-    label: "Xiaomi MiMo (按量)",
+    id: "mimo-api",
+    label: "Xiaomi (API)",
     mode: "claude_compatible_api",
     executionAgent: "claude",
-    platformId: "xiaomi",
+    platformId: "mimo-api",
     defaultModel: "mimo-v2.5-pro",
     defaultBaseUrl: "https://api.xiaomimimo.com/anthropic",
     requiredConfig: ["api_key"],
@@ -129,8 +129,8 @@ export function providerIdForRun(agent: string, platformId?: string | null): Pha
   if (platformId === "zhipu" || platformId === "zhipu-intl") return "glm";
   if (platformId === "bailian") return "qwen";
   if (platformId === "kimi") return "kimi";
-  if (platformId === "mimo-pro") return "mimo-pro";
-  if (platformId === "xiaomi") return "xiaomi";
+  if (platformId === "mimo-pro" || platformId === "mimo-plan") return "mimo-plan";
+  if (platformId === "xiaomi" || platformId === "mimo-api") return "mimo-api";
   if (platformId === "packy-cx2cc") return "packy-cx2cc";
   if (agent === "codex") return "codex";
   return "claude";

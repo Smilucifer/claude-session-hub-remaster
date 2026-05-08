@@ -439,7 +439,8 @@ pub(crate) fn preset_name(pid: &str) -> String {
         "ccr" => "Claude Code Router",
         "zenmux" => "ZenMux",
         "packy-cx2cc" => "Packy CX2CC",
-        "xiaomi" => "Xiaomi MiMo (按量)",
+        "mimo-plan" => "Xiaomi (Token Plan)",
+        "mimo-api" => "Xiaomi (API)",
         "custom" => "Custom",
         _ => return pid.to_string(),
     }
@@ -629,7 +630,8 @@ mod tests {
         assert_eq!(preset_name("zhipu-intl"), "Zhipu (智谱 Intl)");
         assert_eq!(preset_name("zenmux"), "ZenMux");
         assert_eq!(preset_name("packy-cx2cc"), "Packy CX2CC");
-        assert_eq!(preset_name("xiaomi"), "Xiaomi MiMo (按量)");
+        assert_eq!(preset_name("mimo-plan"), "Xiaomi (Token Plan)");
+        assert_eq!(preset_name("mimo-api"), "Xiaomi (API)");
         // Existing mappings
         assert_eq!(preset_name("anthropic"), "Anthropic");
         assert_eq!(preset_name("ollama"), "Ollama");

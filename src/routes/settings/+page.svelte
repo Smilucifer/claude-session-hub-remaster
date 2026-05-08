@@ -115,23 +115,23 @@
     return findCredential(platformCredentials, provider.platformId);
   }
 
-  /** Get the xiaomi (按量付费) credential — shown as second row inside mimo-pro card. */
-  function xiaomiCredential(): PlatformCredential | undefined {
-    return findCredential(platformCredentials, "xiaomi");
+  /** Get the mimo-api credential — shown as second row inside mimo-plan card. */
+  function mimoApiCredential(): PlatformCredential | undefined {
+    return findCredential(platformCredentials, "mimo-api");
   }
 
-  function updateXiaomiApiKey(value: string) {
-    const existing = xiaomiCredential();
+  function updateMimoApiKey(value: string) {
+    const existing = mimoApiCredential();
     const next: PlatformCredential = {
-      platform_id: "xiaomi",
+      platform_id: "mimo-api",
       api_key: value || undefined,
       base_url: existing?.base_url ?? "https://api.xiaomimimo.com/anthropic",
       auth_env_var: existing?.auth_env_var ?? "ANTHROPIC_AUTH_TOKEN",
-      name: existing?.name ?? "Xiaomi MiMo (按量)",
+      name: existing?.name ?? "Xiaomi (API)",
       models: existing?.models ?? ["mimo-v2.5-pro"],
       extra_env: existing?.extra_env,
     };
-    const rest = platformCredentials.filter((c) => c.platform_id !== "xiaomi");
+    const rest = platformCredentials.filter((c) => c.platform_id !== "mimo-api");
     platformCredentials = [...rest, next];
   }
 
@@ -188,7 +188,7 @@
     const modelOptions: string[] | null =
       preset?.models && preset.models.length > 0 ? preset.models : null;
 
-    const showBaseUrl = provider.id !== "deepseek" && provider.id !== "mimo-pro" && provider.id !== "packy-cx2cc";
+    const showBaseUrl = provider.id !== "deepseek" && provider.id !== "mimo-plan" && provider.id !== "packy-cx2cc";
 
     return {
       showApiKey: true,
@@ -1820,92 +1820,146 @@
           </div>
 
           <div class="divide-y divide-border rounded-md border border-border">
-            {#each PHASE7_PROVIDERS.filter((p) => p.id !== "xiaomi") as provider}
+            {#each PHASE7_PROVIDERS.filter((p) => p.id !== "mimo-api") as provider}
               {@const check = providerCliCheck(provider)}
               {@const credential = providerCredential(provider)}
-              <div
-                class="grid gap-3 p-4 md:grid-cols-[minmax(160px,1fr)_minmax(220px,2fr)_auto] md:items-center"
-              >
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium">{provider.label}</span>
-                    <span
-                      class="rounded border px-1.5 py-0.5 text-[10px] font-medium {providerBadgeLabel(
-                        provider,
-                      ) === '缺 Key'
-                        ? 'border-amber-500/40 text-amber-500'
-                        : 'border-emerald-500/40 text-emerald-500'}"
-                    >
-                      {providerBadgeLabel(provider)}
-                    </span>
-                  </div>
-                  <p class="mt-1 truncate text-xs text-muted-foreground">
-                    {providerStatusLabel(provider)}
-                  </p>
-                </div>
 
-                {#if provider.mode === "official_cli"}
-                  <div class="text-xs text-muted-foreground">
-                    <div>启动命令：{provider.executionAgent}</div>
-                    <div>默认权限：{providerPermissionLabel(provider)}</div>
-                    {#if check?.path}
-                      <div class="truncate">路径：{check.path}</div>
-                    {/if}
-                  </div>
-                {:else}
-                  {@const fieldRules = providerFieldRules(provider)}
-                  <div class="space-y-2">
-                    <!-- API Key row (always visible) + expand toggle -->
+              {#if provider.id === "mimo-plan"}
+                <!-- ── Xiaomi dual-row card (Api + Tokenplan) ── -->
+                {@const mimoApiCred = mimoApiCredential()}
+                <div class="grid gap-3 p-4 md:grid-cols-[minmax(120px,1fr)_minmax(220px,3fr)_auto] md:items-center">
+                  <!-- Left: provider name + badge -->
+                  <div class="min-w-0 flex flex-col justify-center">
                     <div class="flex items-center gap-2">
-                      {#if fieldRules.showApiKey}
-                        <Input
-                          type={showApiKey ? "text" : "password"}
-                          placeholder={`${provider.label} API Key`}
-                          value={credential?.api_key ?? ""}
-                          oninput={(event) =>
-                            updateApiProviderField(
-                              provider,
-                              "api_key",
-                              (event.currentTarget as HTMLInputElement).value,
-                            )}
-                          onblur={persistApiProviderConfig}
-                        />
-                      {/if}
-                      <button
-                        type="button"
-                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors"
-                        title={expandedProviderPanels[provider.id] ? "收起配置" : "展开配置"}
-                        onclick={() => toggleProviderPanel(provider.id)}
+                      <span class="text-sm font-medium">{provider.label}</span>
+                      <span
+                        class="rounded border px-1.5 py-0.5 text-[10px] font-medium {providerBadgeLabel(provider) === '缺 Key'
+                          ? 'border-amber-500/40 text-amber-500'
+                          : 'border-emerald-500/40 text-emerald-500'}"
                       >
-                        <svg
-                          class="h-4 w-4 transition-transform {expandedProviderPanels[provider.id]
-                            ? 'rotate-180'
-                            : ''}"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </button>
+                        {providerBadgeLabel(provider)}
+                      </span>
                     </div>
-                    <!-- Xiaomi MiMo: second API key row (按量付费) -->
-                    {#if provider.id === "mimo-pro"}
-                      {@const xiaomiCred = xiaomiCredential()}
+                    <p class="mt-1 truncate text-xs text-muted-foreground">
+                      {providerStatusLabel(provider)}
+                    </p>
+                  </div>
+                  <!-- Middle: two input rows with labels -->
+                  <div class="space-y-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-muted-foreground w-20 shrink-0 text-right">Api</span>
+                      <Input
+                        type={showApiKey ? "text" : "password"}
+                        placeholder="Xiaomi API Key (按量付费)"
+                        value={mimoApiCred?.api_key ?? ""}
+                        oninput={(event) =>
+                          updateMimoApiKey((event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-muted-foreground w-20 shrink-0 text-right">Tokenplan</span>
+                      <Input
+                        type={showApiKey ? "text" : "password"}
+                        placeholder="Xiaomi Token Plan Key (订阅)"
+                        value={credential?.api_key ?? ""}
+                        oninput={(event) =>
+                          updateApiProviderField(provider, "api_key", (event.currentTarget as HTMLInputElement).value)}
+                        onblur={persistApiProviderConfig}
+                      />
+                    </div>
+                  </div>
+                  <!-- Right: expand toggle -->
+                  <button
+                    type="button"
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors"
+                    title={expandedProviderPanels[provider.id] ? "收起配置" : "展开配置"}
+                    onclick={() => toggleProviderPanel(provider.id)}
+                  >
+                    <svg
+                      class="h-4 w-4 transition-transform {expandedProviderPanels[provider.id] ? 'rotate-180' : ''}"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </button>
+                </div>
+              {:else}
+                <!-- ── Standard provider card ── -->
+                <div
+                  class="grid gap-3 p-4 md:grid-cols-[minmax(160px,1fr)_minmax(220px,2fr)_auto] md:items-center"
+                >
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium">{provider.label}</span>
+                      <span
+                        class="rounded border px-1.5 py-0.5 text-[10px] font-medium {providerBadgeLabel(
+                          provider,
+                        ) === '缺 Key'
+                          ? 'border-amber-500/40 text-amber-500'
+                          : 'border-emerald-500/40 text-emerald-500'}"
+                      >
+                        {providerBadgeLabel(provider)}
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate text-xs text-muted-foreground">
+                      {providerStatusLabel(provider)}
+                    </p>
+                  </div>
+
+                  {#if provider.mode === "official_cli"}
+                    <div class="text-xs text-muted-foreground">
+                      <div>启动命令：{provider.executionAgent}</div>
+                      <div>默认权限：{providerPermissionLabel(provider)}</div>
+                      {#if check?.path}
+                        <div class="truncate">路径：{check.path}</div>
+                      {/if}
+                    </div>
+                  {:else}
+                    {@const fieldRules = providerFieldRules(provider)}
+                    <div class="space-y-2">
+                      <!-- API Key row (always visible) + expand toggle -->
                       <div class="flex items-center gap-2">
-                        <Input
-                          type={showApiKey ? "text" : "password"}
-                          placeholder="Xiaomi MiMo 按量 API Key"
-                          value={xiaomiCred?.api_key ?? ""}
-                          oninput={(event) =>
-                            updateXiaomiApiKey((event.currentTarget as HTMLInputElement).value)}
-                          onblur={persistApiProviderConfig}
-                        />
+                        {#if fieldRules.showApiKey}
+                          <Input
+                            type={showApiKey ? "text" : "password"}
+                            placeholder={`${provider.label} API Key`}
+                            value={credential?.api_key ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderField(
+                                provider,
+                                "api_key",
+                                (event.currentTarget as HTMLInputElement).value,
+                              )}
+                            onblur={persistApiProviderConfig}
+                          />
+                        {/if}
+                        <button
+                          type="button"
+                          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors"
+                          title={expandedProviderPanels[provider.id] ? "收起配置" : "展开配置"}
+                          onclick={() => toggleProviderPanel(provider.id)}
+                        >
+                          <svg
+                            class="h-4 w-4 transition-transform {expandedProviderPanels[provider.id]
+                              ? 'rotate-180'
+                              : ''}"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </button>
                       </div>
-                    {/if}
                     <!-- Expanded panel: 3 rows x 2 cols -->
                     {#if expandedProviderPanels[provider.id]}
                       {@const [tierOpus, tierSonnet, tierHaiku] = expandModelsToTiers(credential?.models ?? [])}
