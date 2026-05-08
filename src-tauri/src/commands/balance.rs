@@ -373,10 +373,7 @@ fn format_mimo_balance(
                     balance_text = format!("{} | 套餐 {}/{}", balance_text, used_str, limit_str);
                     token_plan_used = Some(used);
                     token_plan_limit = Some(limit);
-                    token_plan_percent = plan_item
-                        .get("percent")
-                        .and_then(Value::as_f64)
-                        .or_else(|| Some(used as f64 * 100.0 / limit as f64));
+                    token_plan_percent = Some(used as f64 * 100.0 / limit as f64);
                 }
             }
         }
@@ -594,7 +591,9 @@ mod tests {
         assert_eq!(detail.token_plan_used, Some(10136576));
         assert_eq!(detail.token_plan_limit, Some(700000000));
         assert!(detail.token_plan_percent.is_some());
-        assert!((detail.token_plan_percent.unwrap() - 0.01).abs() < 0.001);
+        // percent is computed from used/limit, not from the API's unreliable percent field
+        let expected_pct = 10136576.0 * 100.0 / 700000000.0;
+        assert!((detail.token_plan_percent.unwrap() - expected_pct).abs() < 0.001);
     }
 
     #[test]
