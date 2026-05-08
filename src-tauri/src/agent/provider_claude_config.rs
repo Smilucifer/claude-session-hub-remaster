@@ -248,7 +248,16 @@ fn build_parameterized_env(
         .models
         .clone()
         .filter(|m| !m.is_empty())
-        .ok_or_else(|| format!("{platform_id} model is not configured"))?;
+        .or_else(|| {
+            // Fallback: when preset has no models (e.g. packy-cx2cc), allow user to
+            // provide a single model via extra_env.ANTHROPIC_MODEL in the settings UI.
+            cred.extra_env
+                .as_ref()
+                .and_then(|env| env.get("ANTHROPIC_MODEL"))
+                .filter(|m| !m.trim().is_empty())
+                .map(|m| vec![m.trim().to_string()])
+        })
+        .ok_or_else(|| format!("{platform_id} model is not configured — set it in extra_env or provider models"))?;
     let (opus, sonnet, haiku, subagent) = resolve_model_tiers(&models);
 
     let mut env = HashMap::from([
@@ -594,5 +603,45 @@ mod tests {
         );
         let env = build_parameterized_env("kimi", &c).unwrap();
         assert_eq!(env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str), Some("custom-haiku"));
+    }
+
+    #[test]
+    fn build_parameterized_env_model_fallback_to_extra_env() {
+        let c = PlatformCredential {
+            platform_id: "packy-cx2cc".to_string(),
+            api_key: Some("sk-packy".to_string()),
+            base_url: Some("https://www.packyapi.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("packy-cx2cc".to_string()),
+            models: None,
+            extra_env: Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "claude-sonnet-4-20250514".to_string()),
+            ])),
+        };
+        let env = build_parameterized_env("packy-cx2cc", &c).unwrap();
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("claude-sonnet-4-20250514"));
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
+            Some("claude-sonnet-4-20250514")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("claude-sonnet-4-20250514")
+        );
+    }
+
+    #[test]
+    fn build_parameterized_env_no_model_fails() {
+        let c = PlatformCredential {
+            platform_id: "packy-cx2cc".to_string(),
+            api_key: Some("sk-packy".to_string()),
+            base_url: Some("https://www.packyapi.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("packy-cx2cc".to_string()),
+            models: None,
+            extra_env: None,
+        };
+        let err = build_parameterized_env("packy-cx2cc", &c).unwrap_err();
+        assert!(err.contains("model is not configured"));
     }
 }
