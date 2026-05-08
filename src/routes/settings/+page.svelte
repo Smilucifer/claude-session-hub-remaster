@@ -16,7 +16,7 @@
   import Input from "$lib/components/Input.svelte";
   import KeybindingEditor from "$lib/components/KeybindingEditor.svelte";
   import { formatKeyDisplay } from "$lib/stores/keybindings.svelte";
-  import { findCredential, PLATFORM_PRESETS } from "$lib/utils/platform-presets";
+  import { findCredential, PLATFORM_PRESETS, expandModelsToTiers } from "$lib/utils/platform-presets";
   import { PHASE7_PROVIDERS, type Phase7ProviderEntry } from "$lib/utils/provider-catalog";
   import type {
     PlatformCredential,
@@ -204,6 +204,37 @@
 
   function persistApiProviderConfig() {
     saveGeneralPatch({ platform_credentials: platformCredentials });
+  }
+
+  // ── Collapsible panel state for CC Session providers ──
+  let expandedProviderPanels = $state<Record<string, boolean>>({});
+
+  function toggleProviderPanel(providerId: string) {
+    expandedProviderPanels[providerId] = !expandedProviderPanels[providerId];
+  }
+
+  function updateApiProviderExtraEnv(
+    provider: Phase7ProviderEntry,
+    envKey: string,
+    value: string,
+  ) {
+    if (!provider.platformId) return;
+    const existing = providerCredential(provider);
+    const extraEnv = { ...(existing?.extra_env ?? {}) };
+    if (value.trim() === "") {
+      delete extraEnv[envKey];
+    } else {
+      extraEnv[envKey] = value;
+    }
+    const rest = platformCredentials.filter((cred) => cred.platform_id !== provider.platformId);
+    platformCredentials = [
+      ...rest,
+      {
+        ...existing,
+        platform_id: provider.platformId,
+        extra_env: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
+      },
+    ];
   }
 
   async function loadMsvcEnvStatus(cwd?: string) {
@@ -1803,55 +1834,138 @@
                   </div>
                 {:else}
                   {@const fieldRules = providerFieldRules(provider)}
-                  <div class="grid gap-2 {fieldRules.gridClass}">
-                    {#if fieldRules.showApiKey}
-                      <Input
-                        type={showApiKey ? "text" : "password"}
-                        placeholder={`${provider.label} API Key`}
-                        value={credential?.api_key ?? ""}
-                        oninput={(event) =>
-                          updateApiProviderField(
-                            provider,
-                            "api_key",
-                            (event.currentTarget as HTMLInputElement).value,
-                          )}
-                        onblur={persistApiProviderConfig}
-                      />
-                    {/if}
-                    {#if fieldRules.showBaseUrl}
-                      <Input
-                        placeholder="Base URL"
-                        value={credential?.base_url ?? provider.defaultBaseUrl ?? ""}
-                        oninput={(event) =>
-                          updateApiProviderField(
-                            provider,
-                            "base_url",
-                            (event.currentTarget as HTMLInputElement).value,
-                          )}
-                        onblur={persistApiProviderConfig}
-                      />
-                    {/if}
-                    {#if fieldRules.showModel}
-                      <input
-                        class="h-9 rounded-md border border-border bg-background px-3 text-sm"
-                        placeholder="Model"
-                        value={credential?.models?.[0] ?? provider.defaultModel ?? ""}
-                        list="model-list-{provider.id}"
-                        oninput={(event) =>
-                          updateApiProviderField(
-                            provider,
-                            "model",
-                            (event.currentTarget as HTMLInputElement).value,
-                          )}
-                        onblur={persistApiProviderConfig}
-                      />
-                      {#if fieldRules.modelOptions}
-                        <datalist id="model-list-{provider.id}">
-                          {#each fieldRules.modelOptions as model}
-                            <option value={model} />
-                          {/each}
-                        </datalist>
+                  <div class="space-y-2">
+                    <!-- API Key row (always visible) + expand toggle -->
+                    <div class="flex items-center gap-2">
+                      {#if fieldRules.showApiKey}
+                        <Input
+                          type={showApiKey ? "text" : "password"}
+                          placeholder={`${provider.label} API Key`}
+                          value={credential?.api_key ?? ""}
+                          oninput={(event) =>
+                            updateApiProviderField(
+                              provider,
+                              "api_key",
+                              (event.currentTarget as HTMLInputElement).value,
+                            )}
+                          onblur={persistApiProviderConfig}
+                        />
                       {/if}
+                      <button
+                        type="button"
+                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent transition-colors"
+                        title={expandedProviderPanels[provider.id] ? "收起配置" : "展开配置"}
+                        onclick={() => toggleProviderPanel(provider.id)}
+                      >
+                        <svg
+                          class="h-4 w-4 transition-transform {expandedProviderPanels[provider.id]
+                            ? 'rotate-180'
+                            : ''}"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    </div>
+                    <!-- Expanded panel: 3 rows x 2 cols -->
+                    {#if expandedProviderPanels[provider.id]}
+                      {@const [tierOpus, tierSonnet, tierHaiku] = expandModelsToTiers(credential?.models ?? [])}
+                      <div class="grid grid-cols-2 gap-2 rounded-md border border-border/50 p-3">
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-model-{provider.id}">
+                            ANTHROPIC_MODEL
+                          </label>
+                          <input
+                            id="env-model-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            placeholder={tierOpus || provider.defaultModel || "自动"}
+                            value={credential?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderExtraEnv(provider, "ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                            onblur={persistApiProviderConfig}
+                          />
+                        </div>
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-opus-{provider.id}">
+                            OPUS_MODEL
+                          </label>
+                          <input
+                            id="env-opus-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            placeholder={tierOpus || provider.defaultModel || "自动"}
+                            value={credential?.extra_env?.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_OPUS_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                            onblur={persistApiProviderConfig}
+                          />
+                        </div>
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-sonnet-{provider.id}">
+                            SONNET_MODEL
+                          </label>
+                          <input
+                            id="env-sonnet-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            placeholder={tierSonnet || tierOpus || provider.defaultModel || "自动"}
+                            value={credential?.extra_env?.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_SONNET_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                            onblur={persistApiProviderConfig}
+                          />
+                        </div>
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-haiku-{provider.id}">
+                            HAIKU_MODEL
+                          </label>
+                          <input
+                            id="env-haiku-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            placeholder={tierHaiku || tierOpus || provider.defaultModel || "自动"}
+                            value={credential?.extra_env?.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_HAIKU_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                            onblur={persistApiProviderConfig}
+                          />
+                        </div>
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-subagent-{provider.id}">
+                            SUBAGENT_MODEL
+                          </label>
+                          <input
+                            id="env-subagent-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            placeholder={tierOpus || provider.defaultModel || "自动"}
+                            value={credential?.extra_env?.CLAUDE_CODE_SUBAGENT_MODEL ?? ""}
+                            oninput={(event) =>
+                              updateApiProviderExtraEnv(provider, "CLAUDE_CODE_SUBAGENT_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                            onblur={persistApiProviderConfig}
+                          />
+                        </div>
+                        <div class="space-y-1">
+                          <label class="text-[11px] text-muted-foreground" for="env-effort-{provider.id}">
+                            EFFORT_LEVEL
+                          </label>
+                          <select
+                            id="env-effort-{provider.id}"
+                            class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                            value={credential?.extra_env?.CLAUDE_CODE_EFFORT_LEVEL ?? ""}
+                            onchange={(event) =>
+                              updateApiProviderExtraEnv(provider, "CLAUDE_CODE_EFFORT_LEVEL", (event.currentTarget as HTMLSelectElement).value)}
+                            onblur={persistApiProviderConfig}
+                          >
+                            <option value="">默认 (max)</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                            <option value="max">max</option>
+                          </select>
+                        </div>
+                      </div>
                     {/if}
                   </div>
                 {/if}

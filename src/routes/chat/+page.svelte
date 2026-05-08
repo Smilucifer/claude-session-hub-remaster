@@ -30,7 +30,7 @@
     TimelineEntry,
     CliCheckResult,
   } from "$lib/types";
-  import { PLATFORM_PRESETS, findCredential } from "$lib/utils/platform-presets";
+  import { PLATFORM_PRESETS, findCredential, expandModelsToTiers } from "$lib/utils/platform-presets";
   import { IS_WEBKIT } from "$lib/utils/platform";
   import {
     detectBatchGroups,
@@ -722,19 +722,34 @@
   });
 
   // ── Provider-aware model list ──
-  // When a third-party platform is active and has a models list, use that instead of CLI models.
+  // When a third-party platform is active, show tier-labeled models.
   // Priority: credential.models (user-configured) > preset.models (static defaults)
   let platformModels = $derived.by((): CliModelInfo[] => {
     const pid = store.platformId;
     if (!pid || pid === "anthropic") return [];
     const cred = findCredential(settings?.platform_credentials ?? [], pid);
     const preset = PLATFORM_PRESETS.find((p) => p.id === pid);
-    const models = cred?.models?.length ? cred.models : preset?.models;
-    if (!models?.length) return [];
-    return models.map((m, i) => ({
-      value: m,
-      displayName: m,
-      description: i === 0 ? "Default" : "",
+    const rawModels = cred?.models?.length ? cred.models : preset?.models;
+    if (!rawModels?.length) return [];
+    // Expand to [opus, sonnet, haiku] tiers, applying extra_env overrides
+    const [opus, sonnet, haiku] = expandModelsToTiers(rawModels);
+    const extraEnv = cred?.extra_env ?? {};
+    const effectiveOpus = extraEnv.ANTHROPIC_DEFAULT_OPUS_MODEL || opus;
+    const effectiveSonnet = extraEnv.ANTHROPIC_DEFAULT_SONNET_MODEL || sonnet;
+    const effectiveHaiku = extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL || haiku;
+    // Deduplicate by value, preserve tier order
+    const seen = new Set<string>();
+    const tiers: Array<{ value: string; label: string }> = [];
+    for (const [label, value] of [["Opus", effectiveOpus], ["Sonnet", effectiveSonnet], ["Haiku", effectiveHaiku]]) {
+      if (value && !seen.has(value)) {
+        seen.add(value);
+        tiers.push({ value, label });
+      }
+    }
+    return tiers.map(({ value, label }) => ({
+      value,
+      displayName: `${label} : ${value}`,
+      description: "",
     }));
   });
 
@@ -2234,12 +2249,12 @@
 
     const isThirdParty = store.platformId && store.platformId !== "anthropic";
 
-    // Hot-switch model if session is alive (only for Anthropic — third-party models
-    // are set via ANTHROPIC_MODEL env var at spawn time, not via control protocol)
-    if (!isThirdParty && store.sessionAlive && store.run) {
+    // Hot-switch model if session is alive (works for both Anthropic and third-party providers
+    // via set_model control protocol, tested with DeepSeek and MiMo Pro)
+    if (store.sessionAlive && store.run) {
       try {
         await api.sendSessionControl(store.run.id, "set_model", { model: newModel });
-        dbg("chat", "model hot-switched via control protocol");
+        dbg("chat", "model hot-switched via control protocol", { isThirdParty });
       } catch (e) {
         dbgWarn("chat", "model hot-switch failed, will use new model on next session", e);
       }

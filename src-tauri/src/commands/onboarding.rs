@@ -426,14 +426,9 @@ pub(crate) fn preset_name(pid: &str) -> String {
         "anthropic" => "Anthropic",
         "deepseek" => "DeepSeek",
         "kimi" => "Kimi (Moonshot)",
-        "kimi-coding" => "Kimi For Coding",
         "zhipu" => "Zhipu (智谱)",
         "zhipu-intl" => "Zhipu (智谱 Intl)",
         "bailian" => "Bailian (百炼)",
-        "doubao" => "DouBao (豆包)",
-        "minimax" => "MiniMax",
-        "minimax-cn" => "MiniMax (China)",
-        "mimo" => "Xiaomi MiMo (小米)",
         "vercel" => "Vercel AI Gateway",
         "openrouter" => "OpenRouter",
         "siliconflow" => "SiliconFlow (硅基流动)",
@@ -630,7 +625,6 @@ mod tests {
         assert_eq!(preset_name("ccswitch"), "CC Switch");
         assert_eq!(preset_name("ccr"), "Claude Code Router");
         assert_eq!(preset_name("zhipu-intl"), "Zhipu (智谱 Intl)");
-        assert_eq!(preset_name("minimax-cn"), "MiniMax (China)");
         assert_eq!(preset_name("zenmux"), "ZenMux");
         // Existing mappings
         assert_eq!(preset_name("anthropic"), "Anthropic");

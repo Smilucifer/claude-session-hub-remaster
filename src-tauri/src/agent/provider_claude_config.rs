@@ -143,6 +143,29 @@ fn stability_env_vars() -> HashMap<String, String> {
     ])
 }
 
+/// Whitelist of extra_env keys that users can override via the settings UI.
+/// Prevents accidental overwriting of stability or internal env vars.
+const ALLOWED_EXTRA_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_EFFORT_LEVEL",
+];
+
+/// Merge filtered extra_env into the env map. Only whitelisted keys are applied.
+/// Called after stability_env_vars() so user values take precedence.
+fn merge_extra_env(env: &mut HashMap<String, String>, extra_env: &Option<HashMap<String, String>>) {
+    let Some(extra) = extra_env else { return };
+    for (key, value) in extra {
+        if ALLOWED_EXTRA_ENV_KEYS.contains(&key.as_str()) && !value.trim().is_empty() {
+            log::debug!("[provider_claude_config] extra_env override: {}={}", key, value);
+            env.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 fn build_deepseek_env(cred: &PlatformCredential) -> Result<HashMap<String, String>, String> {
     let api_key = cred
         .api_key
@@ -194,6 +217,7 @@ fn build_deepseek_env(cred: &PlatformCredential) -> Result<HashMap<String, Strin
         ),
     ]);
     env.extend(stability_env_vars());
+    merge_extra_env(&mut env, &cred.extra_env);
     Ok(env)
 }
 
@@ -247,6 +271,7 @@ fn build_parameterized_env(
         ),
     ]);
     env.extend(stability_env_vars());
+    merge_extra_env(&mut env, &cred.extra_env);
     Ok(env)
 }
 
@@ -477,5 +502,94 @@ mod tests {
             Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
             None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
         }
+    }
+
+    fn cred_with_extra_env(platform_id: &str, extra_env: Option<HashMap<String, String>>) -> PlatformCredential {
+        PlatformCredential {
+            platform_id: platform_id.to_string(),
+            api_key: Some("sk-test".to_string()),
+            base_url: Some("https://example.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some(platform_id.to_string()),
+            models: Some(vec!["test-model".to_string()]),
+            extra_env,
+        }
+    }
+
+    #[test]
+    fn merge_extra_env_whitelisted_keys_override() {
+        let mut env = HashMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "default-model".to_string()),
+            ("ANTHROPIC_BASE_URL".to_string(), "https://base.example.com".to_string()),
+        ]);
+        let extra_env = HashMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "override-model".to_string()),
+        ]);
+        merge_extra_env(&mut env, &Some(extra_env));
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("override-model"));
+        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://base.example.com"));
+    }
+
+    #[test]
+    fn merge_extra_env_non_whitelisted_keys_ignored() {
+        let mut env = HashMap::from([
+            ("ANTHROPIC_BASE_URL".to_string(), "https://base.example.com".to_string()),
+        ]);
+        let extra_env = HashMap::from([
+            ("ANTHROPIC_BASE_URL".to_string(), "https://evil.example.com".to_string()),
+            ("SOME_INTERNAL_KEY".to_string(), "bad".to_string()),
+        ]);
+        merge_extra_env(&mut env, &Some(extra_env));
+        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://base.example.com"));
+        assert!(!env.contains_key("SOME_INTERNAL_KEY"));
+    }
+
+    #[test]
+    fn merge_extra_env_empty_values_filtered() {
+        let mut env = HashMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "original".to_string()),
+        ]);
+        let extra_env = HashMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "  ".to_string()),
+        ]);
+        merge_extra_env(&mut env, &Some(extra_env));
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("original"));
+    }
+
+    #[test]
+    fn merge_extra_env_none_is_noop() {
+        let mut env = HashMap::from([
+            ("ANTHROPIC_MODEL".to_string(), "original".to_string()),
+        ]);
+        merge_extra_env(&mut env, &None);
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("original"));
+    }
+
+    #[test]
+    fn build_deepseek_env_with_extra_env_overrides() {
+        let c = cred_with_extra_env(
+            "deepseek",
+            Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "custom-ds-model".to_string()),
+                ("CLAUDE_CODE_EFFORT_LEVEL".to_string(), "low".to_string()),
+                ("EVIL_KEY".to_string(), "should-be-ignored".to_string()),
+            ])),
+        );
+        let env = build_deepseek_env(&c).unwrap();
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("custom-ds-model"));
+        assert_eq!(env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str), Some("low"));
+        assert!(!env.contains_key("EVIL_KEY"));
+    }
+
+    #[test]
+    fn build_parameterized_env_with_extra_env_overrides() {
+        let c = cred_with_extra_env(
+            "kimi",
+            Some(HashMap::from([
+                ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), "custom-haiku".to_string()),
+            ])),
+        );
+        let env = build_parameterized_env("kimi", &c).unwrap();
+        assert_eq!(env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str), Some("custom-haiku"));
     }
 }
