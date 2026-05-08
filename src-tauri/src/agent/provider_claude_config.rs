@@ -118,7 +118,7 @@ fn default_base_url(platform_id: &str) -> Option<&'static str> {
         "bailian" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic"),
         "kimi" => Some("https://api.moonshot.cn/anthropic"),
         "mimo-pro" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
-        "packy-cx2cc" => Some("https://www.packyapi.com"),
+        "packy-cx2cc" => Some("https://www.packyapi.com/anthropic"),
         _ => None,
     }
 }

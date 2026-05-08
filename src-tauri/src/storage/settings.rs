@@ -179,7 +179,7 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
             auth_env_var: None,
         }),
         "packy-cx2cc" => Some(ProviderDefaults {
-            base_url: Some("https://www.packyapi.com"),
+            base_url: Some("https://www.packyapi.com/anthropic"),
             models: None,
             extra_env: None,
             key_optional: false,

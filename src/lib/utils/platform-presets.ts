@@ -80,9 +80,9 @@ export const PLATFORM_PRESETS: PlatformPreset[] = [
   {
     id: "packy-cx2cc",
     name: "Packy CX2CC",
-    base_url: "https://www.packyapi.com",
+    base_url: "https://www.packyapi.com/anthropic",
     auth_env_var: "ANTHROPIC_AUTH_TOKEN",
-    description: "Packy CX2CC",
+    description: "Packy CX2CC API",
     key_placeholder: "your-packy-cx2cc-key",
     category: "provider",
   },

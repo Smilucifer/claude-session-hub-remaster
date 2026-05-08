@@ -2,7 +2,7 @@
 
 ## Phase 9.y (2026-05-09)
 
-- 新增 Packy CX2CC API provider（base URL: https://www.packyapi.com），模型从设置页读取
+- 新增 Packy CX2CC API provider（base URL: https://www.packyapi.com/anthropic），模型从设置页读取
 - 移除 5 个无后端支持的 provider 预设：kimi-coding、doubao、minimax、minimax-cn、mimo（前端 platform-presets.ts + 后端 onboarding.rs/settings.rs 同步清理）
 - `PlatformCredential.extra_env` 白名单机制：`ALLOWED_EXTRA_ENV_KEYS` 限制用户可覆盖的环境变量（模型 tier + effort level），防止误覆盖稳定性变量
 - `merge_extra_env` 合并函数：stability_env_vars → extra_env 覆盖顺序，空值过滤，6 个单元测试覆盖

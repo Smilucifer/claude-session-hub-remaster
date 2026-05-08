@@ -184,6 +184,7 @@ Provider-native launch config generation (Phase 9.y):
 - All providers use per-session temp JSON (`session-{run_id}.json`) generated fresh from the latest credential in settings, passed via `claude --settings <temp-json>` to override global `~/.claude/settings.json`.
 - User-configurable env vars are stored in `PlatformCredential.extra_env` and merged via a whitelist (`ALLOWED_EXTRA_ENV_KEYS` in `provider_claude_config.rs`). Only model tier overrides and effort level are allowed; stability vars cannot be overwritten.
 - Chat page model dropdown shows tier-labeled models (Opus/Sonnet/Haiku) via `expandModelsToTiers`, with extra_env overrides applied. Model hot-switching via `set_model` control protocol works for both Anthropic and third-party providers.
+- Packy CX2CC uses fixed-URL template (API key only; base URL https://www.packyapi.com/anthropic from preset).
 
 Do not collapse provider selection, model display, and actual CLI spawn logic into a single assumption.
 

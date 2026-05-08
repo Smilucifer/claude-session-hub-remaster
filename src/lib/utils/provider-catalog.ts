@@ -102,8 +102,8 @@ export const PHASE7_PROVIDERS: Phase7ProviderEntry[] = [
     mode: "claude_compatible_api",
     executionAgent: "claude",
     platformId: "packy-cx2cc",
-    defaultBaseUrl: "https://www.packyapi.com",
-    requiredConfig: ["api_key", "base_url", "model"],
+    defaultBaseUrl: "https://www.packyapi.com/anthropic",
+    requiredConfig: ["api_key"],
     defaultPermissionMode: "bypass",
   },
 ];

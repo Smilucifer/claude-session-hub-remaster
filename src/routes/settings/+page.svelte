@@ -168,7 +168,7 @@
     const modelOptions: string[] | null =
       preset?.models && preset.models.length > 0 ? preset.models : null;
 
-    const showBaseUrl = provider.id !== "deepseek" && provider.id !== "mimo-pro";
+    const showBaseUrl = provider.id !== "deepseek" && provider.id !== "mimo-pro" && provider.id !== "packy-cx2cc";
 
     return {
       showApiKey: true,

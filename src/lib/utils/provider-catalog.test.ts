@@ -11,6 +11,7 @@ describe("Phase 7 provider catalog", () => {
       "QWEN",
       "KIMI",
       "MiMo Pro",
+      "Packy CX2CC",
     ]);
   });
 
@@ -54,6 +55,14 @@ describe("Phase 7 provider catalog", () => {
       requiredConfig: ["api_key"],
       defaultPermissionMode: "bypass",
     });
+    expect(getPhase7Provider("packy-cx2cc")).toMatchObject({
+      mode: "claude_compatible_api",
+      executionAgent: "claude",
+      platformId: "packy-cx2cc",
+      defaultBaseUrl: "https://www.packyapi.com/anthropic",
+      requiredConfig: ["api_key"],
+      defaultPermissionMode: "bypass",
+    });
   });
 
   it("assigns required settings fields for fixed and parameterized API providers", () => {
@@ -78,6 +87,7 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude", "bailian")).toBe("qwen");
     expect(providerIdForRun("claude", "kimi")).toBe("kimi");
     expect(providerIdForRun("claude", "mimo-pro")).toBe("mimo-pro");
+    expect(providerIdForRun("claude", "packy-cx2cc")).toBe("packy-cx2cc");
     expect(providerIdForRun("codex")).toBe("codex");
     expect(providerIdForRun("claude")).toBe("claude");
   });
