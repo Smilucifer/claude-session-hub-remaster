@@ -126,6 +126,7 @@
     lazyFailed = false; // reset — effect will re-trigger
   }
   let multiChecked: Record<string, boolean> = $state({});
+  let questionMultiChecked: Record<string, Record<string, boolean>> = $state({});
   // Per-question answers for multi-question AskUserQuestion
   let questionAnswers: Record<string, string> = $state({});
   // Per-question "Other" mode state
@@ -313,7 +314,17 @@
 
   // Track how many questions are answered (for multi-question submit)
   let allQuestionsAnswered = $derived(
-    parsedQuestions.length > 0 && parsedQuestions.every((q) => !!questionAnswers[q.question]),
+    parsedQuestions.length > 0 &&
+      parsedQuestions.every((q) => {
+        if (q.multiSelect) {
+          return (
+            getQuestionMultiSelected(q.question).length > 0 ||
+            !!(otherActive[q.question] && otherText[q.question]?.trim())
+          );
+        }
+        if (otherActive[q.question]) return !!otherText[q.question]?.trim();
+        return !!questionAnswers[q.question];
+      }),
   );
 
   // Output text (used by AskUserQuestion answer display)
@@ -515,20 +526,62 @@
     questionAnswers[questionText] = answer;
   }
 
+  function toggleQuestionMulti(questionText: string, option: string) {
+    const current = questionMultiChecked[questionText] ?? {};
+    const nextValue = !current[option];
+    questionMultiChecked = {
+      ...questionMultiChecked,
+      [questionText]: {
+        ...current,
+        [option]: nextValue,
+      },
+    };
+  }
+
+  function getQuestionMultiSelected(questionText: string): string[] {
+    const selectedMap = questionMultiChecked[questionText] ?? {};
+    return Object.keys(selectedMap).filter((option) => selectedMap[option]);
+  }
+
+  function multiQuestionAnswerCount(): number {
+    return parsedQuestions.filter((q) => {
+      if (q.multiSelect) {
+        return (
+          getQuestionMultiSelected(q.question).length > 0 ||
+          !!(otherActive[q.question] && otherText[q.question]?.trim())
+        );
+      }
+      if (otherActive[q.question]) return !!otherText[q.question]?.trim();
+      return !!questionAnswers[q.question];
+    }).length;
+  }
+
   // Multi-question: submit all answers at once
   function submitAllQuestionAnswers() {
     if (submitting || !onPermissionRespond || !tool.permission_request_id) return;
     if (!allQuestionsAnswered) return;
     submitting = true;
+    const answers: Record<string, string> = {};
     const annotations: Record<string, { notes: string }> = {};
-    for (const [q, ans] of Object.entries(questionAnswers)) {
-      if (ans === "Other" && otherText[q]?.trim()) {
-        annotations[q] = { notes: otherText[q].trim() };
+    for (const pq of parsedQuestions) {
+      if (pq.multiSelect) {
+        const selected = getQuestionMultiSelected(pq.question);
+        const otherVal = otherActive[pq.question] ? otherText[pq.question]?.trim() : "";
+        const merged = otherVal ? [...selected, otherVal] : selected;
+        answers[pq.question] = merged.join(", ");
+        if (otherVal) {
+          annotations[pq.question] = { notes: otherVal };
+        }
+      } else {
+        answers[pq.question] = questionAnswers[pq.question];
+        if (questionAnswers[pq.question] === "Other" && otherText[pq.question]?.trim()) {
+          annotations[pq.question] = { notes: otherText[pq.question].trim() };
+        }
       }
     }
     const updatedInput = {
       ...tool.input,
-      answers: { ...questionAnswers },
+      answers,
       ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
     };
     safePermissionRespond(tool.permission_request_id, "allow", undefined, updatedInput);
@@ -993,18 +1046,26 @@
                         {#each pq.options as option}
                           <button
                             type="button"
-                            class="w-full min-w-0 break-words rounded-md border px-3 py-1 text-left text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {questionAnswers[
-                              pq.question
-                            ] === option.label
-                              ? 'border-primary bg-primary/10 text-primary'
-                              : 'border-border bg-background text-foreground hover:bg-accent hover:border-ring/30'}"
+                            class="w-full min-w-0 break-words rounded-md border px-3 py-1 text-left text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {pq.multiSelect
+                              ? getQuestionMultiSelected(pq.question).includes(option.label)
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border bg-background text-foreground hover:bg-accent hover:border-ring/30'
+                              : questionAnswers[pq.question] === option.label
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border bg-background text-foreground hover:bg-accent hover:border-ring/30'}"
                             disabled={submitting}
                             onclick={() => {
                               otherActive = { ...otherActive, [pq.question]: false };
-                              selectQuestionAnswer(pq.question, option.label);
+                              if (pq.multiSelect) {
+                                toggleQuestionMulti(pq.question, option.label);
+                              } else {
+                                selectQuestionAnswer(pq.question, option.label);
+                              }
                             }}
                           >
-                            {#if questionAnswers[pq.question] === option.label}
+                            {#if pq.multiSelect
+                              ? getQuestionMultiSelected(pq.question).includes(option.label)
+                              : questionAnswers[pq.question] === option.label}
                               <svg
                                 class="inline h-3 w-3 mr-0.5 -mt-0.5"
                                 viewBox="0 0 24 24"
@@ -1033,7 +1094,9 @@
                           type="button"
                           class="w-full min-w-0 rounded-md border border-dashed px-3 py-1 text-left text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed {otherActive[
                             pq.question
-                          ] && questionAnswers[pq.question] === 'Other'
+                          ] && (pq.multiSelect
+                            ? !!otherText[pq.question]?.trim()
+                            : questionAnswers[pq.question] === 'Other')
                             ? 'border-primary bg-primary/10 text-primary'
                             : 'border-border bg-background text-muted-foreground hover:bg-accent hover:border-ring/30'}"
                           disabled={submitting}
@@ -1041,10 +1104,15 @@
                             const wasActive = otherActive[pq.question];
                             otherActive = { ...otherActive, [pq.question]: !wasActive };
                             if (!wasActive) {
-                              selectQuestionAnswer(pq.question, "Other");
-                            } else if (questionAnswers[pq.question] === "Other") {
-                              const { [pq.question]: _, ...rest } = questionAnswers;
-                              questionAnswers = rest;
+                              if (!pq.multiSelect) {
+                                selectQuestionAnswer(pq.question, "Other");
+                              }
+                            } else {
+                              otherText = { ...otherText, [pq.question]: "" };
+                              if (questionAnswers[pq.question] === "Other") {
+                                const { [pq.question]: _, ...rest } = questionAnswers;
+                                questionAnswers = rest;
+                              }
                             }
                           }}
                         >
@@ -1070,7 +1138,7 @@
                     onclick={submitAllQuestionAnswers}
                   >
                     {t("inline_submitCount", {
-                      count: `${Object.keys(questionAnswers).length}/${parsedQuestions.length}`,
+                      count: `${multiQuestionAnswerCount()}/${parsedQuestions.length}`,
                     })}
                   </button>
                   <button
