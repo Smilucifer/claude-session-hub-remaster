@@ -50,6 +50,7 @@ import type {
   RoomSummary,
   RoomTurnSnapshot,
   BalanceHelperSettings,
+  ValidatePlatformCredentialsResponse,
 } from "./types";
 
 // Runs
@@ -390,6 +391,15 @@ export async function getUserSettings(): Promise<UserSettings> {
 export async function updateUserSettings(patch: Partial<UserSettings>): Promise<UserSettings> {
   dbg("api", "updateUserSettings");
   return invoke<UserSettings>("update_user_settings", { patch });
+}
+
+export async function validatePlatformCredentials(
+  platformCredentials: import("./types").PlatformCredential[],
+): Promise<ValidatePlatformCredentialsResponse> {
+  dbg("api", "validatePlatformCredentials", { count: platformCredentials.length });
+  return invoke<ValidatePlatformCredentialsResponse>("validate_platform_credentials", {
+    platformCredentials,
+  });
 }
 
 export async function refreshBalanceStatus(

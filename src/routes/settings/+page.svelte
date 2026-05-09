@@ -10,6 +10,7 @@
     RemoteTestResult,
     SshKeyInfo,
     CliCheckResult,
+    ProviderValidationResult,
   } from "$lib/types";
   import Card from "$lib/components/Card.svelte";
   import Button from "$lib/components/Button.svelte";
@@ -17,7 +18,7 @@
   import KeybindingEditor from "$lib/components/KeybindingEditor.svelte";
   import { formatKeyDisplay } from "$lib/stores/keybindings.svelte";
   import { findCredential, PLATFORM_PRESETS, expandModelsToTiers } from "$lib/utils/platform-presets";
-  import { PHASE7_PROVIDERS, type Phase7ProviderEntry } from "$lib/utils/provider-catalog";
+  import { PHASE7_PROVIDERS, getPhase7Provider, type Phase7ProviderEntry } from "$lib/utils/provider-catalog";
   import type {
     PlatformCredential,
     WindowsMsvcEnvMode,
@@ -99,6 +100,9 @@
     claude: null,
     codex: null,
   });
+  let providerValidationResults = $state<Record<string, ProviderValidationResult | null>>({});
+  let providerValidationApplying = $state(false);
+  let providerValidationSummary = $state("");
   let connectionCliChecking = $state(false);
   let msvcEnvMode = $state<WindowsMsvcEnvMode>("auto");
   let msvcEnvStatus = $state<WindowsMsvcEnvStatus | null>(null);
@@ -156,6 +160,11 @@
     };
     const rest = platformCredentials.filter((c) => c.platform_id !== "mimo-api");
     platformCredentials = [...rest, next];
+  }
+
+  function updateMimoSharedExtraEnv(envKey: string, value: string) {
+    updateApiProviderExtraEnv(getPhase7Provider("mimo-plan"), envKey, value);
+    updateMimoApiExtraEnv(envKey, value);
   }
 
   function providerStatusLabel(provider: Phase7ProviderEntry): string {
@@ -1073,6 +1082,31 @@
     }
   }
 
+  function providerValidation(platformId: string): ProviderValidationResult | null {
+    return providerValidationResults[platformId] ?? null;
+  }
+
+  async function applyAndValidateProviderConfig() {
+    providerValidationApplying = true;
+    providerValidationSummary = "";
+    try {
+      settings = await api.updateUserSettings({ platform_credentials: platformCredentials });
+      const response = await api.validatePlatformCredentials(platformCredentials);
+      providerValidationResults = Object.fromEntries(
+        response.results.map((result) => [result.platformId, result]),
+      ) as Record<string, ProviderValidationResult | null>;
+      const failed = response.results.filter((result) => !result.ok).length;
+      providerValidationSummary = failed
+        ? `已保存配置，${failed} 个 provider 仍需补齐设置`
+        : "已保存配置，所有第三方 session provider 校验通过";
+    } catch (e) {
+      providerValidationSummary = "保存或校验失败，请稍后重试";
+      dbgWarn("settings", "applyAndValidateProviderConfig error", e);
+    } finally {
+      providerValidationApplying = false;
+    }
+  }
+
   // ── Web Server helpers ──
 
   async function applyWebServerSettings() {
@@ -1837,15 +1871,28 @@
               <p class="mt-1 text-xs text-muted-foreground">
                 订阅 CLI 使用官方登录；DeepSeek 和 GLM 通过 Claude Code 兼容 API 配置启动。
               </p>
+              {#if providerValidationSummary}
+                <p class="mt-2 text-xs text-muted-foreground">{providerValidationSummary}</p>
+              {/if}
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={connectionCliChecking}
-              onclick={refreshConnectionCliChecks}
-            >
-              {connectionCliChecking ? "检测中" : "重新检测 CLI"}
-            </Button>
+            <div class="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={providerValidationApplying}
+                onclick={applyAndValidateProviderConfig}
+              >
+                {providerValidationApplying ? "校验中" : "应用并校验配置"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={connectionCliChecking}
+                onclick={refreshConnectionCliChecks}
+              >
+                {connectionCliChecking ? "检测中" : "重新检测 CLI"}
+              </Button>
+            </div>
           </div>
 
           <div class="divide-y divide-border rounded-md border border-border">
@@ -1872,6 +1919,36 @@
                     <p class="mt-1 truncate text-xs text-muted-foreground">
                       {providerStatusLabel(provider)}
                     </p>
+                    {#if providerValidation("mimo-plan")}
+                      <div class="mt-2 space-y-1 text-[11px]">
+                        <div class:text-emerald-500={providerValidation("mimo-plan")?.ok}
+                             class:text-amber-500={!providerValidation("mimo-plan")?.ok}>
+                          Token Plan · {providerValidation("mimo-plan")?.ok ? "配置校验通过" : providerValidation("mimo-plan")?.message}
+                        </div>
+                        {#if !providerValidation("mimo-plan")?.ok}
+                          <ul class="list-inside list-disc text-muted-foreground">
+                            {#each providerValidation("mimo-plan")?.issues ?? [] as issue}
+                              <li>{issue.field}</li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    {/if}
+                    {#if providerValidation("mimo-api")}
+                      <div class="mt-2 space-y-1 text-[11px]">
+                        <div class:text-emerald-500={providerValidation("mimo-api")?.ok}
+                             class:text-amber-500={!providerValidation("mimo-api")?.ok}>
+                          API · {providerValidation("mimo-api")?.ok ? "配置校验通过" : providerValidation("mimo-api")?.message}
+                        </div>
+                        {#if !providerValidation("mimo-api")?.ok}
+                          <ul class="list-inside list-disc text-muted-foreground">
+                            {#each providerValidation("mimo-api")?.issues ?? [] as issue}
+                              <li>{issue.field}</li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
                   <!-- Middle: two input rows with labels -->
                   <div class="space-y-2">
@@ -1921,18 +1998,18 @@
                 <!-- Expanded panel: model config for mimo-plan + mimo-api -->
                 {#if expandedProviderPanels[provider.id]}
                   {@const [tierOpus, tierSonnet, tierHaiku] = expandModelsToTiers(credential?.models ?? [])}
-                  {@const apiTierOpus = mimoApiCred?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                  {@const sharedExtraEnv = credential?.extra_env ?? {}}
                   <div class="mx-4 mb-4 grid grid-cols-2 gap-2 rounded-md border border-border/50 p-3">
-                    <div class="col-span-2 text-[11px] font-medium text-muted-foreground">Token Plan 模型配置</div>
+                    <div class="col-span-2 text-[11px] font-medium text-muted-foreground">共用模型配置（同时应用到 Token Plan / API）</div>
                     <div class="space-y-1">
                       <label class="text-[11px] text-muted-foreground" for="mimo-plan-model">ANTHROPIC_MODEL</label>
                       <input
                         id="mimo-plan-model"
                         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
                         placeholder={tierOpus || provider.defaultModel || "自动"}
-                        value={credential?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                        value={sharedExtraEnv.ANTHROPIC_MODEL ?? ""}
                         oninput={(event) =>
-                          updateApiProviderExtraEnv(provider, "ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                          updateMimoSharedExtraEnv("ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
                         onblur={persistApiProviderConfig}
                       />
                     </div>
@@ -1942,9 +2019,9 @@
                         id="mimo-plan-opus"
                         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
                         placeholder={tierOpus || provider.defaultModel || "自动"}
-                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
+                        value={sharedExtraEnv.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
                         oninput={(event) =>
-                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_OPUS_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                          updateMimoSharedExtraEnv("ANTHROPIC_DEFAULT_OPUS_MODEL", (event.currentTarget as HTMLInputElement).value)}
                         onblur={persistApiProviderConfig}
                       />
                     </div>
@@ -1954,9 +2031,9 @@
                         id="mimo-plan-sonnet"
                         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
                         placeholder={tierSonnet || tierOpus || provider.defaultModel || "自动"}
-                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
+                        value={sharedExtraEnv.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
                         oninput={(event) =>
-                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_SONNET_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                          updateMimoSharedExtraEnv("ANTHROPIC_DEFAULT_SONNET_MODEL", (event.currentTarget as HTMLInputElement).value)}
                         onblur={persistApiProviderConfig}
                       />
                     </div>
@@ -1966,25 +2043,42 @@
                         id="mimo-plan-haiku"
                         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
                         placeholder={tierHaiku || tierOpus || provider.defaultModel || "自动"}
-                        value={credential?.extra_env?.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
+                        value={sharedExtraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
                         oninput={(event) =>
-                          updateApiProviderExtraEnv(provider, "ANTHROPIC_DEFAULT_HAIKU_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                          updateMimoSharedExtraEnv("ANTHROPIC_DEFAULT_HAIKU_MODEL", (event.currentTarget as HTMLInputElement).value)}
                         onblur={persistApiProviderConfig}
                       />
                     </div>
-                    <div class="col-span-2 mt-2 border-t border-border/50 pt-2 text-[11px] font-medium text-muted-foreground">API 模型配置</div>
                     <div class="space-y-1">
-                      <label class="text-[11px] text-muted-foreground" for="mimo-api-model">ANTHROPIC_MODEL</label>
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-subagent">SUBAGENT_MODEL</label>
                       <input
-                        id="mimo-api-model"
+                        id="mimo-plan-subagent"
                         class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
-                        placeholder={apiTierOpus || "自动"}
-                        value={mimoApiCred?.extra_env?.ANTHROPIC_MODEL ?? ""}
+                        placeholder={tierOpus || provider.defaultModel || "自动"}
+                        value={sharedExtraEnv.CLAUDE_CODE_SUBAGENT_MODEL ?? ""}
                         oninput={(event) =>
-                          updateMimoApiExtraEnv("ANTHROPIC_MODEL", (event.currentTarget as HTMLInputElement).value)}
+                          updateMimoSharedExtraEnv("CLAUDE_CODE_SUBAGENT_MODEL", (event.currentTarget as HTMLInputElement).value)}
                         onblur={persistApiProviderConfig}
                       />
                     </div>
+                    <div class="space-y-1">
+                      <label class="text-[11px] text-muted-foreground" for="mimo-plan-effort">EFFORT_LEVEL</label>
+                      <select
+                        id="mimo-plan-effort"
+                        class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                        value={sharedExtraEnv.CLAUDE_CODE_EFFORT_LEVEL ?? ""}
+                        onchange={(event) =>
+                          updateMimoSharedExtraEnv("CLAUDE_CODE_EFFORT_LEVEL", (event.currentTarget as HTMLSelectElement).value)}
+                        onblur={persistApiProviderConfig}
+                      >
+                        <option value="">默认 (max)</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                        <option value="max">max</option>
+                      </select>
+                    </div>
+                    <div class="col-span-2 mt-2 border-t border-border/50 pt-2 text-[11px] text-muted-foreground">Key 与 base_url 仍分别保存在 Token Plan / API 各自配置中，只有模型配置共用并双写。</div>
                   </div>
                 {/if}
               {:else}
@@ -2005,9 +2099,31 @@
                         {providerBadgeLabel(provider)}
                       </span>
                     </div>
-                    <p class="mt-1 truncate text-xs text-muted-foreground">
-                      {providerStatusLabel(provider)}
-                    </p>
+                    <div class="mt-1 text-xs text-muted-foreground">
+                      <div class="truncate">{providerStatusLabel(provider)}</div>
+                      {#if provider.id === "deepseek"}
+                        <div class="mt-1">需显式填写完整模型配置后才可启动。</div>
+                      {:else if provider.id === "packy-cx2cc"}
+                        <div class="mt-1">需显式填写完整模型配置后才可启动，不再使用默认模型兜底。</div>
+                      {/if}
+                    </div>
+                    {#if provider.platformId && providerValidation(provider.platformId)}
+                      <div class="mt-2 space-y-1 text-[11px]">
+                        <div class:text-emerald-500={providerValidation(provider.platformId)?.ok}
+                             class:text-amber-500={!providerValidation(provider.platformId)?.ok}>
+                          {providerValidation(provider.platformId)?.ok
+                            ? "配置校验通过"
+                            : providerValidation(provider.platformId)?.message}
+                        </div>
+                        {#if !providerValidation(provider.platformId)?.ok}
+                          <ul class="list-inside list-disc text-muted-foreground">
+                            {#each providerValidation(provider.platformId)?.issues ?? [] as issue}
+                              <li>{issue.field}</li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
 
                   {#if provider.mode === "official_cli"}

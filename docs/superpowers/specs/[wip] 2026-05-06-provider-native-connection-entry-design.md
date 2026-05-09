@@ -311,12 +311,30 @@ Required checks:
 3. GLM launch config is built from settings-derived API key, base URL, and model.
 4. QWEN launch config is built from settings-derived API key, base URL, and model.
 5. KIMI launch config is built from settings-derived API key, base URL, and model.
-6. resume / continue does not drop provider-specific config semantics.
-7. room participant starts do not drop provider-specific config semantics.
-8. subagent behavior preserves the provider-native model/config intent where inherited.
-9. Claude, Codex, Gemini, and unrelated provider presets are not regressed.
+6. Xiaomi `mimo-plan` and `mimo-api` keep independent key / base_url records while sharing one model-configuration surface.
+7. Shared Xiaomi model inputs are dual-written into both `mimo-plan.extra_env` and `mimo-api.extra_env`.
+8. Settings-page validation uses the same backend rule source as provider env materialization.
+9. validation-success copy does not over-promise runtime state; it should communicate configuration readiness rather than execution success.
+10. resume / continue does not drop provider-specific config semantics.
+11. room participant starts do not drop provider-specific config semantics.
+12. subagent behavior preserves the provider-native model/config intent where inherited.
+13. Claude, Codex, Gemini, and unrelated provider presets are not regressed.
 
 Frontend verification is required because provider cards and provider pickers are user-visible behavior.
+
+---
+
+## Follow-up Status (2026-05-09)
+
+The original provider-native entry design has now been extended by a stricter third-party session-provider validation layer:
+
+- Third-party session providers no longer rely on hidden default-model fallback to satisfy startup requirements.
+- The backend now exposes a structured validation result for provider credentials and uses the same rule source for settings-page validation and provider env generation.
+- The Settings → Connection page gained an explicit “apply and validate configuration” flow so users can see provider-level issues before attempting to start a session.
+- Xiaomi is a deliberate exception in UI structure: `mimo-plan` and `mimo-api` keep separate key / base_url storage but share one model-configuration surface whose values are dual-written into both credentials.
+- DeepSeek and Packy do not add new connection fields in this follow-up; only the explanatory copy was tightened so the page clearly communicates that complete explicit model configuration is required.
+
+This follow-up keeps the architectural rule unchanged: provider identity remains distinct from execution identity, but credential completeness is now treated as a first-class startup requirement instead of an implicit byproduct of preset defaults.
 
 ---
 

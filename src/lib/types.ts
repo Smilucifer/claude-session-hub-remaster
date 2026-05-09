@@ -1574,6 +1574,24 @@ export interface PromptInputSnapshot {
   pathRefs?: Array<{ id: string; name: string; path: string; isDir: boolean }>;
 }
 
+export interface ProviderIssue {
+  code: string;
+  field: string;
+  message: string;
+}
+
+export interface ProviderValidationResult {
+  platformId: string;
+  providerId: string;
+  ok: boolean;
+  issues: ProviderIssue[];
+  message: string;
+}
+
+export interface ValidatePlatformCredentialsResponse {
+  results: ProviderValidationResult[];
+}
+
 export interface PlatformCredential {
   platform_id: string;
   api_key?: string;

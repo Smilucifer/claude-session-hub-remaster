@@ -15,6 +15,14 @@
 - Task 4 completed: room UI labels, continuable-run lookup, and room participant creation cover QWEN/KIMI.
 - Task 5 completed as far as environment allows: targeted frontend tests pass; targeted Rust tests compile but executable launch remains blocked on this machine by `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`.
 
+**Follow-up status (2026-05-09):**
+- Added a second-stage implementation focused on third-party session-provider validation readiness.
+- `src-tauri/src/agent/provider_claude_config.rs` now exposes structured provider validation results and reuses the same rule source for settings-page validation and provider env generation.
+- `src-tauri/src/commands/settings.rs` + `src-tauri/src/lib.rs` now expose a `validate_platform_credentials` IPC for the connection page.
+- `src/routes/settings/+page.svelte` now includes an “应用并校验配置” flow with provider-level result rendering.
+- Xiaomi connection UX was tightened: `mimo-plan` and `mimo-api` keep separate key / base_url storage but share one model-configuration surface whose values are dual-written into both credentials.
+- DeepSeek and Packy follow the same validation system without adding new connection fields; their page copy now explicitly states that complete explicit model configuration is required.
+
 ---
 
 ## File Structure

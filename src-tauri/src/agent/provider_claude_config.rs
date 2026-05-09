@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::models::PlatformCredential;
+use crate::models::{
+    PlatformCredential, ProviderIssue, ProviderValidationResult, ValidatePlatformCredentialsResponse,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderClaudeConfigMaterialized {
@@ -29,6 +31,149 @@ pub fn platform_to_provider_id(platform_id: &str) -> Option<&'static str> {
         "packy-cx2cc" => Some("packy-cx2cc"),
         _ => None,
     }
+}
+
+fn make_issue(code: &str, field: &str, message: String) -> ProviderIssue {
+    ProviderIssue {
+        code: code.to_string(),
+        field: field.to_string(),
+        message,
+    }
+}
+
+fn required_nonempty_issue(
+    platform_id: &str,
+    field: &str,
+    value: Option<&str>,
+    code: &str,
+) -> Option<ProviderIssue> {
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        return None;
+    }
+    Some(make_issue(
+        code,
+        field,
+        format!("{platform_id} 缺少必填项：{field}"),
+    ))
+}
+
+fn required_extra_env_issue(
+    platform_id: &str,
+    cred: &PlatformCredential,
+    key: &str,
+) -> Option<ProviderIssue> {
+    let value = cred
+        .extra_env
+        .as_ref()
+        .and_then(|env| env.get(key))
+        .map(String::as_str);
+    required_nonempty_issue(platform_id, key, value, "missing_model_env")
+}
+
+fn required_model_issue(platform_id: &str, cred: &PlatformCredential) -> Option<ProviderIssue> {
+    let model = cred
+        .models
+        .as_ref()
+        .and_then(|models| models.iter().find(|model| !model.trim().is_empty()))
+        .map(String::as_str)
+        .or_else(|| {
+            cred.extra_env
+                .as_ref()
+                .and_then(|env| env.get("ANTHROPIC_MODEL"))
+                .map(String::as_str)
+        });
+    required_nonempty_issue(platform_id, "model", model, "missing_model")
+}
+
+fn required_model_env_keys(platform_id: &str) -> &'static [&'static str] {
+    match platform_id {
+        "deepseek" | "mimo-plan" | "mimo-api" | "packy-cx2cc" => &[
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ],
+        _ => &[],
+    }
+}
+
+fn requires_explicit_base_url(platform_id: &str) -> bool {
+    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi")
+}
+
+fn requires_explicit_model(platform_id: &str) -> bool {
+    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi")
+}
+
+pub fn validate_provider_credential(
+    platform_id: &str,
+    cred: &PlatformCredential,
+) -> Result<ProviderValidationResult, String> {
+    let Some(provider_id) = platform_to_provider_id(platform_id) else {
+        return Err(format!("unsupported provider-backed Claude platform: {platform_id}"));
+    };
+
+    let mut issues = Vec::new();
+    if let Some(issue) = required_nonempty_issue(
+        platform_id,
+        "api_key",
+        cred.api_key.as_deref(),
+        "missing_api_key",
+    ) {
+        issues.push(issue);
+    }
+
+    for key in required_model_env_keys(platform_id) {
+        if let Some(issue) = required_extra_env_issue(platform_id, cred, key) {
+            issues.push(issue);
+        }
+    }
+
+    if requires_explicit_base_url(platform_id) {
+        if let Some(issue) = required_nonempty_issue(
+            platform_id,
+            "base_url",
+            cred.base_url.as_deref(),
+            "missing_base_url",
+        ) {
+            issues.push(issue);
+        }
+    }
+
+    if requires_explicit_model(platform_id) {
+        if let Some(issue) = required_model_issue(platform_id, cred) {
+            issues.push(issue);
+        }
+    }
+
+    let ok = issues.is_empty();
+    let message = if ok {
+        format!("{platform_id} 配置完整")
+    } else {
+        format!("{platform_id} 配置不完整")
+    };
+
+    Ok(ProviderValidationResult {
+        platform_id: platform_id.to_string(),
+        provider_id: provider_id.to_string(),
+        ok,
+        issues,
+        message,
+    })
+}
+
+pub fn validate_platform_credentials(credentials: &[PlatformCredential]) -> ValidatePlatformCredentialsResponse {
+    let mut results = Vec::new();
+    for cred in credentials {
+        if platform_to_provider_id(&cred.platform_id).is_none() {
+            continue;
+        }
+        if let Ok(result) = validate_provider_credential(&cred.platform_id, cred) {
+            results.push(result);
+        }
+    }
+    ValidatePlatformCredentialsResponse { results }
 }
 
 pub fn write_provider_claude_config(
@@ -93,6 +238,7 @@ pub(crate) fn provider_env_from_credential(
 ///   1 model  → all tiers use the same model
 ///   2 models → [0]=opus+sonnet+subagent, [1]=haiku
 ///   3+       → positional: [0]=opus, [1]=sonnet, [2]=haiku, [0]=subagent
+#[cfg(test)]
 fn resolve_model_tiers(models: &[String]) -> (&str, &str, &str, &str) {
     match models.len() {
         0 => ("", "", "", ""),
@@ -179,6 +325,17 @@ fn merge_extra_env(env: &mut HashMap<String, String>, extra_env: &Option<HashMap
 }
 
 fn build_deepseek_env(cred: &PlatformCredential) -> Result<HashMap<String, String>, String> {
+    let validation = validate_provider_credential("deepseek", cred)?;
+    if !validation.ok {
+        let missing = validation
+            .issues
+            .iter()
+            .map(|issue| issue.field.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!("deepseek 配置不完整，请先在连接设置中补齐：{missing}"));
+    }
+
     let api_key = cred
         .api_key
         .clone()
@@ -195,34 +352,44 @@ fn build_deepseek_env(cred: &PlatformCredential) -> Result<HashMap<String, Strin
                 .to_string()
         });
 
-    let models: Vec<String> = cred
-        .models
-        .clone()
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| {
-            vec![
-                "deepseek-v4-pro".to_string(),
-                "deepseek-v4-flash".to_string(),
-            ]
-        });
-    let (opus, sonnet, haiku, subagent) = resolve_model_tiers(&models);
-
+    let env_values = cred.extra_env.clone().unwrap_or_default();
     let mut env = HashMap::from([
         ("ANTHROPIC_BASE_URL".to_string(), base_url),
         ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
-        ("ANTHROPIC_MODEL".to_string(), opus.to_string()),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), opus.to_string()),
+        (
+            "ANTHROPIC_MODEL".to_string(),
+            env_values
+                .get("ANTHROPIC_MODEL")
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+            env_values
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .cloned()
+                .unwrap_or_default(),
+        ),
         (
             "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-            sonnet.to_string(),
+            env_values
+                .get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+                .cloned()
+                .unwrap_or_default(),
         ),
         (
             "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-            haiku.to_string(),
+            env_values
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .cloned()
+                .unwrap_or_default(),
         ),
         (
             "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
-            subagent.to_string(),
+            env_values
+                .get("CLAUDE_CODE_SUBAGENT_MODEL")
+                .cloned()
+                .unwrap_or_default(),
         ),
     ]);
     env.extend(stability_env_vars());
@@ -234,6 +401,19 @@ fn build_parameterized_env(
     platform_id: &str,
     cred: &PlatformCredential,
 ) -> Result<HashMap<String, String>, String> {
+    let validation = validate_provider_credential(platform_id, cred)?;
+    if !validation.ok {
+        let missing = validation
+            .issues
+            .iter()
+            .map(|issue| issue.field.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "{platform_id} 配置不完整，请先在连接设置中补齐：{missing}"
+        ));
+    }
+
     let api_key = cred
         .api_key
         .clone()
@@ -247,42 +427,53 @@ fn build_parameterized_env(
     if base_url.is_empty() {
         return Err(format!("{platform_id} base URL is not configured"));
     }
-    let models: Vec<String> = cred
-        .models
-        .clone()
-        .filter(|m| !m.is_empty())
+
+    let env_values = cred.extra_env.clone().unwrap_or_default();
+    let model = env_values
+        .get("ANTHROPIC_MODEL")
+        .cloned()
         .or_else(|| {
-            // Fallback: when preset has no models (e.g. packy-cx2cc), allow user to
-            // provide a single model via extra_env.ANTHROPIC_MODEL in the settings UI.
-            cred.extra_env
-                .as_ref()
-                .and_then(|env| env.get("ANTHROPIC_MODEL"))
-                .filter(|m| !m.trim().is_empty())
-                .map(|m| vec![m.trim().to_string()])
+            cred.models.as_ref().and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| !model.trim().is_empty())
+                    .map(|model| model.trim().to_string())
+            })
         })
-        .ok_or_else(|| {
-            format!(
-                "{platform_id} model is not configured — set it in extra_env or provider models"
-            )
-        })?;
-    let (opus, sonnet, haiku, subagent) = resolve_model_tiers(&models);
+        .unwrap_or_default();
+    let opus = env_values
+        .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+        .cloned()
+        .unwrap_or_else(|| model.clone());
+    let sonnet = env_values
+        .get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        .cloned()
+        .unwrap_or_else(|| model.clone());
+    let haiku = env_values
+        .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        .cloned()
+        .unwrap_or_else(|| model.clone());
+    let subagent = env_values
+        .get("CLAUDE_CODE_SUBAGENT_MODEL")
+        .cloned()
+        .unwrap_or_else(|| model.clone());
 
     let mut env = HashMap::from([
         ("ANTHROPIC_BASE_URL".to_string(), base_url),
         ("ANTHROPIC_AUTH_TOKEN".to_string(), api_key),
-        ("ANTHROPIC_MODEL".to_string(), opus.to_string()),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), opus.to_string()),
+        ("ANTHROPIC_MODEL".to_string(), model),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), opus),
         (
             "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-            sonnet.to_string(),
+            sonnet,
         ),
         (
             "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-            haiku.to_string(),
+            haiku,
         ),
         (
             "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
-            subagent.to_string(),
+            subagent,
         ),
     ]);
     env.extend(stability_env_vars());
@@ -687,6 +878,196 @@ mod tests {
     }
 
     #[test]
+    fn validate_provider_credential_mimo_api_requires_shared_model_fields() {
+        let c = PlatformCredential {
+            platform_id: "mimo-api".to_string(),
+            api_key: Some("sk-mimo-api".to_string()),
+            base_url: Some("https://api.xiaomimimo.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("mimo-api".to_string()),
+            models: None,
+            extra_env: Some(HashMap::from([(
+                "ANTHROPIC_MODEL".to_string(),
+                "mimo-v2.5-pro".to_string(),
+            )])),
+        };
+        let result = validate_provider_credential("mimo-api", &c).unwrap();
+        assert!(!result.ok);
+        let fields = result
+            .issues
+            .iter()
+            .map(|issue| issue.field.as_str())
+            .collect::<Vec<_>>();
+        assert!(fields.contains(&"ANTHROPIC_DEFAULT_OPUS_MODEL"));
+        assert!(fields.contains(&"CLAUDE_CODE_SUBAGENT_MODEL"));
+    }
+
+    #[test]
+    fn build_parameterized_env_mimo_api_uses_full_explicit_model_env() {
+        let c = PlatformCredential {
+            platform_id: "mimo-api".to_string(),
+            api_key: Some("sk-mimo-api".to_string()),
+            base_url: Some("https://api.xiaomimimo.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("mimo-api".to_string()),
+            models: None,
+            extra_env: Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "mimo-v2.5-pro".to_string()),
+                (
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+                (
+                    "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+            ])),
+        };
+        let env = build_parameterized_env("mimo-api", &c).unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("mimo-v2.5-pro")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("mimo-v2.5-pro")
+        );
+    }
+
+    #[test]
+    fn validate_provider_credential_kimi_requires_explicit_base_url_and_model() {
+        let c = PlatformCredential {
+            platform_id: "kimi".to_string(),
+            api_key: Some("sk-kimi".to_string()),
+            base_url: None,
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("kimi".to_string()),
+            models: None,
+            extra_env: None,
+        };
+        let result = validate_provider_credential("kimi", &c).unwrap();
+        assert!(!result.ok);
+        let fields = result
+            .issues
+            .iter()
+            .map(|issue| issue.field.as_str())
+            .collect::<Vec<_>>();
+        assert!(fields.contains(&"base_url"));
+        assert!(fields.contains(&"model"));
+    }
+
+    #[test]
+    fn validate_provider_credential_deepseek_requires_explicit_model_envs() {
+        let c = PlatformCredential {
+            platform_id: "deepseek".to_string(),
+            api_key: Some("sk-deepseek".to_string()),
+            base_url: Some("https://api.deepseek.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("deepseek".to_string()),
+            models: Some(vec!["deepseek-v4-pro".to_string()]),
+            extra_env: None,
+        };
+        let result = validate_provider_credential("deepseek", &c).unwrap();
+        assert!(!result.ok);
+        let fields = result
+            .issues
+            .iter()
+            .map(|issue| issue.field.as_str())
+            .collect::<Vec<_>>();
+        assert!(fields.contains(&"ANTHROPIC_MODEL"));
+        assert!(fields.contains(&"CLAUDE_CODE_SUBAGENT_MODEL"));
+    }
+
+    #[test]
+    fn build_parameterized_env_packy_requires_full_explicit_model_env() {
+        let c = PlatformCredential {
+            platform_id: "packy-cx2cc".to_string(),
+            api_key: Some("sk-packy".to_string()),
+            base_url: Some("https://www.packyapi.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("packy-cx2cc".to_string()),
+            models: None,
+            extra_env: Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "gpt-5.4-xhigh".to_string()),
+                (
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                    "gpt-5.4-xhigh".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                    "gpt-5.4-xhigh".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                    "gpt-5.4-high".to_string(),
+                ),
+            ])),
+        };
+        let err = build_parameterized_env("packy-cx2cc", &c).unwrap_err();
+        assert!(err.contains("CLAUDE_CODE_SUBAGENT_MODEL"));
+    }
+
+    #[test]
+    fn build_parameterized_env_packy_uses_full_explicit_model_env() {
+        let c = PlatformCredential {
+            platform_id: "packy-cx2cc".to_string(),
+            api_key: Some("sk-packy".to_string()),
+            base_url: Some("https://www.packyapi.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("packy-cx2cc".to_string()),
+            models: None,
+            extra_env: Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "gpt-5.4-xhigh".to_string()),
+                (
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                    "gpt-5.4-xhigh".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                    "gpt-5.4-xhigh".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                    "gpt-5.4-high".to_string(),
+                ),
+                (
+                    "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+                    "gpt-5.4-high".to_string(),
+                ),
+            ])),
+        };
+        let env = build_parameterized_env("packy-cx2cc", &c).unwrap();
+        assert_eq!(
+            env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("gpt-5.4-xhigh")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
+            Some("gpt-5.4-xhigh")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str),
+            Some("gpt-5.4-xhigh")
+        );
+        assert_eq!(
+            env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
+            Some("gpt-5.4-high")
+        );
+        assert_eq!(
+            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("gpt-5.4-high")
+        );
+    }
+
+    #[test]
     fn build_parameterized_env_model_fallback_to_extra_env() {
         let c = PlatformCredential {
             platform_id: "packy-cx2cc".to_string(),
@@ -700,19 +1081,8 @@ mod tests {
                 "claude-sonnet-4-20250514".to_string(),
             )])),
         };
-        let env = build_parameterized_env("packy-cx2cc", &c).unwrap();
-        assert_eq!(
-            env.get("ANTHROPIC_MODEL").map(String::as_str),
-            Some("claude-sonnet-4-20250514")
-        );
-        assert_eq!(
-            env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").map(String::as_str),
-            Some("claude-sonnet-4-20250514")
-        );
-        assert_eq!(
-            env.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
-            Some("claude-sonnet-4-20250514")
-        );
+        let err = build_parameterized_env("packy-cx2cc", &c).unwrap_err();
+        assert!(err.contains("ANTHROPIC_DEFAULT_OPUS_MODEL"));
     }
 
     #[test]
@@ -727,6 +1097,6 @@ mod tests {
             extra_env: None,
         };
         let err = build_parameterized_env("packy-cx2cc", &c).unwrap_err();
-        assert!(err.contains("model is not configured"));
+        assert!(err.contains("ANTHROPIC_MODEL"));
     }
 }

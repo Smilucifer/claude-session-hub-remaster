@@ -1,4 +1,7 @@
-use crate::models::{AgentSettings, UserSettings};
+use crate::agent::provider_claude_config;
+use crate::models::{
+    AgentSettings, PlatformCredential, UserSettings, ValidatePlatformCredentialsResponse,
+};
 use crate::storage;
 use std::sync::atomic::Ordering;
 
@@ -39,6 +42,14 @@ pub async fn update_user_settings(
 ) -> Result<UserSettings, String> {
     log::debug!("[settings] update_user_settings");
     update_user_settings_with_rotation(patch, &token_ver, &shutdown, &live_token).await
+}
+
+#[tauri::command]
+pub fn validate_platform_credentials(
+    platform_credentials: Vec<PlatformCredential>,
+) -> ValidatePlatformCredentialsResponse {
+    log::debug!("[settings] validate_platform_credentials");
+    provider_claude_config::validate_platform_credentials(&platform_credentials)
 }
 
 #[tauri::command]

@@ -103,3 +103,4 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("claude")).toBe("claude");
   });
 });
+

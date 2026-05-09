@@ -2,6 +2,18 @@
 
 ## Phase 9.y (2026-05-09)
 
+### v1.1.7 — 第三方 session provider 显式配置校验与 Xiaomi 共用模型配置
+
+- 第三方 session provider 新增统一显式配置校验结果结构：`ProviderIssue`、`ProviderValidationResult`、`ValidatePlatformCredentialsResponse`
+- 后端在 `src-tauri/src/agent/provider_claude_config.rs` 中新增统一校验入口 `validate_provider_credential` / `validate_platform_credentials`，覆盖 DeepSeek、GLM、QWEN、KIMI、Xiaomi（`mimo-plan` / `mimo-api`）、Packy
+- `build_deepseek_env` / `build_parameterized_env` 在生成临时 session JSON 前先执行统一校验；配置不完整时直接阻止 provider config 生成
+- 新增 settings IPC：`validate_platform_credentials`，并在 `src-tauri/src/lib.rs` 注册
+- Settings → Connection 页新增“应用并校验配置”按钮：保存当前 `platform_credentials` 后立即调用后端统一校验，并在 provider 卡片内联展示字段级问题列表
+- DeepSeek / Packy 卡片补充提示语义：明确要求显式填写完整模型配置；Packy 不再使用默认模型兜底
+- Xiaomi 双 provider 卡片收口：`mimo-plan` 与 `mimo-api` 共享 6 个模型配置输入（`ANTHROPIC_MODEL`、三档 tier、`CLAUDE_CODE_SUBAGENT_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL`），输入变更双写到两份 `extra_env`；`api_key` 与 `base_url` 仍分别保存在各自 credential 中
+- Xiaomi / provider 校验成功文案从“配置完整，可启动”收窄为“配置校验通过”，避免对运行态做过度承诺
+- Rust 测试代码补充：新增 `kimi` / `deepseek` / `mimo-api` / `packy` 的显式校验覆盖；本机仍受既有 `0xc0000139` 环境问题影响，验证以 `cargo check` 为主
+
 ### v1.1.6 — 旧 ID 彻底清理
 
 - 移除所有旧 provider ID 支持：`mimo-pro`、`xiaomi`、`mimo` 从前端 `providerIdForRun` + 后端 `platform_to_provider_id`/`provider_env_from_credential`/`default_base_url`/`is_phase7_claude_compatible_api_platform`/`known_provider_defaults`/`auth_fixes` 同步删除

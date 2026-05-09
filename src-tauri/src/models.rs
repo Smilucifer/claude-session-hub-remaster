@@ -400,6 +400,30 @@ fn default_permission_mode() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderIssue {
+    pub code: String,
+    pub field: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderValidationResult {
+    pub platform_id: String,
+    pub provider_id: String,
+    pub ok: bool,
+    pub issues: Vec<ProviderIssue>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidatePlatformCredentialsResponse {
+    pub results: Vec<ProviderValidationResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformCredential {
     pub platform_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

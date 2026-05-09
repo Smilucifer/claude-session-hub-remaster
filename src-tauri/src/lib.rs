@@ -181,6 +181,7 @@ pub fn run() {
             commands::balance::refresh_balance_status,
             commands::settings::get_user_settings,
             commands::settings::update_user_settings,
+            commands::settings::validate_platform_credentials,
             commands::settings::get_agent_settings,
             commands::settings::update_agent_settings,
             commands::fs::list_directory,
