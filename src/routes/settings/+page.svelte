@@ -119,9 +119,34 @@
     return findCredential(platformCredentials, provider.platformId);
   }
 
+  const MIMO_SHARED_ENV_KEYS = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_EFFORT_LEVEL",
+  ] as const;
+
   /** Get the mimo-api credential — shown as second row inside mimo-plan card. */
   function mimoApiCredential(): PlatformCredential | undefined {
     return findCredential(platformCredentials, "mimo-api");
+  }
+
+  function resolveMimoSharedExtraEnv(): Record<string, string> {
+    const planExtra = providerCredential(getPhase7Provider("mimo-plan"))?.extra_env ?? {};
+    const apiExtra = mimoApiCredential()?.extra_env ?? {};
+    const merged: Record<string, string> = {};
+    for (const key of MIMO_SHARED_ENV_KEYS) {
+      const planValue = planExtra[key];
+      const apiValue = apiExtra[key];
+      if (planValue?.trim()) {
+        merged[key] = planValue;
+      } else if (apiValue?.trim()) {
+        merged[key] = apiValue;
+      }
+    }
+    return merged;
   }
 
   function updateMimoApiKey(value: string) {
@@ -1998,7 +2023,7 @@
                 <!-- Expanded panel: model config for mimo-plan + mimo-api -->
                 {#if expandedProviderPanels[provider.id]}
                   {@const [tierOpus, tierSonnet, tierHaiku] = expandModelsToTiers(credential?.models ?? [])}
-                  {@const sharedExtraEnv = credential?.extra_env ?? {}}
+                  {@const sharedExtraEnv = resolveMimoSharedExtraEnv()}
                   <div class="mx-4 mb-4 grid grid-cols-2 gap-2 rounded-md border border-border/50 p-3">
                     <div class="col-span-2 text-[11px] font-medium text-muted-foreground">共用模型配置（同时应用到 Token Plan / API）</div>
                     <div class="space-y-1">

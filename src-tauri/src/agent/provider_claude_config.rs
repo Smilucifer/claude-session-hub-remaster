@@ -270,7 +270,7 @@ fn default_base_url(platform_id: &str) -> Option<&'static str> {
         "kimi" => Some("https://api.moonshot.cn/anthropic"),
         "mimo-plan" => Some("https://token-plan-cn.xiaomimimo.com/anthropic"),
         "mimo-api" => Some("https://api.xiaomimimo.com/anthropic"),
-        "packy-cx2cc" => Some("https://www.packyapi.com/anthropic"),
+        "packy-cx2cc" => Some("https://www.packyapi.com"),
         _ => None,
     }
 }
@@ -569,6 +569,20 @@ mod tests {
         assert_eq!(sonnet, "s");
         assert_eq!(haiku, "h");
         assert_eq!(subagent, "o");
+    }
+
+    #[test]
+    fn packy_uses_root_base_url_by_default() {
+        let env = build_parameterized_env(
+            "packy-cx2cc",
+            &cred("packy-cx2cc", "sk-packy", None, Some("claude-opus-4-7")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://www.packyapi.com")
+        );
     }
 
     #[test]

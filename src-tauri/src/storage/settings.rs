@@ -2,6 +2,7 @@ use crate::models::{
     AgentSettings, AllSettings, BalanceHelperSettings, ConnectionProfile, UserSettings,
     WindowsMsvcEnvMode,
 };
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -179,7 +180,7 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
             auth_env_var: None,
         }),
         "packy-cx2cc" => Some(ProviderDefaults {
-            base_url: Some("https://www.packyapi.com/anthropic"),
+            base_url: Some("https://www.packyapi.com"),
             models: None,
             extra_env: None,
             key_optional: false,
@@ -249,6 +250,14 @@ fn known_provider_defaults(pid: &str) -> Option<ProviderDefaults> {
 /// - Old deepseek-chat model → deepseek-v4-pro / deepseek-v4-flash
 /// - Missing base_url / models / extra_env on existing credentials
 fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
+    const MIMO_SHARED_ENV_KEYS: &[&str] = &[
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDE_CODE_EFFORT_LEVEL",
+    ];
     let auth_fixes: &[(&str, &str)] = &[
         ("deepseek", "ANTHROPIC_AUTH_TOKEN"),
         ("zhipu", "ANTHROPIC_AUTH_TOKEN"),
@@ -344,6 +353,45 @@ fn migrate_platform_credentials(settings: &mut AllSettings) -> bool {
                         extra
                     );
                     cred.extra_env = Some(extra);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    let mimo_plan_extra = settings
+        .user
+        .platform_credentials
+        .iter()
+        .find(|cred| cred.platform_id == "mimo-plan")
+        .and_then(|cred| cred.extra_env.clone())
+        .unwrap_or_default();
+    let mimo_api_extra = settings
+        .user
+        .platform_credentials
+        .iter()
+        .find(|cred| cred.platform_id == "mimo-api")
+        .and_then(|cred| cred.extra_env.clone())
+        .unwrap_or_default();
+
+    let mut merged_shared = HashMap::new();
+    for key in MIMO_SHARED_ENV_KEYS {
+        if let Some(value) = mimo_plan_extra.get(*key).filter(|value| !value.trim().is_empty()) {
+            merged_shared.insert((*key).to_string(), value.clone());
+        } else if let Some(value) = mimo_api_extra.get(*key).filter(|value| !value.trim().is_empty()) {
+            merged_shared.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    if !merged_shared.is_empty() {
+        for cred in &mut settings.user.platform_credentials {
+            if cred.platform_id != "mimo-plan" && cred.platform_id != "mimo-api" {
+                continue;
+            }
+            let extra_env = cred.extra_env.get_or_insert_with(HashMap::new);
+            for (key, value) in &merged_shared {
+                if extra_env.get(key).is_none_or(|existing| existing.trim().is_empty()) {
+                    extra_env.insert(key.clone(), value.clone());
                     changed = true;
                 }
             }
@@ -853,6 +901,7 @@ mod tests {
     use super::*;
     use crate::models::CcAgentProfile;
     use crate::models::{AllSettings, PlatformCredential};
+    use std::collections::HashMap;
 
     fn make_settings_with_cred(cred: PlatformCredential) -> AllSettings {
         let mut s = AllSettings::default();
@@ -869,6 +918,12 @@ mod tests {
             }
         }
         serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
+    fn packy_defaults_to_root_base_url() {
+        let defaults = known_provider_defaults("packy-cx2cc").unwrap();
+        assert_eq!(defaults.base_url, Some("https://www.packyapi.com"));
     }
 
     #[test]
@@ -1143,6 +1198,74 @@ mod tests {
                 "deepseek-v4-pro".to_string(),
                 "deepseek-v4-flash".to_string()
             ])
+        );
+    }
+
+    #[test]
+    fn migrate_mimo_shared_extra_env_fills_missing_api_fields_from_plan() {
+        let plan = PlatformCredential {
+            platform_id: "mimo-plan".to_string(),
+            api_key: Some("plan-key".to_string()),
+            base_url: Some("https://token-plan-cn.xiaomimimo.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("Xiaomi (Plan)".to_string()),
+            models: Some(vec!["mimo-v2.5-pro".to_string()]),
+            extra_env: Some(HashMap::from([
+                ("ANTHROPIC_MODEL".to_string(), "mimo-v2.5-pro".to_string()),
+                (
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
+                    "mimo-v2.5-pro".to_string(),
+                ),
+                (
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
+                    "mimo-v2.5".to_string(),
+                ),
+                (
+                    "CLAUDE_CODE_SUBAGENT_MODEL".to_string(),
+                    "mimo-v2.5".to_string(),
+                ),
+            ])),
+        };
+        let api = PlatformCredential {
+            platform_id: "mimo-api".to_string(),
+            api_key: Some("api-key".to_string()),
+            base_url: Some("https://api.xiaomimimo.com/anthropic".to_string()),
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("Xiaomi (API)".to_string()),
+            models: Some(vec!["mimo-v2.5-pro".to_string()]),
+            extra_env: Some(HashMap::from([(
+                "ANTHROPIC_MODEL".to_string(),
+                "mimo-v2.5-pro".to_string(),
+            )])),
+        };
+        let mut settings = AllSettings::default();
+        settings.user.platform_credentials = vec![plan, api];
+
+        let changed = migrate_platform_credentials(&mut settings);
+
+        assert!(changed, "migration should sync mimo shared extra_env fields");
+        let api = settings
+            .user
+            .platform_credentials
+            .iter()
+            .find(|cred| cred.platform_id == "mimo-api")
+            .expect("mimo-api credential should exist");
+        let extra = api.extra_env.as_ref().expect("mimo-api extra_env should exist");
+        assert_eq!(
+            extra.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str),
+            Some("mimo-v2.5-pro")
+        );
+        assert_eq!(
+            extra.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").map(String::as_str),
+            Some("mimo-v2.5")
+        );
+        assert_eq!(
+            extra.get("CLAUDE_CODE_SUBAGENT_MODEL").map(String::as_str),
+            Some("mimo-v2.5")
         );
     }
 

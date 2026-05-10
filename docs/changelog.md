@@ -13,6 +13,7 @@
 - Xiaomi 双 provider 卡片收口：`mimo-plan` 与 `mimo-api` 共享 6 个模型配置输入（`ANTHROPIC_MODEL`、三档 tier、`CLAUDE_CODE_SUBAGENT_MODEL`、`CLAUDE_CODE_EFFORT_LEVEL`），输入变更双写到两份 `extra_env`；`api_key` 与 `base_url` 仍分别保存在各自 credential 中
 - Xiaomi / provider 校验成功文案从“配置完整，可启动”收窄为“配置校验通过”，避免对运行态做过度承诺
 - Rust 测试代码补充：新增 `kimi` / `deepseek` / `mimo-api` / `packy` 的显式校验覆盖；本机仍受既有 `0xc0000139` 环境问题影响，验证以 `cargo check` 为主
+- Xiaomi 共用模型配置一致性修复：Settings 页共用模型面板改为共享视图（优先 `mimo-plan.extra_env`，缺失时回退 `mimo-api.extra_env`），后端 `migrate_platform_credentials` 新增共享字段补齐逻辑，自动修复历史上 `mimo-plan` / `mimo-api` 模型字段分叉导致的 `mimo-api` 校验缺项问题
 
 ### v1.1.6 — 旧 ID 彻底清理
 
@@ -24,7 +25,7 @@
 
 ### v1.1.5 — Provider 预设清理与白名单机制
 
-- 新增 Packy CX2CC API provider（base URL: https://www.packyapi.com/anthropic），模型从设置页读取
+- 新增 Packy CX2CC API provider（base URL: https://www.packyapi.com），模型从设置页读取
 - 移除 5 个无后端支持的 provider 预设：kimi-coding、doubao、minimax、minimax-cn、mimo（前端 platform-presets.ts + 后端 onboarding.rs/settings.rs 同步清理）
 - `PlatformCredential.extra_env` 白名单机制：`ALLOWED_EXTRA_ENV_KEYS` 限制用户可覆盖的环境变量（模型 tier + effort level），防止误覆盖稳定性变量
 - `merge_extra_env` 合并函数：stability_env_vars → extra_env 覆盖顺序，空值过滤，6 个单元测试覆盖
