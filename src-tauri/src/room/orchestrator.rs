@@ -96,8 +96,7 @@ pub async fn run_roundtable_turn_with_runtime(
     let (mode, user_input, prompt, targets, is_private) = match command {
         RoundtableCommand::Fanout { input } => {
             let targets = active_targets(&room.participants, sessions).await;
-            let prompt = build_fanout_prompt(public_turns.len() as u64 + 1, &input, None);
-            (RoomTurnMode::Fanout, input, prompt, targets, false)
+            (RoomTurnMode::Fanout, input.clone(), input, targets, false)
         }
         RoundtableCommand::Debate { input } => {
             let targets = active_targets(&room.participants, sessions).await;
@@ -174,16 +173,36 @@ pub async fn run_roundtable_turn_with_runtime(
         .map(|target| target.participant.id.clone())
         .collect();
 
+    let turn_num = public_turns.len() as u64 + 1;
+
     let mut join_set = tokio::task::JoinSet::new();
     for target in &targets {
         let target = target.clone();
         let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = if mode == RoomTurnMode::Debate {
-            build_debate_prompt(&participant, &prompt, &public_turns, &room.participants)
-        } else {
-            prompt.clone()
+        let target_prompt = match mode {
+            RoomTurnMode::Fanout => {
+                let mem = room.seat_memories.get(&participant.id);
+                let section = crate::room::memory::build_memory_prompt_section(
+                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
+                );
+                build_fanout_prompt(turn_num, &prompt, None, section.as_deref())
+            }
+            RoomTurnMode::Debate => {
+                let mem = room.seat_memories.get(&participant.id);
+                let section = crate::room::memory::build_memory_prompt_section(
+                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
+                );
+                build_debate_prompt(
+                    &participant,
+                    &prompt,
+                    &public_turns,
+                    &room.participants,
+                    section.as_deref(),
+                )
+            }
+            _ => prompt.clone(),
         };
         let pipe_runtime = pipe_runtime.clone();
 
@@ -774,6 +793,7 @@ pub fn build_debate_prompt(
     instruction: &str,
     previous_turns: &[RoomTurn],
     participants: &[RoomParticipant],
+    seat_memory_section: Option<&str>,
 ) -> String {
     let turn_num = previous_turns
         .iter()
@@ -835,16 +855,29 @@ pub fn build_debate_prompt(
         body.push_str("(无另两家上轮记录)\n");
     }
 
+    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
+        body.push_str(mem);
+        body.push('\n');
+    }
     body.push_str("\n## 你的任务\n");
     body.push_str("请基于另两家观点 + 用户补充信息，发表新观点：可以继承、可以反驳，但要明示引用对方哪一点。\n");
     body
 }
 
-pub fn build_fanout_prompt(turn_num: u64, user_input: &str, data_pack: Option<&str>) -> String {
+pub fn build_fanout_prompt(
+    turn_num: u64,
+    user_input: &str,
+    data_pack: Option<&str>,
+    seat_memory_section: Option<&str>,
+) -> String {
     let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · 默认提问]\n");
     if let Some(data_pack) = data_pack.map(str::trim).filter(|value| !value.is_empty()) {
         body.push_str("\n## 数据接入\n");
         body.push_str(data_pack);
+        body.push('\n');
+    }
+    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
+        body.push_str(mem);
         body.push('\n');
     }
     body.push_str("\n## 用户问题\n");
@@ -1806,6 +1839,7 @@ mod tests {
             "challenge assumptions",
             &[public_turn()],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
+            None,
         );
 
         assert!(prompt.contains("challenge assumptions"));
@@ -1854,6 +1888,7 @@ mod tests {
                 participant("p3", "Cara"),
                 participant("p4", "Dana"),
             ],
+            None,
         );
 
         assert!(prompt.contains("## 另两家上一轮观点"));
@@ -1891,6 +1926,7 @@ mod tests {
             "",
             &[fanout, summary],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
+            None,
         );
 
         assert!(prompt.contains("Bob answer"));
@@ -2553,6 +2589,11 @@ mod tests {
             cwd: Some("D:/work/app".to_string()),
             memo: String::new(),
             participants: vec![alice.clone()],
+            seat_memories: std::collections::HashMap::new(),
+            seat_memory_inbox: std::collections::HashMap::new(),
+            seat_profile: None,
+            last_checkpoint_turn: 0,
+            last_checkpoint_at: None,
             created_at: "2026-05-02T00:00:00Z".to_string(),
             updated_at: "2026-05-02T00:00:00Z".to_string(),
         };
@@ -2607,6 +2648,11 @@ mod tests {
                 cwd: Some("D:/work/app".to_string()),
                 memo: String::new(),
                 participants: vec![alice.clone()],
+                seat_memories: std::collections::HashMap::new(),
+                seat_memory_inbox: std::collections::HashMap::new(),
+                seat_profile: None,
+                last_checkpoint_turn: 0,
+                last_checkpoint_at: None,
                 created_at: "2026-05-02T00:00:00Z".to_string(),
                 updated_at: "2026-05-02T00:00:00Z".to_string(),
             };
@@ -2681,6 +2727,11 @@ mod tests {
                 cwd: Some("D:/work/app".to_string()),
                 memo: String::new(),
                 participants: vec![alice.clone()],
+                seat_memories: std::collections::HashMap::new(),
+                seat_memory_inbox: std::collections::HashMap::new(),
+                seat_profile: None,
+                last_checkpoint_turn: 0,
+                last_checkpoint_at: None,
                 created_at: "2026-05-02T00:00:00Z".to_string(),
                 updated_at: "2026-05-02T00:00:00Z".to_string(),
             };

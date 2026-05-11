@@ -1,6 +1,7 @@
 use crate::models::TaskRun;
 use crate::room::adapter::AgentCapabilities;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -21,6 +22,16 @@ pub struct Room {
     pub cwd: Option<String>,
     pub memo: String,
     pub participants: Vec<RoomParticipant>,
+    #[serde(default)]
+    pub seat_memories: HashMap<String, Vec<SeatMemoryEntry>>,
+    #[serde(default)]
+    pub seat_memory_inbox: HashMap<String, Vec<PendingMemoryCandidate>>,
+    #[serde(default)]
+    pub seat_profile: Option<SeatProfile>,
+    #[serde(default)]
+    pub last_checkpoint_turn: u64,
+    #[serde(default)]
+    pub last_checkpoint_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -99,6 +110,56 @@ pub struct ArenaMemoryCandidate {
     pub created_at: String,
 }
 
+// --- Seat Memory System ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryKind {
+    Insight,
+    Lesson,
+    Preference,
+    Fact,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeatMemoryEntry {
+    pub id: String,
+    pub kind: MemoryKind,
+    pub key: String,
+    pub content: String,
+    #[serde(default)]
+    pub recall: u32,
+    #[serde(default)]
+    pub last_accessed: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub persisted: bool,
+    #[serde(default)]
+    pub source_turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingMemoryCandidate {
+    pub id: String,
+    pub kind: MemoryKind,
+    pub key: String,
+    pub content: String,
+    pub source_participant_id: String,
+    pub source_turn_id: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub reminder_count: u32,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeatProfile {
+    pub entries: Vec<SeatMemoryEntry>,
+    pub updated_at: String,
+}
+
+// ---
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResearchArtifact {
     pub schema_version: u32,
@@ -141,6 +202,12 @@ pub struct RoomDetail {
     pub participants: Vec<RoomParticipantDetail>,
     pub turns: Vec<RoomTurn>,
     pub research_artifact: Option<ResearchArtifact>,
+    #[serde(default)]
+    pub seat_memories: HashMap<String, Vec<SeatMemoryEntry>>,
+    #[serde(default)]
+    pub seat_memory_inbox: HashMap<String, Vec<PendingMemoryCandidate>>,
+    #[serde(default)]
+    pub seat_profile: Option<SeatProfile>,
     pub created_at: String,
     pub updated_at: String,
 }

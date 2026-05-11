@@ -107,6 +107,37 @@ export interface ArenaMemoryCandidate {
   created_at: string;
 }
 
+export type MemoryKind = "insight" | "lesson" | "preference" | "fact";
+
+export interface SeatMemoryEntry {
+  id: string;
+  kind: MemoryKind;
+  key: string;
+  content: string;
+  recall: number;
+  last_accessed: string;
+  created_at: string;
+  persisted: boolean;
+  source_turn_id?: string;
+}
+
+export interface PendingMemoryCandidate {
+  id: string;
+  kind: MemoryKind;
+  key: string;
+  content: string;
+  source_participant_id: string;
+  source_turn_id: string;
+  created_at: string;
+  reminder_count: number;
+  expires_at: string;
+}
+
+export interface SeatProfile {
+  entries: SeatMemoryEntry[];
+  updated_at: string;
+}
+
 export interface RoomResponseRef {
   participant_id: string;
   run_id: string;
@@ -187,6 +218,9 @@ export interface RoomDetail {
   participants: RoomParticipantDetail[];
   turns: RoomTurn[];
   research_artifact?: ResearchArtifact | null;
+  seat_memories?: Record<string, SeatMemoryEntry[]>;
+  seat_memory_inbox?: Record<string, PendingMemoryCandidate[]>;
+  seat_profile?: SeatProfile | null;
   created_at: string;
   updated_at: string;
 }

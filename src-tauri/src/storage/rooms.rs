@@ -122,6 +122,11 @@ pub fn create_room_with_kind(
         cwd: cwd.filter(|s| !s.trim().is_empty()),
         memo: String::new(),
         participants: vec![],
+        seat_memories: std::collections::HashMap::new(),
+        seat_memory_inbox: std::collections::HashMap::new(),
+        seat_profile: None,
+        last_checkpoint_turn: 0,
+        last_checkpoint_at: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -264,6 +269,54 @@ pub fn update_memo(room_id: &str, memo: String) -> Result<Room, String> {
     let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
     room.memo = memo;
+    room.updated_at = now_iso();
+    save_room(&room)?;
+    Ok(room)
+}
+
+pub fn add_seat_memory_entry(
+    room_id: &str,
+    participant_id: &str,
+    entry: crate::room::models::SeatMemoryEntry,
+) -> Result<Room, String> {
+    validate_room_id(room_id)?;
+    let room_lock = room_lock(room_id);
+    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    let entries = room
+        .seat_memories
+        .entry(participant_id.to_string())
+        .or_default();
+    entries.push(entry);
+    crate::room::memory::evict_seat_memory(entries);
+    room.updated_at = now_iso();
+    save_room(&room)?;
+    Ok(room)
+}
+
+pub fn delete_seat_memory_entry(
+    room_id: &str,
+    participant_id: &str,
+    entry_id: &str,
+) -> Result<Room, String> {
+    validate_room_id(room_id)?;
+    let room_lock = room_lock(room_id);
+    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    if let Some(entries) = room.seat_memories.get_mut(participant_id) {
+        entries.retain(|e| e.id != entry_id);
+    }
+    room.updated_at = now_iso();
+    save_room(&room)?;
+    Ok(room)
+}
+
+pub fn clear_seat_memory(room_id: &str, participant_id: &str) -> Result<Room, String> {
+    validate_room_id(room_id)?;
+    let room_lock = room_lock(room_id);
+    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    room.seat_memories.remove(participant_id);
     room.updated_at = now_iso();
     save_room(&room)?;
     Ok(room)

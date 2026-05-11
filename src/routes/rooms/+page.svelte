@@ -51,6 +51,12 @@
   let deletingRoomId = $state("");
   let showCommandHint = $state(false);
 
+  let openMemoryPanels = $state<Set<string>>(new Set());
+  let memoryAddKind = $state<import("$lib/types").MemoryKind>("insight");
+  let memoryAddKey = $state("");
+  let memoryAddContent = $state("");
+  let memoryClearConfirm = $state<Set<string>>(new Set());
+
   let ccProfiles = $derived((settings?.cc_agent_profiles ?? []).filter((p) => p.enabled !== false));
   let connectionProfiles = $derived(
     (settings?.connection_profiles ?? []).filter((p) => p.enabled !== false),
@@ -565,6 +571,22 @@
                     </div>
                   </div>
                   <div class="flex shrink-0 items-center gap-1.5">
+                    {#if participant && !isSnapshot}
+                      {@const memCount = (store.room?.seat_memories?.[participant.participant.id] ?? []).length}
+                      <button
+                        class="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-muted {openMemoryPanels.has(participant.participant.id) ? 'bg-muted text-foreground' : 'text-muted-foreground'}"
+                        title={t("room_seatMemory")}
+                        onclick={() => {
+                          const pid = participant!.participant.id;
+                          const next = new Set(openMemoryPanels);
+                          if (next.has(pid)) next.delete(pid); else next.add(pid);
+                          openMemoryPanels = next;
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 6 8 12 8 12s8-6 8-12a8 8 0 0 0-8-8z"/><circle cx="12" cy="10" r="3"/></svg>
+                        {#if memCount > 0}<span>{memCount}</span>{/if}
+                      </button>
+                    {/if}
                     {#if !isSnapshot && runElapsed}
                       <span class="text-[10px] text-muted-foreground/70 tabular-nums">{runElapsed}</span>
                     {/if}
@@ -582,6 +604,93 @@
                   </div>
                 </div>
               </header>
+
+              {#if participant && openMemoryPanels.has(participant.participant.id)}
+                {@const pid = participant.participant.id}
+                {@const memories = store.room?.seat_memories?.[pid] ?? []}
+                <div class="shrink-0 border-b border-border bg-muted/30 px-3 py-2 max-h-60 overflow-y-auto">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-medium">{t("room_seatMemory")}</span>
+                    <div class="flex gap-1">
+                      {#if memoryClearConfirm.has(pid)}
+                        <button
+                          class="rounded px-1.5 py-0.5 text-[10px] bg-destructive text-destructive-foreground hover:opacity-80"
+                          onclick={async () => {
+                            await store.clearSeatMemory(pid);
+                            const next = new Set(memoryClearConfirm); next.delete(pid); memoryClearConfirm = next;
+                          }}
+                        >{t("room_confirmYes")}</button>
+                        <button
+                          class="rounded px-1.5 py-0.5 text-[10px] bg-muted hover:bg-muted/80"
+                          onclick={() => { const next = new Set(memoryClearConfirm); next.delete(pid); memoryClearConfirm = next; }}
+                        >{t("room_confirmNo")}</button>
+                      {:else}
+                        <button
+                          class="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
+                          onclick={() => { const next = new Set(memoryClearConfirm); next.add(pid); memoryClearConfirm = next; }}
+                        >{t("room_clearMemory")}</button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  {#if memories.length === 0}
+                    <p class="text-[11px] text-muted-foreground py-1">{t("room_memoryEmpty")}</p>
+                  {:else}
+                    <div class="space-y-1 mb-2">
+                      {#each memories as entry (entry.id)}
+                        <div class="flex items-start gap-1.5 rounded bg-background/60 px-2 py-1">
+                          <span class="shrink-0 rounded px-1 py-0.5 text-[9px] font-medium bg-primary/10 text-primary">
+                            {#if entry.kind === "insight"}{t("room_memoryKindInsight")}
+                            {:else if entry.kind === "lesson"}{t("room_memoryKindLesson")}
+                            {:else if entry.kind === "preference"}{t("room_memoryKindPreference")}
+                            {:else}{t("room_memoryKindFact")}{/if}
+                          </span>
+                          <div class="min-w-0 flex-1">
+                            <p class="text-[11px] font-medium truncate">{entry.key}</p>
+                            <p class="text-[10px] text-muted-foreground truncate">{entry.content}</p>
+                          </div>
+                          <span class="shrink-0 text-[9px] text-muted-foreground/60">{t("room_memoryRecall", { count: String(entry.recall) })}</span>
+                          <button
+                            class="shrink-0 text-muted-foreground/40 hover:text-destructive text-[10px] leading-none"
+                            title={t("room_delete")}
+                            onclick={() => store.deleteSeatMemory(pid, entry.id)}
+                          >&times;</button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+
+                  <div class="flex items-center gap-1.5 mt-1">
+                    <select
+                      class="rounded border border-border bg-background px-1.5 py-0.5 text-[10px]"
+                      bind:value={memoryAddKind}
+                    >
+                      <option value="insight">{t("room_memoryKindInsight")}</option>
+                      <option value="lesson">{t("room_memoryKindLesson")}</option>
+                      <option value="preference">{t("room_memoryKindPreference")}</option>
+                      <option value="fact">{t("room_memoryKindFact")}</option>
+                    </select>
+                    <input
+                      class="flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] min-w-0"
+                      placeholder={t("room_memoryKey")}
+                      bind:value={memoryAddKey}
+                    />
+                    <input
+                      class="flex-[2] rounded border border-border bg-background px-1.5 py-0.5 text-[10px] min-w-0"
+                      placeholder={t("room_memoryContent")}
+                      bind:value={memoryAddContent}
+                    />
+                    <button
+                      class="shrink-0 rounded bg-primary px-2 py-0.5 text-[10px] text-primary-foreground hover:opacity-80 disabled:opacity-40"
+                      disabled={!memoryAddKey.trim() || !memoryAddContent.trim()}
+                      onclick={async () => {
+                        await store.addSeatMemory(pid, memoryAddKind, memoryAddKey.trim(), memoryAddContent.trim());
+                        memoryAddKey = ""; memoryAddContent = "";
+                      }}
+                    >{t("room_addMemory")}</button>
+                  </div>
+                </div>
+              {/if}
 
               <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
                 {#if store.saving && status === "running" && participant?.run?.last_activity_at}

@@ -46,6 +46,9 @@ function detail(id: string, name: string, kind: RoomDetail["kind"] = "roundtable
     participants: [],
     turns: [],
     research_artifact: null,
+    seat_memories: {},
+    seat_memory_inbox: {},
+    seat_profile: null,
     created_at: "2026-04-30T00:00:00Z",
     updated_at: "2026-04-30T00:00:00Z",
   };
