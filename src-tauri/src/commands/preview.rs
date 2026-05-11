@@ -36,7 +36,7 @@ pub async fn open_preview_window(
         // much faster than waiting for on_page_load(Finished) + eval().
         .initialization_script(PICKER_BRIDGE)
         .on_navigation(move |url| {
-            if url.scheme() == "ocv-bridge" {
+            if url.scheme() == "clawgo-bridge" {
                 if let Some(fragment) = url.fragment() {
                     match urlencoding::decode(fragment) {
                         Ok(json) => match serde_json::from_str::<serde_json::Value>(&json) {

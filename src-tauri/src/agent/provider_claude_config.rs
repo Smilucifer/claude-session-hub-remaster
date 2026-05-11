@@ -748,8 +748,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
-        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
 
         let result = write_provider_claude_config(
             "qwen",
@@ -772,8 +772,8 @@ mod tests {
         assert!(content.contains("qwen3.5-plus"));
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
     }
 

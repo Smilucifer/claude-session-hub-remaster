@@ -9,12 +9,12 @@
   let downloadUrl = $state("");
 
   function isDismissed(version: string): boolean {
-    return sessionStorage.getItem(`ocv:update-dismissed:${version}`) === "1";
+    return sessionStorage.getItem(`clawgo:update-dismissed:${version}`) === "1";
   }
 
   function dismiss() {
     dbg("update-banner", "dismissed", latestVersion);
-    sessionStorage.setItem(`ocv:update-dismissed:${latestVersion}`, "1");
+    sessionStorage.setItem(`clawgo:update-dismissed:${latestVersion}`, "1");
     hasUpdate = false;
   }
 

@@ -1,4 +1,4 @@
-# OpenCovibe Remaster Implementation Roadmap
+# Claw GO Remaster Implementation Roadmap
 
 **Date:** 2026-04-30
 **Status:** Active
@@ -15,7 +15,7 @@ Last updated: 2026-05-05 after native Codex/Gemini chat parity, connection-profi
 - Migration Pending pool cleared; future Hub files must be classified directly into Migrate / Reference / Drop.
 - Phase 2 Room as Run Group merged in `ad8c159 merge: phase 2 rooms`.
 - Phase 2 AgentAdapter boundary exists for run-backed participants with conservative Claude capabilities.
-- Release package smoke test passed for the Phase 2 build: `OpenCovibe.exe`, MSI, and NSIS bundles were produced and the release exe rendered `/rooms`.
+- Release package smoke test passed for the Phase 2 build: `ClawGO.exe`, MSI, and NSIS bundles were produced and the release exe rendered `/rooms`.
 - Phase 2.x backend spawn environment resolver merged in `1d03536 merge: phase 2x msvc env` and pushed to `origin/master`: settings shape, conservative native-project detection, `vswhere` / `VsDevCmd.bat` derivation boundary, success cache, protected PATH-like merge, and integration for Claude session actor, Codex pipe-exec, `fork_session`, and side-question one-shot local spawns.
 - `README.md` was updated in `949dfe5 docs: update user-facing readme` to describe user-visible functions only. Engineering process details remain in local `docs/` / `review/` / `thinking.md` and are intentionally not pushed to the remote repository.
 - Temporary Phase 2.x worktree `D:\ClaudeWorkspace\Code\claude-session-hub-remaster-phase2x-msvc` and branch `feat/phase2x-msvc-env` were removed after merge.
@@ -45,7 +45,7 @@ Last updated: 2026-05-05 after native Codex/Gemini chat parity, connection-profi
 
 ## Finish Line
 
-OpenCovibe becomes the primary architecture and UI shell. Claude Session Hub contributes product protocols: Memo, Room, Roundtable, Driver/Copilot, Research, multi-CLI participants, and Arena Memory.
+Claw GO becomes the primary architecture and UI shell. Claude Session Hub contributes product protocols: Memo, Room, Roundtable, Driver/Copilot, Research, multi-CLI participants, and Arena Memory.
 
 ## What We Are Not Building
 
@@ -63,7 +63,7 @@ Goal: deliver visible value without touching session orchestration.
 
 Status: Done. Merged in `216d500 feat: add phase 1 memo foundation`.
 
-Target files in OpenCovibe:
+Target files in Claw GO:
 
 - `src-tauri/src/storage/memos.rs`
 - `src-tauri/src/commands/memos.rs`
@@ -74,7 +74,7 @@ Target files in OpenCovibe:
 
 Scope:
 
-- Store global memo at `~/.opencovibe/memos/global.json`.
+- Store global memo at `~/.claw-go/memos/global.json`.
 - Provide list / add / update / delete / clear commands.
 - Frontend entry starts as a floating panel or command-palette action, not a permanent sidebar.
 
@@ -92,8 +92,8 @@ Status: Done. Merged in `216d500 feat: add phase 1 memo foundation`.
 
 Scope:
 
-- Store project memo at `~/.opencovibe/projects/{project-hash}/memo.json`.
-- Reuse OpenCovibe's existing project/cwd scoping.
+- Store project memo at `~/.claw-go/projects/{project-hash}/memo.json`.
+- Reuse Claw GO's existing project/cwd scoping.
 - Switch memo content when the active project/cwd changes.
 
 Acceptance:
@@ -419,7 +419,7 @@ For frontend phases:
 
 ### Cross-cutting
 
-- Each phase exit must run `npm run verify` green — OpenCovibe's canonical aggregate gate, which wraps `lint`, `format:check`, `i18n:check`, `vitest`, `build`, `rustfmt`, and `clippy -D warnings`. Raw `cargo` / `eslint` / `vitest` invocations are implementation details inside the npm scripts; reference the script name as the gate, not the underlying command.
+- Each phase exit must run `npm run verify` green — Claw GO's canonical aggregate gate, which wraps `lint`, `format:check`, `i18n:check`, `vitest`, `build`, `rustfmt`, and `clippy -D warnings`. Raw `cargo` / `eslint` / `vitest` invocations are implementation details inside the npm scripts; reference the script name as the gate, not the underlying command.
 - `npm run check` (svelte-check) must additionally pass for type-checked Svelte changes.
 - For Windows-specific work (Phase 1.c, Phase 2.x), CI must include a Windows runner before declaring the phase done.
 - For multi-CLI work (Phase 3+), CI uses **mock `AgentAdapter` implementations plus deterministic integration tests** as the blocking gate. Real Claude + Codex sandbox runs are manual or nightly evidence collected before each release — they depend on accounts, network, model availability, rate limits, and cost, none of which should hold a phase exit hostage.

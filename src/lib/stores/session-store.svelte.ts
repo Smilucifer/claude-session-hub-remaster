@@ -2511,7 +2511,7 @@ export class SessionStore {
           if (!replayOnly) {
             updateInstalledVersion(ev.claude_code_version);
             try {
-              localStorage.setItem("ocv:cli-version", ev.claude_code_version);
+              localStorage.setItem("clawgo:cli-version", ev.claude_code_version);
             } catch {
               /* ignore */
             }

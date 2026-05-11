@@ -77,7 +77,7 @@
 
   function switchManagedApp(app: ManagedApp) {
     managedApp = app;
-    localStorage.setItem("ocv:extensions-app", app);
+    localStorage.setItem("clawgo:extensions-app", app);
     cancelEditor();
     selectedSkillPath = null;
     refreshManagedAppData();
@@ -250,7 +250,7 @@
   // ── Lifecycle ──
 
   onMount(async () => {
-    const savedApp = localStorage.getItem("ocv:extensions-app") as ManagedApp | null;
+    const savedApp = localStorage.getItem("clawgo:extensions-app") as ManagedApp | null;
     if (savedApp && managedApps.some((app) => app.id === savedApp)) managedApp = savedApp;
 
     // Initialize from URL params
@@ -270,7 +270,7 @@
       mcpSource = urlSource;
     }
 
-    projectCwd = localStorage.getItem("ocv:project-cwd") ?? "";
+    projectCwd = localStorage.getItem("clawgo:project-cwd") ?? "";
     loading = true;
     const warnings: string[] = [];
     try {
@@ -355,8 +355,8 @@
           dbgWarn("plugins", "skills reload on project-change failed", err);
         });
     }
-    window.addEventListener("ocv:project-changed", onProjectChanged);
-    return () => window.removeEventListener("ocv:project-changed", onProjectChanged);
+    window.addEventListener("clawgo:project-changed", onProjectChanged);
+    return () => window.removeEventListener("clawgo:project-changed", onProjectChanged);
   });
 
   // ── Helpers ──

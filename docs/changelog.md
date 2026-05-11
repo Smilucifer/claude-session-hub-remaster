@@ -51,7 +51,7 @@
 
 ## Phase 9 (2026-05-08)
 
-- History 页面重写：从 OpenCovibe runs 切换为直接读取 CC 原生会话（`~/.claude/projects/`）
+- History 页面重写：从 Claw GO runs 切换为直接读取 CC 原生会话（`~/.claude/projects/`）
 - 过滤掉 `hasSubagents: true` 的子代理会话
 - 简化 UI：仅显示 prompt、时间、项目路径、模型 badge、继续/导入按钮
 - 支持文本搜索 + 项目 pill 过滤

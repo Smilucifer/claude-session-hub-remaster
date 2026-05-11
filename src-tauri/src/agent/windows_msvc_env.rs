@@ -605,7 +605,7 @@ pub fn resolve_spawn_env_plan_with_policy(
             Some((arch, host_arch)) => resolve_default_windows_msvc_env(arch, host_arch),
             None => MsvcEnvDecision::Warn {
                 message: "Current Windows architecture is not supported by the MSVC environment resolver.".to_string(),
-                next_action: "Use mode off or run OpenCovibe from a matching Developer PowerShell for this architecture.".to_string(),
+                next_action: "Use mode off or run Claw GO from a matching Developer PowerShell for this architecture.".to_string(),
             },
         }
     };

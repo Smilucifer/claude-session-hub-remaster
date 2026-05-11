@@ -6,7 +6,7 @@
 //! `~/.claude/stats-cache.json` which tracks those separately.
 //!
 //! Results are cached in memory (120s TTL) and on disk
-//! (`~/.opencovibe/usage-scan-cache.json`) to avoid rescanning
+//! (`~/.claw-go/usage-scan-cache.json`) to avoid rescanning
 //! unchanged files across restarts.
 
 use crate::models::{DailyAggregate, ModelAggregate, UsageOverview};

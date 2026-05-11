@@ -94,7 +94,7 @@
       <div class="flex items-center justify-between border-b border-border px-6 py-4">
         <div class="flex items-center gap-3">
           <span class="text-xs text-muted-foreground"
-            >{appVersion ? `OpenCovibe v${appVersion}` : ""}</span
+            >{appVersion ? `Claw GO v${appVersion}` : ""}</span
           >
           <button
             class="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
@@ -131,7 +131,7 @@
         class="flex items-center justify-between border-t border-border px-6 py-3 text-xs text-muted-foreground"
       >
         <span>Apache License 2.0</span>
-        <span>Copyright 2025-2026 OpenCovibe Contributors</span>
+        <span>Copyright 2025-2026 Claw GO Contributors</span>
       </div>
     </div>
   </div>

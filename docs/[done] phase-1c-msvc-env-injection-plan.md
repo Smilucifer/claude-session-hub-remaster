@@ -3,7 +3,7 @@
 **Feature:** Phase 2.x — Windows MSVC Environment Injection
 **Status:** Done. Merged to `master`.
 **Previous label:** Phase 1.c. Deferred until after Phase 2 Rooms; now the next planned implementation slice.
-**Goal:** Local Claude/Codex-style CLI child processes launched from the OpenCovibe window can receive a Visual Studio / MSVC developer environment on Windows, without requiring the user to start OpenCovibe from Developer PowerShell.
+**Goal:** Local Claude/Codex-style CLI child processes launched from the Claw GO window can receive a Visual Studio / MSVC developer environment on Windows, without requiring the user to start Claw GO from Developer PowerShell.
 **Acceptance Criteria:**
 - On Windows projects that need native tooling, local child CLI processes can receive a derived Visual Studio / MSVC environment.
 - `auto` mode injects only for conservative native-project signals; `always` forces injection; `off` disables it.
@@ -46,7 +46,7 @@ Last updated: 2026-04-30 after merging Task 7 and Task 8 to `master`.
 
 ## Finish Line
 
-The finish line is narrow: when OpenCovibe is launched as a normal Windows desktop app, local Claude session actor, Codex pipe-exec, and fork/one-shot sessions started inside a native Windows project can run tools such as `cl`, `link`, Rust crates with MSVC targets, Tauri builds, and native npm modules because their child process env includes the Visual Studio developer variables.
+The finish line is narrow: when Claw GO is launched as a normal Windows desktop app, local Claude session actor, Codex pipe-exec, and fork/one-shot sessions started inside a native Windows project can run tools such as `cl`, `link`, Rust crates with MSVC targets, Tauri builds, and native npm modules because their child process env includes the Visual Studio developer variables.
 
 We are not building CLI install/login/onboarding in this phase. That already exists in the app. We are also not installing Visual Studio, managing workloads, or rewriting the spawn architecture for all future agents.
 
@@ -122,7 +122,7 @@ pub enum SpawnPathPolicy {
 }
 ```
 
-`SpawnEnvPlan` is not the complete child-process environment. It only represents the MSVC augmentation layer: optional PATH override, MSVC build variables, status, and warnings. Auth variables, base URL, model tier variables, `OPENCOVIBE_*`, and provider/user `extra_env` remain owned by the existing spawn callers and are applied after the MSVC plan according to the merge rules below.
+`SpawnEnvPlan` is not the complete child-process environment. It only represents the MSVC augmentation layer: optional PATH override, MSVC build variables, status, and warnings. Auth variables, base URL, model tier variables, `CLAWGO_*`, and provider/user `extra_env` remain owned by the existing spawn callers and are applied after the MSVC plan according to the merge rules below.
 
 The public backend API must not return the full injected env to the frontend. A status command can return mode, status, source path, and warning text, but not secrets or the full process environment.
 
@@ -478,7 +478,7 @@ Expected: fail until pipe-exec accepts and applies the shared plan.
 
 **Step 2: Thread the env plan into `run_agent`**
 
-Pass a prepared `SpawnEnvPlan` or the minimal inputs needed to derive one from `chat.rs` into `run_agent` using `SpawnPathPolicy::InheritUnlessInjected`. When MSVC injection is active, use the current process `PATH` as the selected base PATH and set the merged `path_override`. Apply `path_override` only when it is `Some`; this preserves current inherited PATH behavior for non-Windows, non-native, warning-only, and `off` decisions. Apply any MSVC env entries before `OPENCOVIBE_TASK_ID` / `OPENCOVIBE_RUN_ID`; keep existing pipe stdout/stderr behavior unchanged.
+Pass a prepared `SpawnEnvPlan` or the minimal inputs needed to derive one from `chat.rs` into `run_agent` using `SpawnPathPolicy::InheritUnlessInjected`. When MSVC injection is active, use the current process `PATH` as the selected base PATH and set the merged `path_override`. Apply `path_override` only when it is `Some`; this preserves current inherited PATH behavior for non-Windows, non-native, warning-only, and `off` decisions. Apply any MSVC env entries before `CLAWGO_TASK_ID` / `CLAWGO_RUN_ID`; keep existing pipe stdout/stderr behavior unchanged.
 
 **Step 3: Verify**
 
@@ -612,7 +612,7 @@ Status: Done and merged.
 
 **Step 1: Validate without Developer PowerShell**
 
-Start OpenCovibe normally from Explorer or Start Menu, open this repo or another Tauri/Rust project, launch a local CLI session, and ask it to run:
+Start Claw GO normally from Explorer or Start Menu, open this repo or another Tauri/Rust project, launch a local CLI session, and ask it to run:
 
 ```powershell
 where cl

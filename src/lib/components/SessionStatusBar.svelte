@@ -133,14 +133,14 @@
   // ── Expansion state (persisted) ──
   let expanded = $state(
     typeof window !== "undefined"
-      ? localStorage.getItem("ocv:statusbar-expanded") !== "false"
+      ? localStorage.getItem("clawgo:statusbar-expanded") !== "false"
       : true,
   );
 
   $effect(() => {
-    localStorage.setItem("ocv:statusbar-expanded", String(expanded));
+    localStorage.setItem("clawgo:statusbar-expanded", String(expanded));
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("ocv:statusbar-toggle", { detail: { expanded } }));
+      window.dispatchEvent(new CustomEvent("clawgo:statusbar-toggle", { detail: { expanded } }));
     }
   });
 
@@ -672,7 +672,7 @@
       <!-- Global memo toggle -->
       <button
         class="rounded p-0.5 text-foreground/30 hover:text-foreground/60 hover:bg-accent transition-colors"
-        onclick={() => window.dispatchEvent(new CustomEvent("ocv:toggle-memo"))}
+        onclick={() => window.dispatchEvent(new CustomEvent("clawgo:toggle-memo"))}
         title={t("memo_panelTitle")}
       >
         <svg

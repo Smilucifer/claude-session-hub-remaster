@@ -24,7 +24,7 @@ static CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(10))
-        .user_agent("OpenCovibe/0.1")
+        .user_agent("ClawGO/1.0")
         .pool_idle_timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(2)
         // Use system proxy if configured (skills.sh may require proxy in some networks)

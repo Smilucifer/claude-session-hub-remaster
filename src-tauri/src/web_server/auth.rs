@@ -308,7 +308,7 @@ const LOGIN_HTML: &str = r#"<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenCovibe — Login</title>
+  <title>Claw GO — Login</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -342,7 +342,7 @@ const LOGIN_HTML: &str = r#"<!DOCTYPE html>
 </head>
 <body>
   <div class="card">
-    <h1>OpenCovibe</h1>
+    <h1>Claw GO</h1>
     <p>Enter your access token to continue. Find it in the desktop app under Settings.</p>
     <form id="loginForm">
       <label for="token">Access Token</label>

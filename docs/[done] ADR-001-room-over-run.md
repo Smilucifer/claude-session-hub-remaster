@@ -2,14 +2,14 @@
 
 **Date:** 2026-04-30
 **Status:** Accepted
-**Decision Owner:** OpenCovibe remaster planning
+**Decision Owner:** Claw GO remaster planning
 **Source:** `thinking.md`
 
 Accepted on 2026-04-30 after Opus 4.7 review confirmation.
 
 ## Context
 
-OpenCovibe already has a solid single-session execution model:
+Claw GO already has a solid single-session execution model:
 
 - `Run` is the persisted execution unit.
 - `SessionActor` owns a Claude Code process lifecycle.
@@ -25,11 +25,11 @@ Claude Session Hub has several collaboration features that sit above a single CL
 - Research Mode.
 - Arena Memory and shared project facts.
 
-The core architecture question is whether to port Hub's meeting-room implementation directly, or model collaboration as a native OpenCovibe layer above existing runs.
+The core architecture question is whether to port Hub's meeting-room implementation directly, or model collaboration as a native Claw GO layer above existing runs.
 
 ## Decision
 
-OpenCovibe will introduce **Room** as a first-class orchestration workspace above `Run`.
+Claw GO will introduce **Room** as a first-class orchestration workspace above `Run`.
 
 `Run` remains the smallest execution unit. A `Room` coordinates multiple runs through participants and collaboration turns.
 
@@ -59,8 +59,8 @@ Reuse the JavaScript meeting-room module behind a Tauri command shim.
 
 Rejected because:
 
-- Hub's meeting-room manages session lifecycle in JS, conflicting with OpenCovibe's Rust `SessionActor`.
-- Forces OpenCovibe to keep two parallel session models (Rust actor + JS meeting room).
+- Hub's meeting-room manages session lifecycle in JS, conflicting with Claw GO's Rust `SessionActor`.
+- Forces Claw GO to keep two parallel session models (Rust actor + JS meeting room).
 - Loses the ability to surface room state through `BusEvent` and the existing web server broadcast path.
 
 ### Alternative B: Extend `Run` to support multiple participants
@@ -92,7 +92,7 @@ Rejected because:
 - The strategic synthesis with Claude Session Hub depends on Room as the load-bearing concept.
 - Memo without Room collapses to a fancier scratchpad and loses the differentiation argument for the remaster.
 
-The chosen path (Room as orchestration above Run) is the only one that satisfies: native OpenCovibe domain model, reuse of existing Run / Actor / Storage / WebServer, and multi-CLI orchestration support.
+The chosen path (Room as orchestration above Run) is the only one that satisfies: native Claw GO domain model, reuse of existing Run / Actor / Storage / WebServer, and multi-CLI orchestration support.
 
 ## Target Model
 
@@ -143,7 +143,7 @@ RoomResponseRef {
 ## Storage
 
 ```text
-~/.opencovibe/
+~/.claw-go/
 ├── runs/
 ├── memos/
 │   └── global.json
@@ -215,7 +215,7 @@ Do not let Room orchestration call CLI-specific parser or process code directly.
 Create `/rooms` as a separate workspace. Do not merge it into `/teams`.
 
 - `/teams` remains the read-only observer for Claude Code native teams.
-- `/rooms` is OpenCovibe's own active multi-CLI collaboration workspace.
+- `/rooms` is Claw GO's own active multi-CLI collaboration workspace.
 
 Default UI should be discussion-first, not a three-terminal wall:
 
@@ -231,12 +231,12 @@ Default UI should be discussion-first, not a three-terminal wall:
 - Do not port Electron or Hub's main process.
 - Do not use node-pty as the default execution path.
 - Do not make Room replace `Run`, `SessionActor`, or `turn_engine.rs`.
-- Do not automatically import old Hub state into OpenCovibe.
+- Do not automatically import old Hub state into Claw GO.
 - Do not make `/teams` and `/rooms` share one data model.
 
 ## Hub Data Migration Decision
 
-Hub data will not be reverse-compatible with OpenCovibe Room storage.
+Hub data will not be reverse-compatible with Claw GO Room storage.
 
 Reasons:
 
@@ -246,7 +246,7 @@ Reasons:
 
 Accepted fallback:
 
-- provide an export-only migration command later, e.g. `opencovibe migrate-hub --export-only`;
+- provide an export-only migration command later, e.g. `claw-go migrate-hub --export-only`;
 - dump Hub rooms, memos, and arena memory into Markdown;
 - let users manually paste important material back into the new workspace.
 
@@ -267,7 +267,7 @@ Avoid claiming byte-for-byte identity. The practical acceptance criterion is unc
 
 Positive:
 
-- Collaboration becomes a native OpenCovibe domain model.
+- Collaboration becomes a native Claw GO domain model.
 - Existing run history, tool cards, permission UI, storage, and web server remain reusable.
 - Roundtable, Driver/Copilot, Research, Memo, and Arena Memory can share one room foundation.
 

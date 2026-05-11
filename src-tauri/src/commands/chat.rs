@@ -121,7 +121,7 @@ pub async fn send_chat_message(
 
     if !attachments.is_empty() {
         let upload_dir = std::env::temp_dir()
-            .join("opencovibe-uploads")
+            .join("claw-go-uploads")
             .join(&run_id);
         fs::create_dir_all(&upload_dir).map_err(|e| e.to_string())?;
 

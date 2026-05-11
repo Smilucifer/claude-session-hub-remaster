@@ -38,7 +38,7 @@ pub struct AdapterSettings {
     pub yolo_mode: Option<bool>,
 }
 
-/// Map OpenCovibe permission mode names to Claude CLI `--permission-mode` values.
+/// Map ClawGO permission mode names to Claude CLI `--permission-mode` values.
 fn map_permission_mode(mode: &str) -> String {
     match mode {
         "ask" => "default".to_string(),

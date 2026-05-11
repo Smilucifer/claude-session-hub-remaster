@@ -110,14 +110,14 @@
 
   function getInitialTheme(): ThemeMode {
     if (typeof window === "undefined") return "dark";
-    const saved = localStorage.getItem("ocv:theme");
+    const saved = localStorage.getItem("clawgo:theme");
     if (saved === "light" || saved === "dark" || saved === "system") return saved;
     return "dark";
   }
 
   function getInitialScheme(): ColorScheme {
     if (typeof window === "undefined") return "warm";
-    const saved = localStorage.getItem("ocv:colorScheme");
+    const saved = localStorage.getItem("clawgo:colorScheme");
     return saved === "neutral" ? "neutral" : "warm";
   }
 
@@ -138,6 +138,7 @@
 
   let panelTab = $state<"chats" | "teams">("chats");
   let runSearchQuery = $state("");
+  let appVersion = $state("");
 
   // ── Folder tree state ──
   let expandedProjects = $state<Set<string>>(new Set());
@@ -152,7 +153,7 @@
   // ── Sidebar resize ──
   function loadSidebarWidth(): number {
     if (typeof window === "undefined") return 280;
-    const raw = parseInt(localStorage.getItem("ocv:sidebar-width") ?? "", 10);
+    const raw = parseInt(localStorage.getItem("clawgo:sidebar-width") ?? "", 10);
     return Number.isFinite(raw) ? Math.min(500, Math.max(180, raw)) : 280;
   }
   let sidebarWidth = $state(loadSidebarWidth());
@@ -175,7 +176,7 @@
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
       resizeCleanup = null;
-      localStorage.setItem("ocv:sidebar-width", String(sidebarWidth));
+      localStorage.setItem("clawgo:sidebar-width", String(sidebarWidth));
       dbg("layout", "sidebar resize end", { width: sidebarWidth });
     }
     function onUp() {
@@ -271,7 +272,7 @@
   function selectFile(node: TreeNode) {
     explorerSelectedFile = node.fullPath;
     // Notify explorer page via custom event
-    window.dispatchEvent(new CustomEvent("ocv:explorer-file", { detail: { path: node.fullPath } }));
+    window.dispatchEvent(new CustomEvent("clawgo:explorer-file", { detail: { path: node.fullPath } }));
   }
 
   let _gitSeq = 0;
@@ -306,7 +307,7 @@
 
   function selectDiffFile(filePath: string) {
     // Notify explorer page to show diff
-    window.dispatchEvent(new CustomEvent("ocv:explorer-diff", { detail: { path: filePath } }));
+    window.dispatchEvent(new CustomEvent("clawgo:explorer-diff", { detail: { path: filePath } }));
   }
 
   // ── Memory sidebar state (shown when on /memory) ──
@@ -350,11 +351,11 @@
   }
 
   function persistPinnedConversationKeys() {
-    localStorage.setItem("ocv:pinned-conversations", JSON.stringify([...pinnedConversationKeys]));
+    localStorage.setItem("clawgo:pinned-conversations", JSON.stringify([...pinnedConversationKeys]));
   }
 
   function persistSeenMessageCounts() {
-    localStorage.setItem("ocv:seen-message-counts", JSON.stringify(seenMessageCounts));
+    localStorage.setItem("clawgo:seen-message-counts", JSON.stringify(seenMessageCounts));
   }
 
   function togglePinnedConversation(groupKey: string) {
@@ -367,9 +368,9 @@
 
   function selectMemoryFile(file: MemoryFileCandidate) {
     // Don't set highlight immediately — page will confirm dirty state first.
-    // If confirmed, page sends ocv:memory-file-selected to ack the switch.
+    // If confirmed, page sends clawgo:memory-file-selected to ack the switch.
     window.dispatchEvent(
-      new CustomEvent("ocv:memory-select", { detail: { path: file.path, exists: file.exists } }),
+      new CustomEvent("clawgo:memory-select", { detail: { path: file.path, exists: file.exists } }),
     );
   }
 
@@ -533,10 +534,10 @@
       settings = await getUserSettings();
       const normalizedWd = normalizeCwd(settings.working_directory);
       if (normalizedWd) {
-        localStorage.setItem("ocv:settings-cwd", normalizedWd);
+        localStorage.setItem("clawgo:settings-cwd", normalizedWd);
         if (!projectCwd) projectCwd = normalizedWd;
       } else {
-        localStorage.removeItem("ocv:settings-cwd");
+        localStorage.removeItem("clawgo:settings-cwd");
       }
       // Show setup wizard if onboarding not completed
       if (!settings.onboarding_completed) {
@@ -614,13 +615,19 @@
     loadAgentSettingsCache();
     loadRoomRunMap();
 
+    // Fetch app version for bottom-left display
+    import("@tauri-apps/api/app")
+      .then(({ getVersion }) => getVersion())
+      .then((v) => { appVersion = v; })
+      .catch(() => { appVersion = ""; });
+
     // Load saved CWD and pinned folders from localStorage
-    const saved = localStorage.getItem("ocv:project-cwd");
+    const saved = localStorage.getItem("clawgo:project-cwd");
     if (saved) projectCwd = normalizeCwd(saved) || "";
 
     // Load expanded projects from localStorage (defensive parse)
     try {
-      const rawExpanded = localStorage.getItem("ocv:expanded-projects");
+      const rawExpanded = localStorage.getItem("clawgo:expanded-projects");
       if (rawExpanded) {
         const parsed = JSON.parse(rawExpanded);
         if (Array.isArray(parsed) && parsed.every((v: unknown) => typeof v === "string")) {
@@ -631,13 +638,13 @@
       /* ignore corrupted data, keep empty Set */
     }
     try {
-      const pinned = localStorage.getItem("ocv:pinned-cwds");
+      const pinned = localStorage.getItem("clawgo:pinned-cwds");
       if (pinned) pinnedCwds = JSON.parse(pinned);
     } catch {
       /* ignore parse errors */
     }
     try {
-      const pinnedConversations = localStorage.getItem("ocv:pinned-conversations");
+      const pinnedConversations = localStorage.getItem("clawgo:pinned-conversations");
       if (pinnedConversations) {
         const parsed = JSON.parse(pinnedConversations);
         if (Array.isArray(parsed) && parsed.every((v: unknown) => typeof v === "string")) {
@@ -648,7 +655,7 @@
       /* ignore parse errors */
     }
     try {
-      const seenCounts = localStorage.getItem("ocv:seen-message-counts");
+      const seenCounts = localStorage.getItem("clawgo:seen-message-counts");
       if (seenCounts) {
         const parsed = JSON.parse(seenCounts);
         if (parsed && typeof parsed === "object") {
@@ -667,7 +674,7 @@
     }
     removedCwds = loadRemovedCwds();
 
-    // Poll for runs every 60s (fallback only — primary updates via ocv:runs-changed event)
+    // Poll for runs every 60s (fallback only — primary updates via clawgo:runs-changed event)
     const interval = setInterval(loadRuns, 60000);
 
     // Team store: initial load + poll fallback (60s)
@@ -768,52 +775,52 @@
         loadGitSummary();
       }
     }
-    window.addEventListener("ocv:runs-changed", onRunsChanged);
+    window.addEventListener("clawgo:runs-changed", onRunsChanged);
 
     // Refresh sidebar favorites when /runs page changes them
     function onFavoritesChanged() {
       loadSidebarFavorites();
     }
-    window.addEventListener("ocv:favorites-changed", onFavoritesChanged);
+    window.addEventListener("clawgo:favorites-changed", onFavoritesChanged);
 
     // Listen for Settings page requesting wizard re-open
     function onShowWizard() {
       showSetupWizard = true;
     }
-    window.addEventListener("ocv:show-wizard", onShowWizard);
+    window.addEventListener("clawgo:show-wizard", onShowWizard);
 
     // Memory page signals which file it selected (for sidebar highlight sync)
     function onMemoryFileSelected(e: Event) {
       const path = (e as CustomEvent).detail?.path ?? "";
       if (path) memorySelectedFile = path;
     }
-    window.addEventListener("ocv:memory-file-selected", onMemoryFileSelected);
+    window.addEventListener("clawgo:memory-file-selected", onMemoryFileSelected);
 
     // Memory page signals a file was saved (refresh candidates to update exists status)
     function onMemoryFileSaved() {
       if (currentPath?.startsWith("/memory")) loadMemoryCandidates({ soft: true });
     }
-    window.addEventListener("ocv:memory-file-saved", onMemoryFileSaved);
+    window.addEventListener("clawgo:memory-file-saved", onMemoryFileSaved);
 
     // Sync projectCwd when chat page picks a folder via dialog
     function handleCwdChanged() {
-      const newCwd = normalizeCwd(localStorage.getItem("ocv:project-cwd") ?? "") || "";
+      const newCwd = normalizeCwd(localStorage.getItem("clawgo:project-cwd") ?? "") || "";
       if (newCwd !== projectCwd) {
         projectCwd = newCwd;
       }
     }
-    window.addEventListener("ocv:cwd-changed", handleCwdChanged);
+    window.addEventListener("clawgo:cwd-changed", handleCwdChanged);
 
     // Open permissions modal from any entry point (Command Palette, PromptInput button)
     function onOpenPermissions() {
       permissionsModalOpen = true;
     }
-    window.addEventListener("ocv:open-permissions", onOpenPermissions);
+    window.addEventListener("clawgo:open-permissions", onOpenPermissions);
 
     function onToggleMemo() {
       showMemoPanel = !showMemoPanel;
     }
-    window.addEventListener("ocv:toggle-memo", onToggleMemo);
+    window.addEventListener("clawgo:toggle-memo", onToggleMemo);
 
     // ── External link interceptor ──
     // Prevent webview from navigating away to external URLs.
@@ -859,12 +866,12 @@
     function onExplorerFileSelected(e: Event) {
       explorerSelectedFile = (e as CustomEvent).detail?.path ?? "";
     }
-    window.addEventListener("ocv:explorer-file-selected", onExplorerFileSelected);
+    window.addEventListener("clawgo:explorer-file-selected", onExplorerFileSelected);
 
     // Listen for run status changes (idle↔running) from backend
     let unlistenStatus: (() => void) | undefined;
     transport
-      .listen("ocv:status-changed", (payload: unknown) => {
+      .listen("clawgo:status-changed", (payload: unknown) => {
         dbg("layout", "status-changed", payload);
         loadRuns();
       })
@@ -890,16 +897,16 @@
       keybindingStore.unregisterCallback("app:toggleSidebar");
       keybindingStore.unregisterCallback("app:commandPalette");
       keybindingStore.unregisterCallback("app:newChat");
-      window.removeEventListener("ocv:runs-changed", onRunsChanged);
-      window.removeEventListener("ocv:favorites-changed", onFavoritesChanged);
-      window.removeEventListener("ocv:show-wizard", onShowWizard);
-      window.removeEventListener("ocv:cwd-changed", handleCwdChanged);
-      window.removeEventListener("ocv:memory-file-selected", onMemoryFileSelected);
-      window.removeEventListener("ocv:memory-file-saved", onMemoryFileSaved);
-      window.removeEventListener("ocv:open-permissions", onOpenPermissions);
-      window.removeEventListener("ocv:toggle-memo", onToggleMemo);
+      window.removeEventListener("clawgo:runs-changed", onRunsChanged);
+      window.removeEventListener("clawgo:favorites-changed", onFavoritesChanged);
+      window.removeEventListener("clawgo:show-wizard", onShowWizard);
+      window.removeEventListener("clawgo:cwd-changed", handleCwdChanged);
+      window.removeEventListener("clawgo:memory-file-selected", onMemoryFileSelected);
+      window.removeEventListener("clawgo:memory-file-saved", onMemoryFileSaved);
+      window.removeEventListener("clawgo:open-permissions", onOpenPermissions);
+      window.removeEventListener("clawgo:toggle-memo", onToggleMemo);
       document.removeEventListener("click", handleExternalLink, true);
-      window.removeEventListener("ocv:explorer-file-selected", onExplorerFileSelected);
+      window.removeEventListener("clawgo:explorer-file-selected", onExplorerFileSelected);
     };
   });
 
@@ -908,17 +915,17 @@
   $effect(() => {
     if (typeof window !== "undefined") {
       if (projectCwd) {
-        localStorage.setItem("ocv:project-cwd", projectCwd);
+        localStorage.setItem("clawgo:project-cwd", projectCwd);
         // Pin this cwd so it stays in the dropdown after switching away
         if (projectCwd !== "/" && !pinnedCwds.includes(projectCwd)) {
           pinnedCwds = [...pinnedCwds, projectCwd];
-          localStorage.setItem("ocv:pinned-cwds", JSON.stringify(pinnedCwds));
+          localStorage.setItem("clawgo:pinned-cwds", JSON.stringify(pinnedCwds));
         }
       } else {
-        localStorage.removeItem("ocv:project-cwd");
+        localStorage.removeItem("clawgo:project-cwd");
       }
       // Notify child pages (e.g. Memory) that project cwd changed
-      window.dispatchEvent(new CustomEvent("ocv:project-changed", { detail: { cwd: projectCwd } }));
+      window.dispatchEvent(new CustomEvent("clawgo:project-changed", { detail: { cwd: projectCwd } }));
     }
   });
 
@@ -976,7 +983,7 @@
       const ids = conv.runs.map((r) => r.id);
       await softDeleteRuns(ids);
       dbg("layout", "deleteConversation success", { ids });
-      window.dispatchEvent(new Event("ocv:runs-changed"));
+      window.dispatchEvent(new Event("clawgo:runs-changed"));
       if (conv.runs.some((r) => r.id === selectedRunId)) {
         goto("/chat");
       }
@@ -999,7 +1006,7 @@
       await Promise.allSettled(activeIds.map((id) => stopSession(id)));
       await softDeleteRuns(ids);
       dbg("layout", "forceRemoveConversation success", { ids, stopped: activeIds });
-      window.dispatchEvent(new Event("ocv:runs-changed"));
+      window.dispatchEvent(new Event("clawgo:runs-changed"));
       if (conv.runs.some((r) => r.id === selectedRunId)) {
         goto("/chat");
       }
@@ -1013,7 +1020,7 @@
   let removeProjectTarget = $state("");
 
   function persistRemovedCwds() {
-    localStorage.setItem("ocv:removed-cwds", JSON.stringify(removedCwds));
+    localStorage.setItem("clawgo:removed-cwds", JSON.stringify(removedCwds));
   }
 
   function requestRemoveProject(cwd: string) {
@@ -1037,7 +1044,7 @@
     const newPinned = pinnedCwds.filter((c) => normalizeCwd(c) !== normalized);
     if (newPinned.length !== pinnedCwds.length) {
       pinnedCwds = newPinned;
-      localStorage.setItem("ocv:pinned-cwds", JSON.stringify(pinnedCwds));
+      localStorage.setItem("clawgo:pinned-cwds", JSON.stringify(pinnedCwds));
     }
 
     // If currently viewing this project, switch to All Projects
@@ -1253,13 +1260,13 @@
 
   // Persist theme + apply class
   $effect(() => {
-    localStorage.setItem("ocv:theme", themeMode);
+    localStorage.setItem("clawgo:theme", themeMode);
     document.documentElement.classList.toggle("dark", effectiveDark);
   });
 
   // Persist color scheme + apply class
   $effect(() => {
-    localStorage.setItem("ocv:colorScheme", colorScheme);
+    localStorage.setItem("clawgo:colorScheme", colorScheme);
     document.documentElement.classList.toggle("scheme-neutral", colorScheme === "neutral");
   });
 
@@ -1310,7 +1317,7 @@
     if (pruned.length !== expandedProjects.size) {
       expandedProjects = new Set(pruned);
     }
-    localStorage.setItem("ocv:expanded-projects", JSON.stringify(pruned));
+    localStorage.setItem("clawgo:expanded-projects", JSON.stringify(pruned));
   });
 
   // Note: <html lang> is set by initLocale() and switchLocale() directly.
@@ -1540,7 +1547,7 @@
             <button
               class="text-xs text-muted-foreground hover:text-muted-foreground transition-colors cursor-pointer"
               onclick={() => (showAbout = true)}
-              title="About OpenCovibe">v0.1</button
+              title="About Claw GO">{appVersion}</button
             >
           </div>
           <div class="relative mx-auto mb-0.5">

@@ -1701,7 +1701,7 @@ pub fn generate_ssh_key() -> Result<SshKeyInfo, String> {
         })
         .unwrap_or_else(|| "localhost".into());
 
-    let comment = format!("opencovibe@{}", hostname);
+    let comment = format!("clawgo@{}", hostname);
     let aug_path = augmented_path();
 
     log::debug!(

@@ -2,7 +2,7 @@
 
 **Feature:** Phase 5.5 - Native Codex/Gemini Chat and Connection Parity
 **Status:** Done on `master` on 2026-05-05.
-**Goal:** Make Codex and Gemini native CLI runs feel like normal OpenCovibe chat sessions while preserving one-shot pipe-exec semantics.
+**Goal:** Make Codex and Gemini native CLI runs feel like normal Claw GO chat sessions while preserving one-shot pipe-exec semantics.
 
 ## Scope
 

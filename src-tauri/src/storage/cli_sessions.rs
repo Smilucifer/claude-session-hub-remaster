@@ -1,7 +1,7 @@
 //! CLI session discovery, normalization, import, and incremental sync.
 //!
 //! Reads Claude CLI transcript files (~/.claude/projects/*/*.jsonl) and converts
-//! them into OpenCovibe run format (~/.opencovibe/runs/{run-id}/).
+//! them into ClawGO run format (~/.claw-go/runs/{run-id}/).
 
 use crate::agent::claude_protocol::{validate_bus_event, ProtocolState};
 use crate::models::{BusEvent, ImportWatermark, RunMeta, RunSource, RunStatus};

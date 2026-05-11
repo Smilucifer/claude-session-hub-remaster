@@ -1,5 +1,5 @@
 // picker_bridge.js — injected into preview window for element selection
-// Communicates back via navigation intercept (ocv-bridge://)
+// Communicates back via navigation intercept (clawgo-bridge://)
 (function() {
   if (window.__ocvPicker) return;
 
@@ -30,7 +30,7 @@
     bar.id = '__ocv_toolbar';
     bar.style.cssText = BAR + 'display:flex;align-items:center;padding:8px 16px;gap:10px;';
     bar.innerHTML =
-      '<span style="color:#a6adc8;flex:1;font-size:11px;">OpenCovibe Preview</span>' +
+      '<span style="color:#a6adc8;flex:1;font-size:11px;">Claw GO Preview</span>' +
       '<button id="__ocv_btn_pick" style="' + BTN + 'background:#3b82f6;color:#fff;">Pick Element</button>';
     document.body.appendChild(bar);
     document.body.style.paddingBottom = (bar.offsetHeight) + 'px';
@@ -194,7 +194,7 @@
       if (!pendingData) return;
       var json = encodeURIComponent(JSON.stringify(pendingData));
       dismissResult();
-      window.location.href = 'ocv-bridge://element-selected#' + json;
+      window.location.href = 'clawgo-bridge://element-selected#' + json;
     };
     document.getElementById('__ocv_r_pick').onclick = function() {
       dismissResult();

@@ -341,7 +341,7 @@ pub fn read_clipboard_file(path: String, as_text: bool) -> Result<ClipboardFileC
 /// then its path is injected into the prompt text so CLI handles via pdftoppm.
 #[tauri::command]
 pub fn save_temp_attachment(name: String, content_base64: String) -> Result<String, String> {
-    let tmp_dir = std::env::temp_dir().join("opencovibe-attachments");
+    let tmp_dir = std::env::temp_dir().join("claw-go-attachments");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir: {}", e))?;
 
     use base64::Engine;

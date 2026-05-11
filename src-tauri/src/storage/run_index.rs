@@ -1,8 +1,8 @@
 //! Run index — scans events.jsonl + meta.json to build a searchable
 //! summary of every run (tools, files, cost, errors, etc.).
 //!
-//! Index file:    `~/.opencovibe/run-index.jsonl`
-//! Manifest file: `~/.opencovibe/run-index-manifest.json`
+//! Index file:    `~/.claw-go/run-index.jsonl`
+//! Manifest file: `~/.claw-go/run-index-manifest.json`
 //!
 //! Uses in-memory cache with 120s TTL (same pattern as `prompt_index.rs`).
 

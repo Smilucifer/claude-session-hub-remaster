@@ -2112,7 +2112,7 @@
         {/if}
         <button
           class="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground border border-transparent hover:border-border"
-          onclick={() => window.dispatchEvent(new CustomEvent("ocv:open-permissions"))}
+          onclick={() => window.dispatchEvent(new CustomEvent("clawgo:open-permissions"))}
           title={t("permissions_title")}
         >
           <svg

@@ -1,6 +1,6 @@
-# Contributing to OpenCovibe
+# Contributing to Claw GO
 
-Welcome! We're glad you're interested in contributing to OpenCovibe. Whether it's a bug fix, new feature, translation, or documentation improvement — every contribution helps.
+Welcome! We're glad you're interested in contributing to Claw GO. Whether it's a bug fix, new feature, translation, or documentation improvement — every contribution helps.
 
 ## Ways to Contribute
 
@@ -14,7 +14,7 @@ Welcome! We're glad you're interested in contributing to OpenCovibe. Whether it'
 
 ```bash
 git clone https://github.com/AnyiWang/OpenCovibe.git
-cd OpenCovibe
+cd ClawGO
 npm install
 npm run tauri dev
 ```

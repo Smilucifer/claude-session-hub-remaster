@@ -91,7 +91,7 @@
           runId: conversation.latestRun.id,
           name: trimmed,
         });
-        window.dispatchEvent(new Event("ocv:runs-changed"));
+        window.dispatchEvent(new Event("clawgo:runs-changed"));
       } catch (e) {
         dbgWarn("conv-item", "rename failed", e);
         // runs will refresh on next poll

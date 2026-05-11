@@ -51,7 +51,7 @@
 
   <!-- Storage -->
   <rect class="box" x="410" y="115" width="225" height="55" rx="6"/>
-  <text class="t-body" x="522" y="137" text-anchor="middle">~/.opencovibe/</text>
+  <text class="t-body" x="522" y="137" text-anchor="middle">~/.claw-go/</text>
   <text class="t-sm" x="522" y="155" text-anchor="middle">JSON 文件存储</text>
 
   <!-- IPC -->

@@ -15,7 +15,7 @@ static CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(10))
-        .user_agent("OpenCovibe/0.1")
+        .user_agent("ClawGO/1.0")
         .build()
         .unwrap_or_default()
 });

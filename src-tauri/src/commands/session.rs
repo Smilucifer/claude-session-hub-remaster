@@ -854,7 +854,7 @@ pub(crate) async fn start_session_impl(
                 log::warn!("[session] synthetic idle meta update failed: {}", e);
             } else {
                 emitter.emit_realtime(
-                    "ocv:status-changed",
+                    "clawgo:status-changed",
                     &serde_json::json!({"run_id": run_id.as_str(), "status": "idle"}),
                     Some(&run_id),
                 );

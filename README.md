@@ -11,9 +11,9 @@ This project evolves from the local-first desktop architecture and UI foundation
 
 ## 项目定位 / Project Positioning
 
-Claude Session Hub Remaster 的目标不是重写 OpenCovibe，也不是直接搬运 Claude Session Hub。它以 OpenCovibe 当前的 Tauri + Svelte + Rust 架构为主体，逐步叠加 Claude Session Hub 中有差异化价值的协作能力。
+Claude Session Hub Remaster 的目标不是重写 Claw GO，也不是直接搬运 Claude Session Hub。它以 Claw GO 当前的 Tauri + Svelte + Rust 架构为主体，逐步叠加 Claude Session Hub 中有差异化价值的协作能力。
 
-Claude Session Hub Remaster is not a rewrite of OpenCovibe and not a direct port of Claude Session Hub. It keeps OpenCovibe's current Tauri + Svelte + Rust architecture as the foundation, then incrementally adds the collaboration ideas that make Claude Session Hub distinctive.
+Claude Session Hub Remaster is not a rewrite of Claw GO and not a direct port of Claude Session Hub. It keeps Claw GO's current Tauri + Svelte + Rust architecture as the foundation, then incrementally adds the collaboration ideas that make Claude Session Hub distinctive.
 
 当前架构原则：
 
@@ -97,9 +97,9 @@ The current primary providers are: Claude, Codex, DeepSeek, GLM, QWEN, KIMI, and
 
 The settings page provides independent model and auth configuration per provider. Claude and Codex use official CLI authentication. DeepSeek, GLM, QWEN, KIMI, and MiMo Pro support dynamic API key / base URL / model configuration, generating a per-session temp config from the latest settings on each launch. Codex uses a PTY-based native CLI execution path with transcript-based completion detection rather than process-exit semantics.
 
-Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.opencovibe/settings.json` for backward compatibility. API providers should keep provider identity separate from the Claude execution agent:
+Claude-compatible API profiles can still be represented under `user.cc_agent_profiles` in `~/.claw-go/settings.json` for backward compatibility. API providers should keep provider identity separate from the Claude execution agent:
 
-为了向后兼容，Claude-compatible API profile 仍可保留在 `~/.opencovibe/settings.json` 的 `user.cc_agent_profiles` 下。API provider 应保持 provider identity 和 Claude execution agent 分离：
+为了向后兼容，Claude-compatible API profile 仍可保留在 `~/.claw-go/settings.json` 的 `user.cc_agent_profiles` 下。API provider 应保持 provider identity 和 Claude execution agent 分离：
 
 ```json
 {

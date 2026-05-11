@@ -13,7 +13,7 @@ TYPES="src/lib/types.ts"
 ERRORS=0
 
 if [[ ! -f "$MODELS" || ! -f "$TYPES" ]]; then
-  echo "Error: must run from project root (OpenCovibe/)"
+  echo "Error: must run from project root (ClawGO/)"
   exit 2
 fi
 

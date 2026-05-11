@@ -955,8 +955,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
-        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
 
         let initial = update_user_settings(serde_json::json!({
             "platform_credentials": [
@@ -980,8 +980,8 @@ mod tests {
         .unwrap();
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
 
         assert_eq!(updated.platform_credentials.len(), 1);
@@ -1010,8 +1010,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
-        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
 
         let result = update_user_settings(serde_json::json!({
             "balance_helper": {
@@ -1020,8 +1020,8 @@ mod tests {
         }));
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
 
         assert!(result
@@ -1063,8 +1063,8 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
-        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
 
         let updated = update_user_settings(serde_json::json!({
             "cc_agent_profiles": [
@@ -1080,8 +1080,8 @@ mod tests {
         .unwrap();
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
 
         assert_eq!(

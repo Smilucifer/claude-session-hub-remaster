@@ -191,8 +191,8 @@ pub async fn run_agent(
     }
 
     let mut child = cmd
-        .env("OPENCOVIBE_TASK_ID", &run_id)
-        .env("OPENCOVIBE_RUN_ID", &run_id)
+        .env("CLAW_GO_TASK_ID", &run_id)
+        .env("CLAW_GO_RUN_ID", &run_id)
         .env_remove("CLAUDECODE") // Allow running inside a Claude Code session
         .hide_console()
         .kill_on_drop(true)

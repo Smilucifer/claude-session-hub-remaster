@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This repository is a Windows-first Tauri desktop app with a SvelteKit frontend and a Rust backend. The project is a remaster built on OpenCovibe's local-first desktop architecture, adding Claude Session Hub concepts such as Rooms, Memo, Roundtable, Driver/Copilot, and Research workflows without disrupting the existing `/chat` path.
+This repository is a Windows-first Tauri desktop app with a SvelteKit frontend and a Rust backend. The project is a remaster built on Claw GO's local-first desktop architecture, adding Claude Session Hub concepts such as Rooms, Memo, Roundtable, Driver/Copilot, and Research workflows without disrupting the existing `/chat` path.
 
 The core product model is:
 - `Run` is the smallest execution unit.
@@ -74,9 +74,9 @@ npm run tauri build
 ```
 
 Produces:
-- `src-tauri/target/release/OpenCovibe.exe` (main binary)
-- `src-tauri/target/release/bundle/nsis/OpenCovibe_<version>_x64-setup.exe`
-- `src-tauri/target/release/bundle/msi/OpenCovibe_<version>_x64_en-US.msi`
+- `src-tauri/target/release/ClawGO.exe` (main binary)
+- `src-tauri/target/release/bundle/nsis/ClawGO_<version>_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/ClawGO_<version>_x64_en-US.msi`
 
 For version bumping across all config files:
 
@@ -241,9 +241,9 @@ Key files:
 - `src/lib/components/GlobalMemoPanel.svelte`
 - `src/lib/stores/memo-store.svelte.ts`
 
-### 9. History reads CC native sessions, not OpenCovibe runs
+### 9. History reads CC native sessions, not Claw GO runs
 
-As of Phase 9, the `/history` page reads directly from `~/.claude/projects/` via the `discover_cli_sessions` Tauri command. It no longer uses `~/.opencovibe/runs/`.
+As of Phase 9, the `/history` page reads directly from `~/.claude/projects/` via the `discover_cli_sessions` Tauri command. It no longer uses `~/.claw-go/runs/`.
 
 Key behaviors:
 - Subagent sessions (`hasSubagents: true`) are filtered out — only user-initiated conversations are shown.
@@ -344,7 +344,7 @@ Detailed plans and review responses are in `docs/`.
 ## Notes for future edits
 
 - Vite dev server is configured for port `1420`, with HMR on `1421` when `TAURI_DEV_HOST` is set.
-- Vite watch ignores backend/build/runtime directories such as `src-tauri`, `.claude`, `.opencovibe`, `memory`, and other non-frontend paths to avoid reload churn during active agent sessions.
+- Vite watch ignores backend/build/runtime directories such as `src-tauri`, `.claude`, `.claw-go`, `memory`, and other non-frontend paths to avoid reload churn during active agent sessions.
 - SvelteKit uses `adapter-static` with `fallback: "index.html"`.
 - Frontend test environment is `node`, configured in `vitest.config.ts`.
 - Provider-native launch config templates are in `src-tauri/src/commands/session.rs` (builder boundary).

@@ -15,7 +15,7 @@ pub fn cleanup_hook_bridge() {
                 "[hooks/setup] HOME/USERPROFILE not set, cannot locate ~/.claude/settings.json. \
                  Skipping hook-bridge cleanup. To fix manually: edit ~/.claude/settings.json \
                  and remove all hook entries containing 'hook-bridge.mjs', \
-                 then delete ~/.opencovibe/hook-bridge.mjs"
+                 then delete ~/.claw-go/hook-bridge.mjs"
             );
         }
     }

@@ -9,7 +9,7 @@ use tauri::Manager;
 fn do_capture(app: &AppHandle) {
     let path = std::env::temp_dir()
         .join(format!(
-            "ocv-screenshot-{}.png",
+            "clawgo-screenshot-{}.png",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

@@ -3,7 +3,7 @@
 **Feature:** Phase 1.a / 1.b - Global and Project Memo
 **Status:** Done
 **Merged:** `216d500 feat: add phase 1 memo foundation`
-**Goal:** Ship a small persistent memo surface that gives immediate value without touching OpenCovibe session orchestration.
+**Goal:** Ship a small persistent memo surface that gives immediate value without touching Claw GO session orchestration.
 **Acceptance Criteria:**
 - Users can add, edit, copy, delete, and clear memo items.
 - Global memo survives app restart.
@@ -19,7 +19,7 @@
 
 ## Finish Line
 
-Phase 1 Memo is complete when OpenCovibe has a command-accessible memo model with a visible frontend panel. The implementation should be small enough to land before Room work starts, but permanent enough to extend later with room memo.
+Phase 1 Memo is complete when Claw GO has a command-accessible memo model with a visible frontend panel. The implementation should be small enough to land before Room work starts, but permanent enough to extend later with room memo.
 
 Completion note, 2026-04-30: Phase 1.a / 1.b landed before Room work and is treated as complete for roadmap purposes. Room memo was delivered separately with Phase 2's room storage/UI.
 
@@ -94,7 +94,7 @@ Use a stable project key derived from canonical cwd. Prefer a short SHA-256 hex 
 
 **Steps:**
 
-1. Add `OPENCOVIBE_DATA_DIR` support to `storage::data_dir()`.
+1. Add `CLAWGO_DATA_DIR` support to `storage::data_dir()`.
 2. Keep existing home-dir fallback when the env var is absent or empty.
 3. Add tests for env override and fallback behavior. Guard env mutation with a test mutex or equivalent serial helper so parallel Rust tests do not race.
 
@@ -102,7 +102,7 @@ Expected behavior:
 
 ```rust
 // Pseudocode
-std::env::set_var("OPENCOVIBE_DATA_DIR", temp.path());
+std::env::set_var("CLAWGO_DATA_DIR", temp.path());
 assert_eq!(storage::data_dir(), temp.path());
 ```
 

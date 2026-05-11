@@ -1012,7 +1012,7 @@
     try {
       cliConfig = await api.getCliConfig();
       // Load project config for override indicators
-      const cwd = localStorage.getItem("ocv:project-cwd") || "";
+      const cwd = localStorage.getItem("clawgo:project-cwd") || "";
       if (cwd) {
         projectCliConfig = await api.getProjectCliConfig(cwd);
       }

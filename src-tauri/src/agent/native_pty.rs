@@ -388,8 +388,8 @@ pub async fn run_native_pty_agent(
     for (key, value) in &spawn_env_plan.msvc_env {
         child_env.insert(key.clone(), value.clone());
     }
-    child_env.insert("OPENCOVIBE_TASK_ID".to_string(), run_id.clone());
-    child_env.insert("OPENCOVIBE_RUN_ID".to_string(), run_id.clone());
+    child_env.insert("CLAW_GO_TASK_ID".to_string(), run_id.clone());
+    child_env.insert("CLAW_GO_RUN_ID".to_string(), run_id.clone());
     child_env.remove("CLAUDECODE");
     for (key, value) in child_env {
         cmd.env(key, value);

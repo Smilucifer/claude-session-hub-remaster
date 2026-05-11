@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/.github/schemas/tauri-v2.json",
-  "productName": "OpenCovibe",
-  "version": "1.1.8",
-  "identifier": "com.opencovibe.desktop",
+  "productName": "Claw GO",
+  "version": "1.2.0",
+  "identifier": "com.clawgo.desktop",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OpenCovibe",
+        "title": "Claw GO",
         "width": 1280,
         "height": 800,
         "minWidth": 900,
@@ -39,7 +39,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "AI-assisted vibe coding desktop app",
-    "longDescription": "OpenCovibe wraps AI coding CLIs (Claude Code, Codex) with a visual chat interface, run management, and activity monitoring. Local-first, no cloud required.",
+    "longDescription": "Claw GO wraps AI coding CLIs (Claude Code, Codex) with a visual chat interface, run management, and activity monitoring. Local-first, no cloud required.",
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "13.0"

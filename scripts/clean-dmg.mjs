@@ -16,7 +16,7 @@ import { join } from "node:path";
 const BASE = "src-tauri/target/universal-apple-darwin/release/bundle";
 
 const cleanups = [
-  { dir: join(BASE, "dmg"), pattern: /^OpenCovibe_.*\.dmg$/ },
+  { dir: join(BASE, "dmg"), pattern: /^ClawGO_.*\.dmg$/ },
   { dir: join(BASE, "macos"), pattern: /^rw\..*\.dmg$/ },
 ];
 

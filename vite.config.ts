@@ -43,7 +43,7 @@ export default defineConfig({
         "**/.next/**",
         "**/dist/**",
         "**/.claude/**",
-        "**/.opencovibe/**",
+        "**/.claw-go/**",
         "**/tmp/**",
         "**/memory/**",
       ],

@@ -1,14 +1,14 @@
 /**
  * Removed-cwds utilities — manage the list of project folders removed from sidebar.
  *
- * Removed cwds are stored in localStorage under "ocv:removed-cwds".
- * Legacy key "ocv:hidden-cwds" is migrated on first load.
+ * Removed cwds are stored in localStorage under "clawgo:removed-cwds".
+ * Legacy key "clawgo:hidden-cwds" is migrated on first load.
  */
 
 import { normalizeCwd } from "./sidebar-groups";
 
-const STORAGE_KEY = "ocv:removed-cwds";
-const LEGACY_KEY = "ocv:hidden-cwds";
+const STORAGE_KEY = "clawgo:removed-cwds";
+const LEGACY_KEY = "clawgo:hidden-cwds";
 
 /** Parse a JSON array from localStorage, returning [] on any error. */
 function safeParseArray(key: string): string[] {

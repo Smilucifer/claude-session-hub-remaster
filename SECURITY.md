@@ -23,7 +23,7 @@ If the GitHub channel is unavailable, email `security@opencovibe.com`.
 
 ## Scope
 
-This policy covers the OpenCovibe desktop application itself (Tauri, Rust backend, Svelte frontend). Vulnerabilities in upstream CLIs (Claude Code, Codex) should be reported to their respective maintainers.
+This policy covers the Claw GO desktop application itself (Tauri, Rust backend, Svelte frontend). Vulnerabilities in upstream CLIs (Claude Code, Codex) should be reported to their respective maintainers.
 
 ## Response Timeline
 

@@ -54,7 +54,7 @@
       try {
         const { renameRun } = await import("$lib/api");
         await renameRun(run.id, trimmed);
-        window.dispatchEvent(new Event("ocv:runs-changed"));
+        window.dispatchEvent(new Event("clawgo:runs-changed"));
       } catch {
         // runs will refresh on next poll
       }

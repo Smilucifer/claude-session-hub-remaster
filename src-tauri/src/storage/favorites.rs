@@ -1,6 +1,6 @@
 //! Prompt-level favorites — independent of RunMeta.
 //!
-//! Storage: `~/.opencovibe/prompt-favorites.json`
+//! Storage: `~/.claw-go/prompt-favorites.json`
 //! Each favorite stores the prompt text redundantly so it survives run deletion.
 
 use crate::models::PromptFavorite;

@@ -157,7 +157,7 @@
   let previewInstanceId = $state("");
   let previewOpen = $derived(previewInstanceId !== "");
   let previewUrlBarOpen = $state(false);
-  let previewUrlInput = $state(localStorage.getItem("ocv:preview-url") ?? "http://localhost:");
+  let previewUrlInput = $state(localStorage.getItem("clawgo:preview-url") ?? "http://localhost:");
 
   // ── Model contamination helpers ──
 
@@ -502,7 +502,7 @@
   // Track status bar expansion for MCP panel offset
   let statusBarExpanded = $state(
     typeof window !== "undefined"
-      ? localStorage.getItem("ocv:statusbar-expanded") !== "false"
+      ? localStorage.getItem("clawgo:statusbar-expanded") !== "false"
       : true,
   );
 
@@ -1114,7 +1114,7 @@
     if (!folder) return;
     untrack(() => {
       dbg("chat", "new chat in folder", { folder });
-      localStorage.setItem("ocv:project-cwd", folder);
+      localStorage.setItem("clawgo:project-cwd", folder);
       folderCwdOverride = folder;
       store.loadRun("", xtermRef);
       const clean = new URL($page.url);
@@ -1138,7 +1138,7 @@
       // Restore last target selection
       if (!store.run && remoteHosts.length > 0) {
         try {
-          const lastTarget = localStorage.getItem("ocv:last-target");
+          const lastTarget = localStorage.getItem("clawgo:last-target");
           if (lastTarget && remoteHosts.some((h) => h.name === lastTarget)) {
             store.remoteHostName = lastTarget;
           }
@@ -1255,7 +1255,7 @@
     checkProjectInit();
     // Preload project data from filesystem (no session needed)
     if (!runId) {
-      const cwd = localStorage.getItem("ocv:project-cwd") || "";
+      const cwd = localStorage.getItem("clawgo:project-cwd") || "";
       reloadProjectData(cwd);
     }
   });
@@ -1265,12 +1265,12 @@
     const handler = () => {
       checkProjectInit();
       if (!runId && !store.run) {
-        const cwd = localStorage.getItem("ocv:project-cwd") || "";
+        const cwd = localStorage.getItem("clawgo:project-cwd") || "";
         reloadProjectData(cwd);
       }
     };
-    window.addEventListener("ocv:project-changed", handler);
-    return () => window.removeEventListener("ocv:project-changed", handler);
+    window.addEventListener("clawgo:project-changed", handler);
+    return () => window.removeEventListener("clawgo:project-changed", handler);
   });
 
   // Sync run name when sidebar/history renames the current run
@@ -1291,8 +1291,8 @@
           dbgWarn("chat", "runs-changed: failed to sync name", e);
         });
     }
-    window.addEventListener("ocv:runs-changed", onRunsChanged);
-    return () => window.removeEventListener("ocv:runs-changed", onRunsChanged);
+    window.addEventListener("clawgo:runs-changed", onRunsChanged);
+    return () => window.removeEventListener("clawgo:runs-changed", onRunsChanged);
   });
 
   // Start middleware + register handlers
@@ -1435,7 +1435,7 @@
     function onStatusBarToggle(e: Event) {
       statusBarExpanded = (e as CustomEvent).detail.expanded;
     }
-    window.addEventListener("ocv:statusbar-toggle", onStatusBarToggle);
+    window.addEventListener("clawgo:statusbar-toggle", onStatusBarToggle);
 
     // Register chat-context keybinding callbacks
     keybindingStore.registerCallback("chat:interrupt", () => {
@@ -1519,10 +1519,10 @@
     });
     keybindingStore.registerCallback("app:exportChatHtml", () => void handleExportHtml());
     const onExportHtmlEvent = () => {
-      window.dispatchEvent(new CustomEvent("ocv:export-html-ack"));
+      window.dispatchEvent(new CustomEvent("clawgo:export-html-ack"));
       void handleExportHtml();
     };
-    window.addEventListener("ocv:export-html", onExportHtmlEvent);
+    window.addEventListener("clawgo:export-html", onExportHtmlEvent);
 
     // Screenshot event listener (global hotkey → attachment injection)
     const chatTransport = getTransport();
@@ -1586,7 +1586,7 @@
     );
 
     return () => {
-      window.removeEventListener("ocv:statusbar-toggle", onStatusBarToggle);
+      window.removeEventListener("clawgo:statusbar-toggle", onStatusBarToggle);
       keybindingStore.unregisterCallback("chat:interrupt");
       keybindingStore.unregisterCallback("chat:sendGlobal");
       keybindingStore.unregisterCallback("app:shortcutHelp");
@@ -1598,7 +1598,7 @@
       keybindingStore.unregisterCallback("chat:toggleTasks");
       keybindingStore.unregisterCallback("chat:undoLastTurn");
       keybindingStore.unregisterCallback("app:exportChatHtml");
-      window.removeEventListener("ocv:export-html", onExportHtmlEvent);
+      window.removeEventListener("clawgo:export-html", onExportHtmlEvent);
       screenshotUnlisten.then((fn) => fn());
       dragEnterUnlisten.then((fn) => fn());
       dragLeaveUnlisten.then((fn) => fn());
@@ -1872,8 +1872,8 @@
         // First message: create run
         let cwd =
           typeof window !== "undefined"
-            ? localStorage.getItem("ocv:project-cwd") ||
-              localStorage.getItem("ocv:settings-cwd") ||
+            ? localStorage.getItem("clawgo:project-cwd") ||
+              localStorage.getItem("clawgo:settings-cwd") ||
               ""
             : "";
 
@@ -1888,8 +1888,8 @@
             });
             if (!selected) return; // user cancelled → don't send
             cwd = selected as string;
-            localStorage.setItem("ocv:project-cwd", cwd);
-            window.dispatchEvent(new Event("ocv:cwd-changed"));
+            localStorage.setItem("clawgo:project-cwd", cwd);
+            window.dispatchEvent(new Event("clawgo:cwd-changed"));
           } else {
             // Browser: use server-configured working_directory from settings
             cwd = settings?.working_directory || "/";
@@ -1904,7 +1904,7 @@
 
         const runId = await store.startSession(text, cwd, attachments);
         goto(`/chat?run=${runId}`, { replaceState: true });
-        window.dispatchEvent(new Event("ocv:runs-changed"));
+        window.dispatchEvent(new Event("clawgo:runs-changed"));
         // Re-detect CLI version on new session (picks up external updates)
         loadCliVersionInfo();
       } else if (store.useStreamSession && !store.sessionAlive && store.run.session_id) {
@@ -1978,7 +1978,7 @@
   }
 
   async function checkProjectInit() {
-    const cwd = localStorage.getItem("ocv:project-cwd") || "";
+    const cwd = localStorage.getItem("clawgo:project-cwd") || "";
     if (!cwd || cwd === "/") {
       projectInitStatus = null;
       dbg("chat", "checkProjectInit: skip (no cwd)");
@@ -1996,7 +1996,7 @@
         isApiMode: store.isApiMode,
       });
       if (seq !== initCheckSeq) return;
-      const dismissKey = `ocv:init-dismissed:${status.cwd}`;
+      const dismissKey = `clawgo:init-dismissed:${status.cwd}`;
       const dismissed = localStorage.getItem(dismissKey);
       if (dismissed) {
         projectInitStatus = null;
@@ -2012,7 +2012,7 @@
 
   function dismissInitHint() {
     if (projectInitStatus?.cwd) {
-      localStorage.setItem(`ocv:init-dismissed:${projectInitStatus.cwd}`, "1");
+      localStorage.setItem(`clawgo:init-dismissed:${projectInitStatus.cwd}`, "1");
     }
     projectInitStatus = null;
     dbg("chat", "init hint dismissed");
@@ -2384,7 +2384,7 @@
     try {
       await api.renameRun(store.run.id, name);
       store.run = { ...store.run, name };
-      window.dispatchEvent(new Event("ocv:runs-changed"));
+      window.dispatchEvent(new Event("clawgo:runs-changed"));
       dbg("chat", "renamed run", { id: store.run.id, name });
     } catch (e) {
       dbgWarn("chat", "rename failed", e);
@@ -2461,7 +2461,7 @@
 
     try {
       await api.openPreviewWindow(url, instanceId);
-      localStorage.setItem("ocv:preview-url", url);
+      localStorage.setItem("clawgo:preview-url", url);
       return "ok";
     } catch (e) {
       dbgWarn("preview", "openPreview failed", e);
@@ -2590,7 +2590,7 @@
     } else if (action === "run-doctor") {
       try {
         dbg("doctor", "run-doctor triggered", { cwd: store.effectiveCwd });
-        const cwd = store.effectiveCwd || localStorage.getItem("ocv:project-cwd") || "";
+        const cwd = store.effectiveCwd || localStorage.getItem("clawgo:project-cwd") || "";
         const mcpSvrs = store.sessionAlive ? store.mcpServers : undefined;
         const report = await buildDoctorReport(cwd, mcpSvrs);
         appendCommandOutput(report);
@@ -2648,7 +2648,7 @@
         appendCommandOutput(t("todos_empty"));
       }
     } else if (action === "show-diff") {
-      const cwd = store.effectiveCwd || localStorage.getItem("ocv:project-cwd") || "";
+      const cwd = store.effectiveCwd || localStorage.getItem("clawgo:project-cwd") || "";
       if (!cwd) {
         appendCommandOutput(t("diff_noCwd"));
         return;
@@ -2875,7 +2875,7 @@
         await store.stop();
         dbg("chat", "clear-context: navigating to fresh chat");
         goto("/chat", { replaceState: true });
-        window.dispatchEvent(new Event("ocv:runs-changed"));
+        window.dispatchEvent(new Event("clawgo:runs-changed"));
       } catch (e) {
         dbgWarn("chat", "clear-context failed", e);
         store.error = String(e);
@@ -2891,7 +2891,7 @@
         handleRewind();
       }
     } else if (action === "open-permissions") {
-      window.dispatchEvent(new CustomEvent("ocv:open-permissions"));
+      window.dispatchEvent(new CustomEvent("clawgo:open-permissions"));
     } else if (action === "open-stickers") {
       const url = "https://www.stickermule.com/claudecode";
       dbg("chat", "open-stickers", { url });
@@ -2949,7 +2949,7 @@
         await closePreview();
         appendCommandOutput(t("preview_closed"));
       } else {
-        const lastUrl = localStorage.getItem("ocv:preview-url");
+        const lastUrl = localStorage.getItem("clawgo:preview-url");
         if (lastUrl) {
           await openPreviewAndNotify(lastUrl);
         } else {
@@ -2961,7 +2961,7 @@
 
   async function handleStop() {
     await store.stop();
-    window.dispatchEvent(new Event("ocv:runs-changed"));
+    window.dispatchEvent(new Event("clawgo:runs-changed"));
   }
 
   async function handleResume(
@@ -3025,7 +3025,7 @@
         lastContinuableRun = null;
         goto(`/chat?run=${targetRunId}`, { replaceState: true });
       }
-      window.dispatchEvent(new Event("ocv:runs-changed"));
+      window.dispatchEvent(new Event("clawgo:runs-changed"));
     } catch (e) {
       // Fork sync failure → show error in overlay instead of error bar
       if (mode === "fork" && forkOverlay) {
@@ -3056,7 +3056,7 @@
     goto(`/chat?run=${sourceRunId}`, { replaceState: true });
     // Explicit reload — URL may not change if we're returning to the same run
     await loadRunProgressive(sourceRunId);
-    window.dispatchEvent(new Event("ocv:runs-changed"));
+    window.dispatchEvent(new Event("clawgo:runs-changed"));
   }
 
   async function handleForkRetry() {
@@ -3469,7 +3469,7 @@
   async function handleExitPlanClearContext() {
     if (!store.run) return;
     const runId = store.run.id;
-    const cwd = localStorage.getItem("ocv:project-cwd") || "";
+    const cwd = localStorage.getItem("clawgo:project-cwd") || "";
     dbg("chat", "ExitPlanMode: clear context + auto-accept");
 
     // Find the ExitPlanMode tool's permission request ID from timeline
@@ -3678,7 +3678,7 @@
             onclick={() => {
               store.remoteHostName = null;
               try {
-                localStorage.setItem("ocv:last-target", "");
+                localStorage.setItem("clawgo:last-target", "");
               } catch {
                 // localStorage may fail in restricted contexts
               }
@@ -3697,7 +3697,7 @@
               onclick={() => {
                 store.remoteHostName = host.name;
                 try {
-                  localStorage.setItem("ocv:last-target", host.name);
+                  localStorage.setItem("clawgo:last-target", host.name);
                 } catch {
                   // localStorage may fail in restricted contexts
                 }
@@ -3774,7 +3774,7 @@
           {@const welcomeCwd =
             store.effectiveCwd ||
             folderCwdOverride ||
-            localStorage.getItem("ocv:project-cwd") ||
+            localStorage.getItem("clawgo:project-cwd") ||
             ""}
           {#if welcomeCwd}
             <p
@@ -4831,7 +4831,7 @@
         permissionMode={store.permissionMode}
         cwd={store.effectiveCwd ||
           folderCwdOverride ||
-          localStorage.getItem("ocv:project-cwd") ||
+          localStorage.getItem("clawgo:project-cwd") ||
           ""}
         authMode={store.authMode}
         platformId={store.platformId ?? "anthropic"}

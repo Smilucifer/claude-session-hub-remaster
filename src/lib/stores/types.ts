@@ -68,7 +68,7 @@ export function assertTransition(from: SessionPhase, to: SessionPhase): void {
   if (from === to) return;
   const allowed = VALID_TRANSITIONS[from];
   if (!allowed || !allowed.has(to)) {
-    console.warn(`[ocv:phase] invalid transition: ${from} → ${to}`, new Error().stack);
+    console.warn(`[clawgo:phase] invalid transition: ${from} → ${to}`, new Error().stack);
   }
 }
 

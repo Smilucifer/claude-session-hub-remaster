@@ -2331,7 +2331,7 @@ impl SessionActor {
             );
         } else {
             self.emitter.emit_realtime(
-                "ocv:status-changed",
+                "clawgo:status-changed",
                 &serde_json::json!({"run_id": self.run_id.as_str(), "status": status_str}),
                 Some(&self.run_id),
             );
@@ -2391,7 +2391,7 @@ fn att_extension(mime: &str) -> &str {
     }
 }
 
-/// Save an attachment to `~/.opencovibe/runs/{run_id}/attachments/` and return the path.
+/// Save an attachment to `~/.claw-go/runs/{run_id}/attachments/` and return the path.
 /// Returns `None` on failure (non-fatal, logged as warning).
 fn save_attachment_to_disk(run_id: &str, att: &AttachmentData) -> Option<String> {
     let att_dir = crate::storage::run_dir(run_id).join("attachments");

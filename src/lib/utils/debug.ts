@@ -1,10 +1,10 @@
 /**
  * Debug logging utility with ring buffer, tag filtering, and structured log entries.
  *
- * Enable:  localStorage.setItem('ocv:debug', '1')           → all tags
- *          localStorage.setItem('ocv:debug', 'api,bus')      → only api and bus
- *          localStorage.setItem('ocv:debug', '-replay')      → exclude replay
- * Disable: localStorage.removeItem('ocv:debug')
+ * Enable:  localStorage.setItem('clawgo:debug', '1')           → all tags
+ *          localStorage.setItem('clawgo:debug', 'api,bus')      → only api and bus
+ *          localStorage.setItem('clawgo:debug', '-replay')      → exclude replay
+ * Disable: localStorage.removeItem('clawgo:debug')
  * URL:     ?debug
  */
 
@@ -21,7 +21,7 @@ const logBuffer: LogEntry[] = [];
 
 function shouldLog(tag: string): boolean {
   if (typeof window === "undefined") return false;
-  const filter = localStorage.getItem("ocv:debug") ?? "";
+  const filter = localStorage.getItem("clawgo:debug") ?? "";
   if (!filter) {
     // Check URL param
     if (new URL(window.location.href).searchParams.has("debug")) return true;
@@ -44,7 +44,7 @@ let _enabled: boolean | null = null;
 function enabled(): boolean {
   if (_enabled === null) {
     if (typeof window === "undefined") return false;
-    const filter = localStorage.getItem("ocv:debug");
+    const filter = localStorage.getItem("clawgo:debug");
     if (filter) {
       _enabled = true; // has a filter value — enabled (shouldLog handles per-tag)
     } else {
@@ -75,7 +75,7 @@ export function dbg(tag: string, ...args: unknown[]): void {
   const entry: LogEntry = { ts: timestamp, tag, level: "debug", args: serialized };
   logBuffer.push(entry);
   if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.shift();
-  console.debug(`%c[ocv:${tag}]`, "color:#6cf", ...args);
+  console.debug(`%c[clawgo:${tag}]`, "color:#6cf", ...args);
 }
 
 /** Always log, regardless of debug mode (for errors/warnings) */
@@ -85,7 +85,7 @@ export function dbgWarn(tag: string, ...args: unknown[]): void {
   const entry: LogEntry = { ts: timestamp, tag, level: "warn", args: serialized };
   logBuffer.push(entry);
   if (logBuffer.length > MAX_LOG_ENTRIES) logBuffer.shift();
-  console.warn(`[ocv:${tag}]`, ...args);
+  console.warn(`[clawgo:${tag}]`, ...args);
 }
 
 /** Get all buffered log entries as a single string */
@@ -141,17 +141,17 @@ export function isDebugMode(): boolean {
 /** Get current debug filter string */
 export function getDebugFilter(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("ocv:debug") ?? "";
+  return localStorage.getItem("clawgo:debug") ?? "";
 }
 
 /** Toggle debug mode on/off, or set a tag filter */
 export function setDebugMode(on: boolean | string): void {
   if (typeof on === "string") {
-    localStorage.setItem("ocv:debug", on);
+    localStorage.setItem("clawgo:debug", on);
   } else if (on) {
-    localStorage.setItem("ocv:debug", "1");
+    localStorage.setItem("clawgo:debug", "1");
   } else {
-    localStorage.removeItem("ocv:debug");
+    localStorage.removeItem("clawgo:debug");
   }
   refreshDebugState();
 }

@@ -24,7 +24,7 @@ fn build_client() -> Client {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(10))
-        .user_agent(format!("OpenCovibe/{}", env!("CARGO_PKG_VERSION")));
+        .user_agent(format!("ClawGO/{}", env!("CARGO_PKG_VERSION")));
 
     if let Some(proxy_url) = resolve_proxy_url(
         settings.user.github_proxy_enabled,
@@ -269,8 +269,8 @@ mod tests {
         let body = json!({
             "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
             "assets": [
-                { "name": "OpenCovibe-0.1.14.zip", "browser_download_url": "https://example.com/a.zip" },
-                { "name": "OpenCovibe_0.1.14_universal.dmg", "browser_download_url": "https://example.com/a.dmg" }
+                { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
+                { "name": "ClawGO_1.2.0_universal.dmg", "browser_download_url": "https://example.com/a.dmg" }
             ]
         });
         assert_eq!(
@@ -284,9 +284,9 @@ mod tests {
         let body = json!({
             "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
             "assets": [
-                { "name": "OpenCovibe-0.1.14.zip", "browser_download_url": "https://example.com/a.zip" },
-                { "name": "OpenCovibe_0.1.14_x64-setup.msi", "browser_download_url": "https://example.com/a.msi" },
-                { "name": "OpenCovibe_0.1.14_x64.exe", "browser_download_url": "https://example.com/a.exe" }
+                { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
+                { "name": "ClawGO_1.2.0_x64-setup.msi", "browser_download_url": "https://example.com/a.msi" },
+                { "name": "ClawGO_1.2.0_x64.exe", "browser_download_url": "https://example.com/a.exe" }
             ]
         });
         // .msi preferred over .exe
@@ -302,8 +302,8 @@ mod tests {
         let body = json!({
             "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
             "assets": [
-                { "name": "OpenCovibe-0.1.14.zip", "browser_download_url": "https://example.com/a.zip" },
-                { "name": "OpenCovibe_0.1.14_x64.exe", "browser_download_url": "https://example.com/a.exe" }
+                { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
+                { "name": "ClawGO_1.2.0_x64.exe", "browser_download_url": "https://example.com/a.exe" }
             ]
         });
         assert_eq!(
@@ -318,8 +318,8 @@ mod tests {
         let body = json!({
             "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.31",
             "assets": [
-                { "name": "OpenCovibe_0.1.31_universal.dmg", "browser_download_url": "https://example.com/a.dmg" },
-                { "name": "OpenCovibe_0.1.31_x64-setup.zip", "browser_download_url": "https://example.com/a.zip" }
+                { "name": "ClawGO_1.2.0_universal.dmg", "browser_download_url": "https://example.com/a.dmg" },
+                { "name": "ClawGO_1.2.0_x64-setup.zip", "browser_download_url": "https://example.com/a.zip" }
             ]
         });
         assert_eq!(
@@ -333,7 +333,7 @@ mod tests {
         let body = json!({
             "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
             "assets": [
-                { "name": "OpenCovibe_0.1.14.AppImage", "browser_download_url": "https://example.com/a.AppImage" }
+                { "name": "ClawGO_1.2.0.AppImage", "browser_download_url": "https://example.com/a.AppImage" }
             ]
         });
         assert_eq!(

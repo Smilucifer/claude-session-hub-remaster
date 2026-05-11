@@ -47,7 +47,7 @@
   let imageDataUrl = $state("");
 
   let projectCwd = $state(
-    typeof window !== "undefined" ? (localStorage.getItem("ocv:project-cwd") ?? "") : "",
+    typeof window !== "undefined" ? (localStorage.getItem("clawgo:project-cwd") ?? "") : "",
   );
 
   // Track original content to detect dirty state
@@ -202,14 +202,14 @@
       const path = (e as CustomEvent).detail?.path;
       if (path) loadFilePreview(path);
     }
-    window.addEventListener("ocv:explorer-file", onExplorerFile);
+    window.addEventListener("clawgo:explorer-file", onExplorerFile);
 
     // Listen for diff selection from sidebar Git tab (layout)
     function onExplorerDiff(e: Event) {
       const path = (e as CustomEvent).detail?.path;
       if (path) openFileDiff(path);
     }
-    window.addEventListener("ocv:explorer-diff", onExplorerDiff);
+    window.addEventListener("clawgo:explorer-diff", onExplorerDiff);
 
     // Listen for project cwd changes from layout
     function onProjectChanged(e: Event) {
@@ -244,7 +244,7 @@
         const restoreCwd = cwd;
         dbg("explorer", "restoring cached file on project switch", { cwd, cached });
         window.dispatchEvent(
-          new CustomEvent("ocv:explorer-file-selected", { detail: { path: cached } }),
+          new CustomEvent("clawgo:explorer-file-selected", { detail: { path: cached } }),
         );
         loadFilePreview(cached, true).then((result) => {
           if (result === "failed") {
@@ -256,7 +256,7 @@
             imageDataUrl = "";
             fileError = "";
             window.dispatchEvent(
-              new CustomEvent("ocv:explorer-file-selected", { detail: { path: "" } }),
+              new CustomEvent("clawgo:explorer-file-selected", { detail: { path: "" } }),
             );
           }
         });
@@ -266,11 +266,11 @@
         fileContent = "";
         originalContent = "";
         window.dispatchEvent(
-          new CustomEvent("ocv:explorer-file-selected", { detail: { path: "" } }),
+          new CustomEvent("clawgo:explorer-file-selected", { detail: { path: "" } }),
         );
       }
     }
-    window.addEventListener("ocv:project-changed", onProjectChanged);
+    window.addEventListener("clawgo:project-changed", onProjectChanged);
 
     // Restore cached file state on mount (e.g. navigating back to /explorer)
     const cached = getCachedFile(projectCwd);
@@ -278,7 +278,7 @@
       const restoreCwd = projectCwd;
       dbg("explorer", "restoring cached file on mount", { cwd: projectCwd, cached });
       window.dispatchEvent(
-        new CustomEvent("ocv:explorer-file-selected", { detail: { path: cached } }),
+        new CustomEvent("clawgo:explorer-file-selected", { detail: { path: cached } }),
       );
       loadFilePreview(cached, true).then((result) => {
         if (result === "failed") {
@@ -290,7 +290,7 @@
           imageDataUrl = "";
           fileError = "";
           window.dispatchEvent(
-            new CustomEvent("ocv:explorer-file-selected", { detail: { path: "" } }),
+            new CustomEvent("clawgo:explorer-file-selected", { detail: { path: "" } }),
           );
         }
       });
@@ -305,9 +305,9 @@
         });
         setCachedFile(projectCwd, selectedFilePath);
       }
-      window.removeEventListener("ocv:explorer-file", onExplorerFile);
-      window.removeEventListener("ocv:explorer-diff", onExplorerDiff);
-      window.removeEventListener("ocv:project-changed", onProjectChanged);
+      window.removeEventListener("clawgo:explorer-file", onExplorerFile);
+      window.removeEventListener("clawgo:explorer-diff", onExplorerDiff);
+      window.removeEventListener("clawgo:project-changed", onProjectChanged);
     };
   });
 </script>

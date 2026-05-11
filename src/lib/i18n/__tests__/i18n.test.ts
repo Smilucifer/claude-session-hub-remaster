@@ -81,7 +81,7 @@ describe("i18n", () => {
 
     initLocale();
     switchLocale("en");
-    delete lsStore["ocv:locale"];
+    delete lsStore["clawgo:locale"];
     delete lsStore["PARAGLIDE_LOCALE"];
   });
 
@@ -152,31 +152,31 @@ describe("i18n", () => {
     expect(currentLocale()).toBe("zh-CN");
   });
 
-  // ── localStorage persistence (new key: ocv:locale) ──
+  // ── localStorage persistence (new key: clawgo:locale) ──
 
   it("persists locale to localStorage on switch", () => {
     initLocale();
     switchLocale("zh-CN");
-    expect(lsStore["ocv:locale"]).toBe("zh-CN");
+    expect(lsStore["clawgo:locale"]).toBe("zh-CN");
   });
 
   it("reads locale from localStorage on init", () => {
-    lsStore["ocv:locale"] = "zh-CN";
+    lsStore["clawgo:locale"] = "zh-CN";
     initLocale();
     expect(currentLocale()).toBe("zh-CN");
   });
 
   // ── Legacy localStorage migration ──
 
-  it("migrates PARAGLIDE_LOCALE to ocv:locale on init", () => {
+  it("migrates PARAGLIDE_LOCALE to clawgo:locale on init", () => {
     lsStore["PARAGLIDE_LOCALE"] = "zh-CN";
     initLocale();
     expect(currentLocale()).toBe("zh-CN");
-    expect(lsStore["ocv:locale"]).toBe("zh-CN");
+    expect(lsStore["clawgo:locale"]).toBe("zh-CN");
   });
 
-  it("prefers ocv:locale over PARAGLIDE_LOCALE", () => {
-    lsStore["ocv:locale"] = "en";
+  it("prefers clawgo:locale over PARAGLIDE_LOCALE", () => {
+    lsStore["clawgo:locale"] = "en";
     lsStore["PARAGLIDE_LOCALE"] = "zh-CN";
     initLocale();
     expect(currentLocale()).toBe("en");

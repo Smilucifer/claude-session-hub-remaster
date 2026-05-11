@@ -30,52 +30,52 @@ describe("loadRemovedCwds", () => {
   });
 
   it("loads from current key", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["/projA", "/projB"]);
+    store["clawgo:removed-cwds"] = JSON.stringify(["/projA", "/projB"]);
     const result = loadRemovedCwds();
     expect(result).toEqual(["/projA", "/projB"]);
   });
 
   it("merges legacy key and removes it", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["/projA"]);
-    store["ocv:hidden-cwds"] = JSON.stringify(["/projB"]);
+    store["clawgo:removed-cwds"] = JSON.stringify(["/projA"]);
+    store["clawgo:hidden-cwds"] = JSON.stringify(["/projB"]);
     const result = loadRemovedCwds();
     expect(result).toContain("/projA");
     expect(result).toContain("/projB");
     expect(result).toHaveLength(2);
     // Legacy key should be removed
-    expect(store["ocv:hidden-cwds"]).toBeUndefined();
+    expect(store["clawgo:hidden-cwds"]).toBeUndefined();
     // Merged result should be persisted
-    expect(JSON.parse(store["ocv:removed-cwds"])).toEqual(result);
+    expect(JSON.parse(store["clawgo:removed-cwds"])).toEqual(result);
   });
 
   it("deduplicates after normalization", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["/proj", "/proj/", "/proj"]);
+    store["clawgo:removed-cwds"] = JSON.stringify(["/proj", "/proj/", "/proj"]);
     const result = loadRemovedCwds();
     expect(result).toEqual(["/proj"]);
   });
 
   it("filters empty and root values", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["", "/", "  ", "/real"]);
+    store["clawgo:removed-cwds"] = JSON.stringify(["", "/", "  ", "/real"]);
     const result = loadRemovedCwds();
     expect(result).toEqual(["/real"]);
   });
 
   it("handles corrupted current key gracefully", () => {
-    store["ocv:removed-cwds"] = "not-json";
-    store["ocv:hidden-cwds"] = JSON.stringify(["/projB"]);
+    store["clawgo:removed-cwds"] = "not-json";
+    store["clawgo:hidden-cwds"] = JSON.stringify(["/projB"]);
     const result = loadRemovedCwds();
     expect(result).toContain("/projB");
   });
 
   it("handles corrupted legacy key gracefully", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["/projA"]);
-    store["ocv:hidden-cwds"] = "{bad}";
+    store["clawgo:removed-cwds"] = JSON.stringify(["/projA"]);
+    store["clawgo:hidden-cwds"] = "{bad}";
     const result = loadRemovedCwds();
     expect(result).toEqual(["/projA"]);
   });
 
   it("normalizes Windows paths", () => {
-    store["ocv:removed-cwds"] = JSON.stringify(["c:\\Users\\proj\\"]);
+    store["clawgo:removed-cwds"] = JSON.stringify(["c:\\Users\\proj\\"]);
     const result = loadRemovedCwds();
     expect(result).toEqual(["C:/Users/proj"]);
   });

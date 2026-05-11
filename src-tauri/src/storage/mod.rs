@@ -23,14 +23,14 @@ use std::path::PathBuf;
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn data_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("OPENCOVIBE_DATA_DIR") {
+    if let Ok(path) = std::env::var("CLAW_GO_DATA_DIR") {
         if !path.trim().is_empty() {
             return PathBuf::from(path);
         }
     }
 
     let home = dirs_next().expect("Could not determine home directory");
-    home.join(".opencovibe")
+    home.join(".claw-go")
 }
 
 pub fn runs_dir() -> PathBuf {
@@ -108,36 +108,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn data_dir_uses_opencovibe_data_dir_override() {
+    fn data_dir_uses_claw_go_data_dir_override() {
         let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
 
-        std::env::set_var("OPENCOVIBE_DATA_DIR", tmp.path());
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
         assert_eq!(data_dir(), tmp.path());
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
     }
 
     #[test]
-    fn data_dir_ignores_empty_opencovibe_data_dir_override() {
+    fn data_dir_ignores_empty_claw_go_data_dir_override() {
         let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let previous = std::env::var_os("OPENCOVIBE_DATA_DIR");
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
 
-        std::env::set_var("OPENCOVIBE_DATA_DIR", "");
+        std::env::set_var("CLAW_GO_DATA_DIR", "");
         assert_eq!(
             data_dir(),
             dirs_next()
                 .expect("Could not determine home directory")
-                .join(".opencovibe")
+                .join(".claw-go")
         );
 
         match previous {
-            Some(value) => std::env::set_var("OPENCOVIBE_DATA_DIR", value),
-            None => std::env::remove_var("OPENCOVIBE_DATA_DIR"),
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
         }
     }
 }

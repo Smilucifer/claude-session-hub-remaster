@@ -2,7 +2,7 @@
  * Session store reducer tests.
  *
  * Tests the core reducer logic (applyEvent / applyEventBatch) using
- * event fixtures derived from real ~/.opencovibe/runs/ data.
+ * event fixtures derived from real ~/.claw-go/runs/ data.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { BusEvent, TimelineEntry } from "$lib/types";

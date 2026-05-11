@@ -339,7 +339,7 @@ export class RoomStore {
         this.room = null;
       }
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("ocv:runs-changed"));
+        window.dispatchEvent(new Event("clawgo:runs-changed"));
       }
     } catch (e) {
       this.error = errorMessage(e);

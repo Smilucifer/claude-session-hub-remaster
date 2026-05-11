@@ -17,7 +17,7 @@
 
   async function loadDiff(staged: boolean) {
     const cwd =
-      typeof window !== "undefined" ? localStorage.getItem("ocv:project-cwd") || "/" : "/";
+      typeof window !== "undefined" ? localStorage.getItem("clawgo:project-cwd") || "/" : "/";
     loading = true;
     try {
       diff = await api.getGitDiff(cwd, staged);

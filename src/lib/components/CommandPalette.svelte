@@ -103,9 +103,9 @@
         else if (cmd.payload === "folder-browser") onOpenFolderBrowser?.();
         else if (cmd.payload === "version-info") showVersionInfo();
         else if (cmd.payload === "permissions") {
-          window.dispatchEvent(new CustomEvent("ocv:open-permissions"));
+          window.dispatchEvent(new CustomEvent("clawgo:open-permissions"));
         } else if (cmd.payload === "memo") {
-          window.dispatchEvent(new CustomEvent("ocv:toggle-memo"));
+          window.dispatchEvent(new CustomEvent("clawgo:toggle-memo"));
         }
         break;
 
@@ -168,15 +168,15 @@
         break;
 
       case "export_conversation_html": {
-        dbg("palette", "dispatching ocv:export-html");
+        dbg("palette", "dispatching clawgo:export-html");
         let acked = false;
         const onAck = () => {
           acked = true;
         };
-        window.addEventListener("ocv:export-html-ack", onAck, { once: true });
-        window.dispatchEvent(new CustomEvent("ocv:export-html"));
+        window.addEventListener("clawgo:export-html-ack", onAck, { once: true });
+        window.dispatchEvent(new CustomEvent("clawgo:export-html"));
         setTimeout(() => {
-          window.removeEventListener("ocv:export-html-ack", onAck);
+          window.removeEventListener("clawgo:export-html-ack", onAck);
           if (!acked) dbgWarn("palette", "export-html: no ack — not on chat page?");
         }, 500);
         break;

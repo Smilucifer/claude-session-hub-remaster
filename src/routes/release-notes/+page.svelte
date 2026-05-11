@@ -24,7 +24,7 @@
     getCliVersionInfo_cached()?.installed ??
       (() => {
         try {
-          return localStorage.getItem("ocv:cli-version") ?? "";
+          return localStorage.getItem("clawgo:cli-version") ?? "";
         } catch {
           return "";
         }

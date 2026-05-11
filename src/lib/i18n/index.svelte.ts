@@ -1,5 +1,5 @@
 /**
- * Self-built i18n runtime for OpenCovibe.
+ * Self-built i18n runtime for Claw GO.
  *
  * Supports: `{variable}` interpolation, fallback chain (locale -> en -> raw key),
  * reactive locale via Svelte 5 $state, localStorage persistence, async loading.
@@ -20,7 +20,7 @@ export const baseLocale = BASE_LOCALE;
 export const locales = SUPPORTED_LOCALES;
 
 // ── localStorage key migration ──────────────────────────────────
-const LOCAL_STORAGE_KEY = "ocv:locale";
+const LOCAL_STORAGE_KEY = "clawgo:locale";
 const LEGACY_STORAGE_KEY = "PARAGLIDE_LOCALE";
 
 // ── Message cache ───────────────────────────────────────────────
@@ -70,7 +70,7 @@ function persistLocale(locale: string): void {
 
 /**
  * Detect and set the initial locale.
- * Priority: localStorage (ocv:locale) -> legacy (PARAGLIDE_LOCALE) -> navigator.languages -> baseLocale.
+ * Priority: localStorage (clawgo:locale) -> legacy (PARAGLIDE_LOCALE) -> navigator.languages -> baseLocale.
  * Must be called once in root layout before any t() usage.
  */
 export function initLocale(): void {
