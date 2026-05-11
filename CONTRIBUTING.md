@@ -4,8 +4,8 @@ Welcome! We're glad you're interested in contributing to Claw GO. Whether it's a
 
 ## Ways to Contribute
 
-- **Bug reports** — [Open a bug report](https://github.com/AnyiWang/OpenCovibe/issues/new?template=bug_report.yml)
-- **Feature requests** — [Open a feature request](https://github.com/AnyiWang/OpenCovibe/issues/new?template=feature_request.yml)
+- **Bug reports** — [Open a bug report](https://github.com/Smilucifer/ClawGO/issues/new?template=bug_report.yml)
+- **Feature requests** — [Open a feature request](https://github.com/Smilucifer/ClawGO/issues/new?template=feature_request.yml)
 - **Code** — Fix bugs or implement features via pull requests
 - **Translations** — Help translate the UI into more languages
 - **Documentation** — Improve README, guides, or inline docs
@@ -13,7 +13,7 @@ Welcome! We're glad you're interested in contributing to Claw GO. Whether it's a
 ## Development Setup
 
 ```bash
-git clone https://github.com/AnyiWang/OpenCovibe.git
+git clone https://github.com/Smilucifer/ClawGO.git
 cd ClawGO
 npm install
 npm run tauri dev

@@ -4,8 +4,8 @@ version = "1.2.0"
 edition = "2021"
 description = "Local-first desktop app for AI-assisted vibe coding"
 license = "Apache-2.0"
-repository = "https://github.com/AnyiWang/OpenCovibe"
-homepage = "https://github.com/AnyiWang/OpenCovibe"
+repository = "https://github.com/Smilucifer/ClawGO"
+homepage = "https://github.com/Smilucifer/ClawGO"
 
 [lib]
 name = "claw_go_lib"

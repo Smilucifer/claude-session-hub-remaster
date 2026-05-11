@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn test_select_download_url_prefers_dmg() {
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14",
             "assets": [
                 { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
                 { "name": "ClawGO_1.2.0_universal.dmg", "browser_download_url": "https://example.com/a.dmg" }
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_select_download_url_prefers_msi() {
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14",
             "assets": [
                 { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
                 { "name": "ClawGO_1.2.0_x64-setup.msi", "browser_download_url": "https://example.com/a.msi" },
@@ -300,7 +300,7 @@ mod tests {
     fn test_select_download_url_exe_fallback() {
         // .msi not present → should fall back to .exe
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14",
             "assets": [
                 { "name": "ClawGO-1.2.0.zip", "browser_download_url": "https://example.com/a.zip" },
                 { "name": "ClawGO_1.2.0_x64.exe", "browser_download_url": "https://example.com/a.exe" }
@@ -316,7 +316,7 @@ mod tests {
     fn test_select_download_url_zip_fallback_on_windows() {
         // No .msi or .exe → should fall back to .zip
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.31",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.31",
             "assets": [
                 { "name": "ClawGO_1.2.0_universal.dmg", "browser_download_url": "https://example.com/a.dmg" },
                 { "name": "ClawGO_1.2.0_x64-setup.zip", "browser_download_url": "https://example.com/a.zip" }
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn test_select_download_url_prefers_appimage() {
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14",
             "assets": [
                 { "name": "ClawGO_1.2.0.AppImage", "browser_download_url": "https://example.com/a.AppImage" }
             ]
@@ -345,12 +345,12 @@ mod tests {
     #[test]
     fn test_select_download_url_falls_back_to_html() {
         let body = json!({
-            "html_url": "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14",
+            "html_url": "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14",
             "assets": []
         });
         assert_eq!(
             select_download_url_for_exts(&body, &[".dmg"]),
-            "https://github.com/AnyiWang/OpenCovibe/releases/tag/v0.1.14"
+            "https://github.com/Smilucifer/ClawGO/releases/tag/v0.1.14"
         );
     }
 

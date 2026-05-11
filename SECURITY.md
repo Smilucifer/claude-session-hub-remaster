@@ -15,7 +15,7 @@
 
 Report via GitHub's built-in private reporting:
 
-https://github.com/AnyiWang/OpenCovibe/security/advisories/new
+https://github.com/Smilucifer/ClawGO/security/advisories/new
 
 ### Backup: Email
 
