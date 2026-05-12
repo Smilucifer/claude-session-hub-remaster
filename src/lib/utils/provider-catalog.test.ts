@@ -102,5 +102,10 @@ describe("Phase 7 provider catalog", () => {
     expect(providerIdForRun("codex")).toBe("codex");
     expect(providerIdForRun("claude")).toBe("claude");
   });
+
+  it("falls back to claude for custom-* platform IDs", () => {
+    expect(providerIdForRun("claude", "custom-1234567890")).toBe("claude");
+    expect(providerIdForRun("claude", "custom-abc-def")).toBe("claude");
+  });
 });
 

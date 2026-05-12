@@ -236,6 +236,34 @@
 
   function handleProviderChange(providerId: string) {
     if (store.run) return;
+
+    // Custom provider: custom-* platform IDs use Claude-compatible execution
+    if (providerId.startsWith("custom-")) {
+      store.agent = "claude";
+      store.platformId = providerId;
+      store.connectionProfileId = null;
+      store.permissionMode = "";
+      store.permissionModeSetByUser = false;
+      store.permissionModePersistFailed = false;
+      const cred = findCredential(settings?.platform_credentials ?? [], providerId);
+      store.model = cred?.models?.[0] ?? "";
+      void api.updateUserSettings({ active_platform_id: providerId }).catch((e) => {
+        dbgWarn("chat", "failed to persist custom provider change", e);
+      });
+      void loadAgentSettingsFor("claude").then((loaded) => {
+        if (store.run || store.agent !== "claude" || store.permissionModeSetByUser) return;
+        if (loaded?.plan_mode) {
+          store.permissionMode = "plan";
+          store.permissionModeSetByUser = true;
+        } else if (settings?.permission_mode) {
+          const cliName = APP_TO_CLI_MODE[settings.permission_mode] ?? settings.permission_mode;
+          store.permissionMode = cliName;
+          store.permissionModeSetByUser = true;
+        }
+      });
+      return;
+    }
+
     const provider = getPhase7Provider(providerId);
     const agent = provider.executionAgent;
     store.agent = agent;
@@ -879,7 +907,18 @@
     store.timeline.length === 0 && !store.streamingText && !store.run && store.phase !== "loading",
   );
   let activeProviderId = $derived(providerIdForRun(store.agent, store.platformId));
-  let activeProvider = $derived(getPhase7Provider(activeProviderId));
+  let activeProvider = $derived.by(() => {
+    if (store.platformId?.startsWith("custom-")) {
+      const cred = findCredential(settings?.platform_credentials ?? [], store.platformId);
+      return {
+        ...getPhase7Provider(activeProviderId),
+        id: store.platformId,
+        label: cred?.name ?? "Custom",
+        mode: "claude_compatible_api" as const,
+      };
+    }
+    return getPhase7Provider(activeProviderId);
+  });
   let _startupConnectionProfiles = $derived(
     (settings?.connection_profiles ?? []).filter(
       (profile) => profile.enabled !== false && profile.agent === store.agent,
@@ -4813,7 +4852,7 @@
       <PromptInput
         bind:this={promptRef}
         agent={store.agent}
-        providerId={activeProviderId}
+        providerId={store.platformId?.startsWith("custom-") ? store.platformId : activeProviderId}
         running={store.isActivelyRunning}
         disabled={inputBlockedByPermission}
         pendingPermission={store.hasInlinePermission}

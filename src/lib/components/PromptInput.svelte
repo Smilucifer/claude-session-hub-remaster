@@ -2061,6 +2061,7 @@
         {#if !hasRun && onAgentChange}
           <AgentSelector
             value={providerId || agent}
+            {platformCredentials}
             onchange={(a) => (onProviderChange ?? onAgentChange)?.(a)}
           />
         {/if}
