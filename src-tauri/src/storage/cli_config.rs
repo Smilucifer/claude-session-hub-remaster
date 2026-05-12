@@ -2,6 +2,10 @@ use crate::storage::teams::claude_home_dir;
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// Top-level keys in `~/.claude/settings.json` that contain secrets.
+/// Must stay in sync with `session.rs:AUTH_KEYS` and `provider_claude_config.rs`.
+pub const SENSITIVE_KEYS: &[&str] = &["apiKey", "primaryApiKey"];
+
 /// Path to the user-level CLI settings file: ~/.claude/settings.json
 fn cli_config_path() -> PathBuf {
     claude_home_dir().join("settings.json")
@@ -74,8 +78,6 @@ pub fn update_cli_config(patch: Value) -> Result<Value, String> {
     let map = config
         .as_object_mut()
         .expect("load_cli_config always returns object");
-
-    const SENSITIVE_KEYS: &[&str] = &["apiKey", "primaryApiKey"];
 
     for (key, value) in patch_obj {
         if value.is_null() {

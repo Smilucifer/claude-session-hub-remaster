@@ -362,6 +362,26 @@ fn list_configured_claude(cwd: Option<&str>) -> Vec<ConfiguredMcpServer> {
         }
     }
 
+    // 4. Claw GO managed servers (UserSettings.mcp_servers) — scope="managed"
+    //    Managed servers override native user-scope servers with the same name.
+    {
+        let settings = crate::storage::settings::get_user_settings();
+        if !settings.mcp_servers.is_empty() {
+            // Remove native entries that will be replaced by managed ones
+            let managed_names: Vec<String> = settings.mcp_servers.keys().cloned().collect();
+            servers.retain(|s| {
+                !(s.scope == "user" && managed_names.iter().any(|n| n == &s.name))
+            });
+            for (name, config) in &settings.mcp_servers {
+                servers.push(parse_mcp_entry(name, config, "managed"));
+            }
+            log::debug!(
+                "[mcp_registry] managed servers from Claw GO settings: {}",
+                settings.mcp_servers.len()
+            );
+        }
+    }
+
     log::debug!(
         "[mcp_registry] list_configured: {} total servers",
         servers.len()

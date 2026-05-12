@@ -1,13 +1,12 @@
 # Provider-Native Connection Entry and Settings Design
 
-**Date:** 2026-05-06  
-**Status:** Partially implemented  
-**Scope:** DeepSeek, GLM, QWEN, KIMI provider entry design, settings design, and native launch-config generation
+**Date:** 2026-05-06
+**Status:** Done (Phase 9.z — 2026-05-12)
+**Scope:** DeepSeek, GLM, QWEN, KIMI, Custom Provider entry design, settings design, and native launch-config generation
 
-**Implementation status (2026-05-06):**
-- Completed: provider catalog expansion for QWEN and KIMI, DeepSeek model narrowing to `deepseek-v4-pro` / `deepseek-v4-flash`, settings-page provider-card field rules, room/chat-facing provider identity coverage, and provider-native launch-config builder wiring in `src-tauri/src/commands/session.rs`.
-- Completed verification: targeted frontend tests for provider catalog, room UI labels, continuable-run lookup, and room-store participant creation all pass.
-- Environment blocker: targeted Rust test binaries compile successfully but still fail to start on this Windows machine with the pre-existing runtime error `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)`, so full Rust green verification remains blocked by environment rather than current source-level compile errors.
+**Implementation status (2026-05-12):**
+- All Phase 9.y items completed: provider catalog expansion, DeepSeek model narrowing, settings-page provider-card field rules, room/chat-facing provider identity coverage, provider-native launch-config builder wiring, tier-labeled model dropdown, extra_env whitelist, collapsible config panel, old ID removal, label disambiguation.
+- Phase 9.z completed: Custom Provider support (`custom-*` platform routing, CRUD UI, URL validation, collision guard), native config merge (`provider_config_json_from_env` uses native `~/.claude/settings.json` as base, strips secrets, preserves hooks/plugins/env), managed MCP server injection (`mcp_registry.rs` 5th source), `SENSITIVE_KEYS` centralization (`cli_config.rs` pub const shared with `session.rs` and `provider_claude_config.rs`).
 
 ---
 

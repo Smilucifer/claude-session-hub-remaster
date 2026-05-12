@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 9.y (2026-05-09). Provider presets cleanup, extra_env whitelist, tier-labeled model dropdown, collapsible advanced config panel, third-party model hot-switching, old ID removal (mimo-pro/xiaomi/mimo), provider label disambiguation.
+**Current phase:** Phase 9.z (2026-05-12). Custom Provider support, native config merge (hooks/plugins/env survive `--settings`), managed MCP server injection, SENSITIVE_KEYS centralization.
 
 ## Standard workflow
 
@@ -170,18 +170,22 @@ When fixing bugs around chat, resume, room participation, or provider support, a
 
 This codebase intentionally separates what the UI presents as a provider from which execution agent actually runs the work.
 
-Current providers (Phase 9.y):
+Current providers (Phase 9.z):
 - **Official CLI providers** (subscription): Claude, Codex — use their native CLI with bypass/yolo permissions.
 - **Claude-compatible API providers**: DeepSeek, GLM, QWEN, KIMI, MiMo Pro, Packy CX2CC — displayed as first-class providers but execute through Claude Code sessions with `platform_id`-based configuration injection.
+- **Custom providers**: User-created `custom-{timestamp}` endpoints configured via Settings → Connection. Use the same `build_parameterized_env` path as parameterized providers. Require explicit base_url and model.
 
 Key files:
 - `src/lib/utils/provider-catalog.ts`: PHASE7_PROVIDERS array, provider metadata, and label resolution.
 - `src/lib/utils/platform-presets.ts`: platform-specific base URLs and configuration defaults.
 
-Provider-native launch config generation (Phase 9.y):
+Provider-native launch config generation (Phase 9.z):
 - DeepSeek and MiMo Pro use a fixed-URL template (API key only; default model and base_url from preset).
 - GLM, QWEN, KIMI use a shared parameterized template (API key + base URL + model).
+- Custom providers (`custom-*`) use the same parameterized template as GLM/QWEN/KIMI, with user-provided base_url and model. Validated via `validate_provider_credential` which requires api_key, base_url, and model.
 - All providers use per-session temp JSON (`session-{run_id}.json`) generated fresh from the latest credential in settings, passed via `claude --settings <temp-json>` to override global `~/.claude/settings.json`.
+- The temp JSON now merges native `~/.claude/settings.json` as the base (preserving hooks, plugins, env vars, MCP servers), then strips sensitive keys (`apiKey`, `primaryApiKey`), and overlays provider-specific fields. This ensures user config (hooks, enabledPlugins, enabledMcpjsonServers) survives the `--settings` override.
+- Managed MCP servers (`UserSettings.mcp_servers`) are additively merged into the temp JSON alongside native MCP servers.
 - User-configurable env vars are stored in `PlatformCredential.extra_env` and merged via a whitelist (`ALLOWED_EXTRA_ENV_KEYS` in `provider_claude_config.rs`). Only model tier overrides and effort level are allowed; stability vars cannot be overwritten.
 - Chat page model dropdown shows tier-labeled models (Opus/Sonnet/Haiku) via `expandModelsToTiers`, with extra_env overrides applied. Model hot-switching via `set_model` control protocol works for both Anthropic and third-party providers.
 - Packy CX2CC uses fixed-URL template (API key only; base URL https://www.packyapi.com from preset).
@@ -338,6 +342,7 @@ Key phases and their status:
 | 9 | History page rewrite: CC native sessions, subagent filtering, simplified UI | [done] |
 | 9.x | Room adapter timeout fix: activity-aware timeout, cancel turn, frontend UX | [done] |
 | 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel, old ID removal, label disambiguation | [done] |
+| 9.z | Custom Provider support, native config merge, managed MCP injection, SENSITIVE_KEYS centralization | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

@@ -1722,10 +1722,9 @@ fn resolve_shell_auth() -> (Option<String>, Option<String>) {
 
 /// Pure function: check if a JSON config value contains a non-empty auth key.
 /// Checks both `apiKey` and `primaryApiKey` (used by Max/Team plans).
-/// See SENSITIVE_KEYS in cli_config.rs:78.
+/// Uses shared SENSITIVE_KEYS from cli_config.rs.
 fn config_value_has_auth_key(config: &serde_json::Value) -> bool {
-    const AUTH_KEYS: &[&str] = &["apiKey", "primaryApiKey"];
-    AUTH_KEYS.iter().any(|k| {
+    crate::storage::cli_config::SENSITIVE_KEYS.iter().any(|k| {
         config
             .get(k)
             .and_then(|v| v.as_str())

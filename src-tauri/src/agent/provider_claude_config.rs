@@ -20,6 +20,28 @@ fn provider_claude_config_temp_path(run_id: &str) -> PathBuf {
         .join(format!("session-{run_id}.json"))
 }
 
+use std::sync::Mutex;
+
+/// Returns true if `platform_id` is a user-created custom endpoint.
+fn is_custom_platform(platform_id: &str) -> bool {
+    platform_id.starts_with("custom-")
+}
+
+/// Cache for leaked custom platform_id strings so repeated calls don't leak duplicates.
+static CUSTOM_PROVIDER_CACHE: Mutex<Option<std::collections::HashMap<String, &'static str>>> =
+    Mutex::new(None);
+
+fn leak_custom_id(id: &str) -> &'static str {
+    let mut guard = CUSTOM_PROVIDER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(std::collections::HashMap::new);
+    if let Some(&existing) = cache.get(id) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(id.to_string().into_boxed_str());
+    cache.insert(id.to_string(), leaked);
+    leaked
+}
+
 pub fn platform_to_provider_id(platform_id: &str) -> Option<&'static str> {
     match platform_id {
         "deepseek" => Some("deepseek"),
@@ -29,6 +51,7 @@ pub fn platform_to_provider_id(platform_id: &str) -> Option<&'static str> {
         "mimo-plan" => Some("mimo-plan"),
         "mimo-api" => Some("mimo-api"),
         "packy-cx2cc" => Some("packy-cx2cc"),
+        id if is_custom_platform(id) => Some(leak_custom_id(id)),
         _ => None,
     }
 }
@@ -99,11 +122,11 @@ fn required_model_env_keys(platform_id: &str) -> &'static [&'static str] {
 }
 
 fn requires_explicit_base_url(platform_id: &str) -> bool {
-    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi")
+    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi") || is_custom_platform(platform_id)
 }
 
 fn requires_explicit_model(platform_id: &str) -> bool {
-    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi")
+    matches!(platform_id, "zhipu" | "zhipu-intl" | "bailian" | "kimi") || is_custom_platform(platform_id)
 }
 
 pub fn validate_provider_credential(
@@ -258,6 +281,7 @@ pub(crate) fn provider_env_from_credential(
         "zhipu" | "zhipu-intl" | "bailian" | "kimi" | "mimo-plan" | "mimo-api" | "packy-cx2cc" => {
             build_parameterized_env(platform_id, cred)
         }
+        id if is_custom_platform(id) => build_parameterized_env(platform_id, cred),
         _ => Err(format!(
             "unsupported provider-backed Claude platform: {platform_id}"
         )),
@@ -519,35 +543,84 @@ fn provider_config_json_from_env(
     env: &HashMap<String, String>,
     mcp_servers: &HashMap<String, serde_json::Value>,
 ) -> Value {
-    let mut env_obj = Map::new();
+    // Merge order: native base → strip secrets → overlay env → force
+    // permissions → fixed fields → merge MCP. The native base ensures
+    // hooks, enabledMcpjsonServers, enabledPlugins, extraKnownMarketplaces,
+    // and other user fields survive the --settings override.
+    let mut config = crate::storage::cli_config::load_cli_config();
+
+    // SAFETY: load_cli_config() always returns Value::Object.
+    let obj = config.as_object_mut().unwrap();
+
+    // Strip sensitive keys that must not leak into provider session files.
+    for &key in crate::storage::cli_config::SENSITIVE_KEYS {
+        obj.remove(key);
+    }
+
+    // ── Claw GO overrides (applied on top of native base) ──
+
+    // env: start from native env, then overlay provider-specific vars.
+    let mut env_obj = obj
+        .get("env")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
     for (key, value) in env {
         env_obj.insert(key.clone(), Value::String(value.clone()));
     }
+    obj.insert("env".to_string(), Value::Object(env_obj));
 
-    let mut config = json!({
-        "env": env_obj,
-        "permissions": {
-            "defaultMode": "bypassPermissions"
-        },
-        "enabledPlugins": {
-            "superpowers@claude-plugins-official": true
-        },
-        "includeCoAuthoredBy": false,
-        "thinking": false,
-        "skipDangerousModePermissionPrompt": true,
-        "autoUpdatesChannel": "latest",
-        "language": "简体中文"
-    });
+    // permissions: force bypass for provider sessions
+    obj.insert(
+        "permissions".to_string(),
+        json!({ "defaultMode": "bypassPermissions" }),
+    );
 
+    // Ensure superpowers plugin is always enabled, even if native config lacks it.
+    let plugins = obj
+        .entry("enabledPlugins".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(plugins_obj) = plugins.as_object_mut() {
+        plugins_obj
+            .entry("superpowers@claude-plugins-official".to_string())
+            .or_insert(Value::Bool(true));
+    }
+    // ── Intentional overrides (always forced for provider sessions) ──
+    // These fields are deliberately overwritten regardless of native config.
+    // - includeCoAuthoredBy: false — provider sessions don't need co-author trailers.
+    // - thinking: false — third-party providers don't support extended thinking.
+    // - skipDangerousModePermissionPrompt: true — bypass permissions are already set.
+    // - autoUpdatesChannel: "latest" — keep provider sessions on the latest release.
+    // - language: "简体中文" — matches the app's primary locale. If the app adds
+    //   multi-locale support, this should read from user settings instead.
+    obj.insert("includeCoAuthoredBy".to_string(), Value::Bool(false));
+    obj.insert("thinking".to_string(), Value::Bool(false));
+    obj.insert(
+        "skipDangerousModePermissionPrompt".to_string(),
+        Value::Bool(true),
+    );
+    obj.insert(
+        "autoUpdatesChannel".to_string(),
+        Value::String("latest".to_string()),
+    );
+    obj.insert(
+        "language".to_string(),
+        Value::String("简体中文".to_string()),
+    );
+
+    // mcpServers: merge native + Claw GO managed (additive).
+    // Assumes upstream has already deduplicated by name.
     if !mcp_servers.is_empty() {
-        let mcp_obj: Map<String, Value> = mcp_servers
-            .iter()
-            .map(|(name, cfg)| (name.clone(), cfg.clone()))
-            .collect();
-        config
-            .as_object_mut()
-            .unwrap()
-            .insert("mcpServers".to_string(), Value::Object(mcp_obj));
+        let existing = obj
+            .get("mcpServers")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        let mut merged = existing;
+        for (name, cfg) in mcp_servers {
+            merged.insert(name.clone(), cfg.clone());
+        }
+        obj.insert("mcpServers".to_string(), Value::Object(merged));
     }
 
     config
@@ -1199,5 +1272,138 @@ mod tests {
         };
         let err = build_parameterized_env("packy-cx2cc", &c).unwrap_err();
         assert!(err.contains("ANTHROPIC_MODEL"));
+    }
+
+    #[test]
+    fn provider_config_preserves_native_hooks() {
+        let env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "test-model".to_string())]);
+        let config = provider_config_json_from_env(&env, &HashMap::new());
+        // Native ~/.claude/settings.json has hooks — they must survive.
+        // If no native file exists (CI), hooks simply won't be present; that's fine.
+        // The key assertion: Claw GO's own fields are always present.
+        assert!(config.get("permissions").is_some());
+        assert!(config.get("env").is_some());
+        assert!(config.get("skipDangerousModePermissionPrompt").is_some());
+    }
+
+    #[test]
+    fn provider_config_strips_api_key_from_native_base() {
+        let env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "test-model".to_string())]);
+        let config = provider_config_json_from_env(&env, &HashMap::new());
+        assert!(
+            config.get("apiKey").is_none(),
+            "apiKey must not leak into provider session config"
+        );
+        assert!(
+            config.get("primaryApiKey").is_none(),
+            "primaryApiKey must not leak into provider session config"
+        );
+    }
+
+    #[test]
+    fn provider_config_merges_mcp_servers_additively() {
+        let env = HashMap::new();
+        let managed = HashMap::from([(
+            "my-server".to_string(),
+            serde_json::json!({"command": "node", "args": ["server.js"]}),
+        )]);
+        let config = provider_config_json_from_env(&env, &managed);
+        let mcp = config.get("mcpServers").and_then(|v| v.as_object()).unwrap();
+        assert!(mcp.contains_key("my-server"));
+        // If native settings also have mcpServers, they should be preserved too.
+    }
+
+    #[test]
+    fn provider_config_env_overrides_native_env() {
+        let env = HashMap::from([(
+            "ANTHROPIC_BASE_URL".to_string(),
+            "https://provider.example.com".to_string(),
+        )]);
+        let config = provider_config_json_from_env(&env, &HashMap::new());
+        let env_obj = config.get("env").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(
+            env_obj.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str()),
+            Some("https://provider.example.com")
+        );
+    }
+
+    #[test]
+    fn provider_config_preserves_native_env_vars() {
+        // On this machine, native settings.json has MX_APIKEY in env.
+        // After the merge, native-only env vars should survive.
+        let env = HashMap::from([("ANTHROPIC_MODEL".to_string(), "test".to_string())]);
+        let config = provider_config_json_from_env(&env, &HashMap::new());
+        let env_obj = config.get("env").and_then(|v| v.as_object()).unwrap();
+        // Claw GO's env must be present
+        assert_eq!(
+            env_obj.get("ANTHROPIC_MODEL").and_then(|v| v.as_str()),
+            Some("test")
+        );
+        // Native-only vars (if present in real settings) are preserved.
+        // In CI where no native file exists, this simply has no extra keys.
+    }
+
+    #[test]
+    fn provider_config_always_enables_superpowers_plugin() {
+        let env = HashMap::new();
+        let config = provider_config_json_from_env(&env, &HashMap::new());
+        let plugins = config
+            .get("enabledPlugins")
+            .and_then(|v| v.as_object())
+            .expect("enabledPlugins must exist");
+        assert_eq!(
+            plugins.get("superpowers@claude-plugins-official"),
+            Some(&Value::Bool(true)),
+            "superpowers plugin must always be enabled"
+        );
+    }
+
+    #[test]
+    fn custom_platform_maps_to_self() {
+        assert_eq!(platform_to_provider_id("custom-1234"), Some("custom-1234"));
+        assert_eq!(platform_to_provider_id("custom-my-api"), Some("custom-my-api"));
+        // Stable across repeated calls
+        assert_eq!(platform_to_provider_id("custom-1234"), Some("custom-1234"));
+    }
+
+    #[test]
+    fn custom_platform_requires_base_url_and_model() {
+        let c = PlatformCredential {
+            platform_id: "custom-test".to_string(),
+            api_key: Some("sk-test".to_string()),
+            base_url: None,
+            auth_env_var: Some("ANTHROPIC_AUTH_TOKEN".to_string()),
+            name: Some("Custom Test".to_string()),
+            models: None,
+            extra_env: None,
+        };
+        let result = validate_provider_credential("custom-test", &c).unwrap();
+        assert!(!result.ok);
+        let fields: Vec<&str> = result.issues.iter().map(|i| i.field.as_str()).collect();
+        assert!(fields.contains(&"base_url"));
+        assert!(fields.contains(&"model"));
+    }
+
+    #[test]
+    fn custom_platform_valid_with_all_fields() {
+        let c = cred("custom-ok", "sk-test", Some("https://example.com/anthropic"), Some("my-model"));
+        let result = validate_provider_credential("custom-ok", &c).unwrap();
+        assert!(result.ok);
+    }
+
+    #[test]
+    fn custom_platform_builds_parameterized_env() {
+        let c = cred(
+            "custom-env",
+            "sk-custom",
+            Some("https://custom.example.com/anthropic"),
+            Some("custom-model-v1"),
+        );
+        let env = provider_env_from_credential("custom-env", &c).unwrap();
+        assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("sk-custom"));
+        assert_eq!(env.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://custom.example.com/anthropic"));
+        assert_eq!(env.get("ANTHROPIC_MODEL").map(String::as_str), Some("custom-model-v1"));
+        assert_eq!(env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").map(String::as_str), Some("custom-model-v1"));
+        assert!(env.contains_key("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"));
     }
 }

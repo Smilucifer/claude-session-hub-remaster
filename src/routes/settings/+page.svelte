@@ -91,6 +91,15 @@
   let showApiKey = $state(false);
   let platformCredentials = $state<PlatformCredential[]>([]);
 
+  // ── Custom Provider form state ──
+  let showCustomForm = $state(false);
+  let customFormName = $state("");
+  let customFormUrl = $state("");
+  let customFormKey = $state("");
+  let customFormModel = $state("");
+  let customFormEffort = $state("max");
+  let customShowApiKey = $state(false);
+
   type ConnectionAgentTab = "claude" | "codex";
   const connectionAgentTabs: Array<{ id: ConnectionAgentTab; label: string; command: string }> = [
     { id: "claude", label: "Claude", command: "claude" },
@@ -288,6 +297,65 @@
   function persistApiProviderConfig() {
     saveGeneralPatch({ platform_credentials: platformCredentials });
   }
+
+  // ── Custom Provider CRUD ──
+  function addCustomProvider() {
+    const name = customFormName.trim();
+    const url = customFormUrl.trim();
+    const key = customFormKey.trim();
+    const model = customFormModel.trim();
+    if (!name || !url || !key || !model) return;
+
+    // Basic URL validation
+    try {
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+    } catch {
+      return;
+    }
+
+    // Collision guard: append random suffix if ID already exists
+    let platformId = `custom-${Date.now()}`;
+    if (platformCredentials.some((c) => c.platform_id === platformId)) {
+      platformId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    const extraEnv: Record<string, string> = {};
+    if (customFormEffort && customFormEffort !== "max") {
+      extraEnv.CLAUDE_CODE_EFFORT_LEVEL = customFormEffort;
+    }
+
+    const newCred: PlatformCredential = {
+      platform_id: platformId,
+      api_key: key,
+      base_url: url,
+      auth_env_var: "ANTHROPIC_AUTH_TOKEN",
+      name,
+      models: [model],
+      extra_env: Object.keys(extraEnv).length ? extraEnv : undefined,
+    };
+
+    platformCredentials = [...platformCredentials, newCred];
+    persistApiProviderConfig();
+
+    // Reset form
+    customFormName = "";
+    customFormUrl = "";
+    customFormKey = "";
+    customFormModel = "";
+    customFormEffort = "max";
+    customShowApiKey = false;
+    showCustomForm = false;
+  }
+
+  function removeCustomProvider(platformId: string) {
+    platformCredentials = platformCredentials.filter((c) => c.platform_id !== platformId);
+    persistApiProviderConfig();
+  }
+
+  let customProviderCredentials = $derived(
+    platformCredentials.filter((c) => c.platform_id.startsWith("custom-"))
+  );
 
   // ── Collapsible panel state for CC Session providers ──
   let expandedProviderPanels = $state<Record<string, boolean>>({});
@@ -2308,6 +2376,127 @@
               {/if}
             {/each}
           </div>
+        </Card>
+
+        <!-- ═══ Custom Providers ═══ -->
+        <Card class="p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                Custom Providers
+              </h2>
+              <p class="mt-1 text-xs text-muted-foreground">
+                自定义 Claude-compatible API 端点，使用 parameterized 模板启动。
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => (showCustomForm = !showCustomForm)}
+            >
+              {showCustomForm ? "取消" : "新增 Custom Provider"}
+            </Button>
+          </div>
+
+          <!-- Existing custom providers -->
+          {#if customProviderCredentials.length > 0}
+            <div class="divide-y divide-border rounded-md border border-border">
+              {#each customProviderCredentials as cred (cred.platform_id)}
+                <div class="grid gap-3 p-4 md:grid-cols-[minmax(160px,1fr)_minmax(220px,2fr)_auto] md:items-center">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium">{cred.name ?? cred.platform_id}</span>
+                      <span class="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
+                        Custom
+                      </span>
+                    </div>
+                    <div class="mt-1 truncate text-xs text-muted-foreground">
+                      {cred.models?.[0] ?? "未配置模型"} · {cred.base_url ?? "未配置 URL"}
+                    </div>
+                  </div>
+                  <div class="text-xs text-muted-foreground">
+                    Key: {cred.api_key ? "••••" + cred.api_key.slice(-4) : "未设置"}
+                  </div>
+                  <button
+                    type="button"
+                    class="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+                    onclick={() => removeCustomProvider(cred.platform_id)}
+                  >
+                    删除
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {:else if !showCustomForm}
+            <p class="text-sm text-muted-foreground">暂无自定义 Provider。</p>
+          {/if}
+
+          <!-- Add form -->
+          {#if showCustomForm}
+            <div class="rounded-md border border-border/50 p-4 space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="text-[11px] text-muted-foreground" for="custom-name">Name *</label>
+                  <input
+                    id="custom-name"
+                    class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    placeholder="My API"
+                    bind:value={customFormName}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-muted-foreground" for="custom-url">Base URL *</label>
+                  <input
+                    id="custom-url"
+                    class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    placeholder="https://api.example.com/anthropic"
+                    bind:value={customFormUrl}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-muted-foreground" for="custom-key">API Key *</label>
+                  <input
+                    id="custom-key"
+                    type={customShowApiKey ? "text" : "password"}
+                    class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    placeholder="sk-..."
+                    bind:value={customFormKey}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-muted-foreground" for="custom-model">Model *</label>
+                  <input
+                    id="custom-model"
+                    class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    placeholder="claude-sonnet-4-20250514"
+                    bind:value={customFormModel}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-muted-foreground" for="custom-effort">Effort Level</label>
+                  <select
+                    id="custom-effort"
+                    class="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    bind:value={customFormEffort}
+                  >
+                    <option value="max">max (默认)</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex justify-end">
+                <Button
+                  size="sm"
+                  disabled={!customFormName.trim() || !customFormUrl.trim() || !customFormKey.trim() || !customFormModel.trim()}
+                  onclick={addCustomProvider}
+                >
+                  保存
+                </Button>
+              </div>
+            </div>
+          {/if}
         </Card>
       </div>
     {:else if activeTab === "cli-config"}

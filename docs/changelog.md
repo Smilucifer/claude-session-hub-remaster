@@ -1,5 +1,29 @@
 # Changelog / 更新日志
 
+## Phase 9.z (2026-05-12)
+
+### Custom Provider 支持 + Native Config Merge + Managed MCP
+
+**Custom Provider:**
+- 后端 `provider_claude_config.rs` 新增 `custom-*` 平台路由：`is_custom_platform()`、`leak_custom_id()`（带 Mutex 缓存避免重复 leak）、`platform_to_provider_id()` 返回自身、`requires_explicit_base_url/model()` 要求必填、`provider_env_from_credential()` 委托 `build_parameterized_env`
+- 前端 Settings → Connection 新增 Custom Providers 卡片：表单（Name / Base URL / API Key / Model / Effort Level）、CRUD 操作、已有 custom provider 列表展示
+- 碰撞防护：`Date.now()` + `Math.random()` 随机后缀；URL 格式校验（仅允许 http/https）
+- Custom form API key 可见性独立于全局 `showApiKey` 状态（`customShowApiKey`）
+- 4 个新测试：`custom_platform_maps_to_self`、`custom_platform_requires_base_url_and_model`、`custom_platform_valid_with_all_fields`、`custom_platform_builds_parameterized_env`
+
+**Native Config Merge:**
+- `provider_config_json_from_env` 重构：以 native `~/.claude/settings.json` 为基底，strip 敏感 key（`apiKey`/`primaryApiKey`），叠加 provider env/permissions/MCP，保留 hooks/plugins/enabledMcpjsonServers 等用户配置
+- `SENSITIVE_KEYS` 从 `cli_config.rs` 提取为 `pub const`，`session.rs` 和 `provider_claude_config.rs` 共享引用，消除重复常量
+- 6 个新测试覆盖：native hooks 保留、API key 剥离、MCP 合并、env 覆盖、native env 保留、superpowers 插件强制启用
+
+**Managed MCP Injection:**
+- `mcp_registry.rs` 新增第 5 来源：Claw GO 托管服务器（`UserSettings.mcp_servers`），scope="managed"
+- 托管服务器替换同名 `scope="user"` 条目，保留 `local`/`project` scope
+- Extensions 页面配置列表正确显示托管 MCP 服务器
+
+**其他:**
+- `provider_config_json_from_env` 硬覆盖字段（thinking/includeCoAuthoredBy/language 等）补充设计意图注释
+
 ## Phase 9.y (2026-05-09)
 
 ### v1.1.7 — 第三方 session provider 显式配置校验与 Xiaomi 共用模型配置
