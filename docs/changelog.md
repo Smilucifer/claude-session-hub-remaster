@@ -1,5 +1,57 @@
 # Changelog / 更新日志
 
+## Phase 10.a (2026-05-13)
+
+### Managed Config Injection — Hooks/Plugins CRUD + Settings Refactor
+
+**Bug Fixes:**
+- MCP 持久化修复：`update_user_settings()` 新增 `mcp_servers` patch handler，修复托管 MCP 服务器添加后不持久化的问题
+- Plugins marketplace 安装状态：已安装插件显示 "Installed" 禁用按钮，不再始终显示 "Install"
+- Hooks 数据丢失修复：hooks 从 `~/.claude/settings.json` 迁移到 Claw GO managed settings，避免被 CLI 更新覆盖
+
+**Settings 重构:**
+- `update_user_settings()` 从 190 行 `if let Some` 单体函数重构为 19 个 per-field `apply_*` 函数
+- 新增泛型 `apply_hashmap_field<V>` 和 `apply_deser_vec_field<T>` 消除重复代码
+- 语义等价重构，无行为变更
+
+**数据模型扩展:**
+- `UserSettings` 新增 `hooks: HashMap<String, Value>` 和 `enabled_plugins: HashMap<String, bool>` 字段
+- `#[serde(default)]` 保证旧 settings.json 向后兼容
+
+**Session JSON 注入:**
+- `ManagedConfig` 结构体捆绑 mcp_servers/hooks/enabled_plugins，避免参数膨胀
+- `provider_config_json_from_env()` 三层合并：MCP additive、hooks per-event overwrite、plugins overlay
+- superpowers 强制注入在 managed overlay 之后执行（`insert` 而非 `or_insert`，确保不可被覆盖）
+- `write_mcp_only_settings` 重命名为 `write_managed_settings`
+
+**IPC 命令:**
+- 6 个新 Tauri 命令：`list_managed_hooks`、`add_managed_hook`、`remove_managed_hook`、`list_managed_plugins`、`set_managed_plugin`、`remove_managed_plugin`
+- 遵循现有 MCP 命令的 read-modify-write 模式
+
+**前端迁移:**
+- `HookManager.svelte` 从 `getCliConfig`/`updateCliConfig` 迁移到 managed hooks API
+- `api.ts` 新增 6 个前端 API wrapper
+- `handleSaveEditor` 空数组时调用 `deleteEventHooks` 而非静默跳过
+- `deleteEventHooks` 使用专用 `hooks_deleted` i18n key
+
+**审查修复 (4 providers: Claude, DeepSeek, MiMo Plan, Packy CX2CC):**
+- superpowers `or_insert` → `insert` — 确保强制覆盖不可被 managed config 绕过
+- 测试编译错误修复：`&HashMap::new()` → `&empty_managed()`
+- `write_mcp_only_settings` doc comment 更新
+- 新增 `hooks_deleted` i18n key（en + zh-CN）
+
+**Native Hooks Migration:**
+- `hooks/setup.rs` 新增 `migrate_native_hooks()`：首次启动时自动将 `~/.claude/settings.json` 中的 hooks 导入 Claw GO managed settings
+- `UserSettings` 新增 `native_hooks_migrated: bool` 标记，`#[serde(default)]` 保证向后兼容
+- 仅在 managed hooks 为空时导入，避免覆盖用户已配置的 managed hooks
+- 导入后从 native settings 移除 hooks key，避免重复注入
+- `lib.rs` 启动时在 `cleanup_hook_bridge()` 之后调用
+
+**Review Round 2 修复:**
+- `migrate_native_hooks` save() 错误处理：`let _ = save()` → `if let Err(e)` + `log::warn!`，save 失败时跳过 native 移除（自愈：下次启动重试）
+- `write_mcp_only_settings` 重命名为 `write_managed_settings`
+- startup 顺序注释补充 cleanup→migration 依赖说明
+
 ## Phase 9.z (2026-05-12)
 
 ### Custom Provider 支持 + Native Config Merge + Managed MCP

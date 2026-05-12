@@ -87,7 +87,11 @@ pub fn run() {
     storage::runs::reconcile_orphaned_runs();
 
     // Clean up legacy hook-bridge (removed: was redundant with stream-json mode)
+    // Must run BEFORE migrate_native_hooks — strips stale bridge entries so only real user hooks are imported.
     hooks::setup::cleanup_hook_bridge();
+
+    // One-time migration: import native hooks into Claw GO managed settings
+    hooks::setup::migrate_native_hooks();
 
     // Global cancellation token — shared with all session actors for graceful shutdown
     let cancel_token = CancellationToken::new();
@@ -190,6 +194,12 @@ pub fn run() {
             commands::settings::list_managed_mcp_servers,
             commands::settings::add_managed_mcp_server,
             commands::settings::remove_managed_mcp_server,
+            commands::settings::list_managed_hooks,
+            commands::settings::add_managed_hook,
+            commands::settings::remove_managed_hook,
+            commands::settings::list_managed_plugins,
+            commands::settings::set_managed_plugin,
+            commands::settings::remove_managed_plugin,
             commands::fs::list_directory,
             commands::fs::check_is_directory,
             commands::fs::read_file_base64,

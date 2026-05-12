@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getCliConfig, updateCliConfig } from "$lib/api";
+  import { listManagedHooks, addManagedHook, removeManagedHook } from "$lib/api";
   import { dbg, dbgWarn } from "$lib/utils/debug";
   import { t } from "$lib/i18n/index.svelte";
   import {
@@ -15,7 +15,7 @@
   type Rec = Record<string, any>;
 
   // ── State ──
-  let cliConfig = $state<Record<string, unknown> | null>(null);
+  let rawHooks = $state<Record<string, unknown> | null>(null);
   let loading = $state(true);
   let loadError = $state<string | null>(null);
   let saving = $state(false);
@@ -40,7 +40,6 @@
   } | null>(null);
 
   // ── Derived ──
-  let rawHooks = $derived(cliConfig ? cliConfig.hooks : null);
   let displayHooks = $derived(normalizeForDisplay(rawHooks));
   let displayEntries = $derived(Object.entries(displayHooks));
   let totalGroups = $derived(displayEntries.reduce((sum, [, groups]) => sum + groups.length, 0));
@@ -54,8 +53,9 @@
     loading = true;
     loadError = null;
     try {
-      cliConfig = await getCliConfig();
-      dbg("hooks", "loaded config", { hasHooks: !!cliConfig?.hooks });
+      const managed = await listManagedHooks();
+      rawHooks = Object.keys(managed).length > 0 ? managed : null;
+      dbg("hooks", "loaded managed hooks", { events: Object.keys(managed) });
     } catch (e) {
       loadError = String(e);
       dbgWarn("hooks", "load error", e);
@@ -65,16 +65,34 @@
   }
 
   // ── Save helpers ──
-  async function saveHooks(newHooks: Rec) {
+  async function saveEventHooks(event: string, groups: unknown[]) {
     saving = true;
     try {
-      const updated = await updateCliConfig({ hooks: newHooks });
-      cliConfig = updated;
+      await addManagedHook(event, JSON.stringify(groups));
+      // Reload to get the full picture
+      const managed = await listManagedHooks();
+      rawHooks = Object.keys(managed).length > 0 ? managed : null;
       showToast(t("hooks_saved"), "success");
-      dbg("hooks", "saved", { events: Object.keys(newHooks) });
+      dbg("hooks", "saved", { event, groupCount: groups.length });
     } catch (e) {
       showToast(t("hooks_saveFailed", { error: String(e) }), "error");
       dbgWarn("hooks", "save error", e);
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function deleteEventHooks(event: string) {
+    saving = true;
+    try {
+      await removeManagedHook(event);
+      const managed = await listManagedHooks();
+      rawHooks = Object.keys(managed).length > 0 ? managed : null;
+      showToast(t("hooks_deleted"), "success");
+      dbg("hooks", "deleted event", { event });
+    } catch (e) {
+      showToast(t("hooks_saveFailed", { error: String(e) }), "error");
+      dbgWarn("hooks", "delete error", e);
     } finally {
       saving = false;
     }
@@ -188,7 +206,12 @@
     } else {
       newHooks = patchGroup(rawHooks, editorEvent, editorGroupIndex, group);
     }
-    await saveHooks(newHooks);
+    const eventGroups = newHooks[editorEvent] as unknown[];
+    if (eventGroups && eventGroups.length > 0) {
+      await saveEventHooks(editorEvent, eventGroups);
+    } else {
+      await deleteEventHooks(editorEvent);
+    }
     editorMode = null;
   }
 
@@ -198,7 +221,12 @@
       message: t("hooks_deleteGroupMsg"),
       onConfirm: async () => {
         const newHooks = removeGroup(rawHooks, event, index);
-        await saveHooks(newHooks);
+        const eventGroups = newHooks[event] as unknown[] | undefined;
+        if (eventGroups && eventGroups.length > 0) {
+          await saveEventHooks(event, eventGroups);
+        } else {
+          await deleteEventHooks(event);
+        }
       },
     };
   }

@@ -1745,16 +1745,25 @@
                     {/if}
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <!-- Install button -->
-                    <button
-                      class="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                      onclick={() => handleInstall(plugin.name)}
-                      disabled={operationLoading === plugin.name}
-                    >
-                      {operationLoading === plugin.name
-                        ? t("plugin_installing")
-                        : t("plugin_install")}
-                    </button>
+                    <!-- Install / Installed button -->
+                    {#if installedPlugins.some((p) => p.name === plugin.name)}
+                      <button
+                        class="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground cursor-default"
+                        disabled
+                      >
+                        {t("plugin_installed")}
+                      </button>
+                    {:else}
+                      <button
+                        class="rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        onclick={() => handleInstall(plugin.name)}
+                        disabled={operationLoading === plugin.name}
+                      >
+                        {operationLoading === plugin.name
+                          ? t("plugin_installing")
+                          : t("plugin_install")}
+                      </button>
+                    {/if}
                     {#if plugin.install_count != null && plugin.install_count > 0}
                       <span class="text-[11px] text-muted-foreground"
                         >{formatInstallCount(plugin.install_count)} {t("plugin_installs")}</span

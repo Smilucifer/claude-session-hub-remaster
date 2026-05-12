@@ -11,7 +11,7 @@ The core product model is:
 - `Room` is an orchestration layer built on top of one or more runs.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 9.z (2026-05-12). Custom Provider support, native config merge (hooks/plugins/env survive `--settings`), managed MCP server injection, SENSITIVE_KEYS centralization.
+**Current phase:** Phase 10.a (2026-05-13). Managed config injection — hooks/plugins CRUD, settings refactor, session JSON three-layer merge.
 
 ## Standard workflow
 
@@ -185,7 +185,7 @@ Provider-native launch config generation (Phase 9.z):
 - Custom providers (`custom-*`) use the same parameterized template as GLM/QWEN/KIMI, with user-provided base_url and model. Validated via `validate_provider_credential` which requires api_key, base_url, and model.
 - All providers use per-session temp JSON (`session-{run_id}.json`) generated fresh from the latest credential in settings, passed via `claude --settings <temp-json>` to override global `~/.claude/settings.json`.
 - The temp JSON now merges native `~/.claude/settings.json` as the base (preserving hooks, plugins, env vars, MCP servers), then strips sensitive keys (`apiKey`, `primaryApiKey`), and overlays provider-specific fields. This ensures user config (hooks, enabledPlugins, enabledMcpjsonServers) survives the `--settings` override.
-- Managed MCP servers (`UserSettings.mcp_servers`) are additively merged into the temp JSON alongside native MCP servers.
+- Managed MCP servers (`UserSettings.mcp_servers`) are additively merged into the temp JSON alongside native MCP servers. Managed hooks (`UserSettings.hooks`) overwrite native per-event. Managed plugins (`UserSettings.enabled_plugins`) overlay native, with superpowers forced after managed overlay.
 - User-configurable env vars are stored in `PlatformCredential.extra_env` and merged via a whitelist (`ALLOWED_EXTRA_ENV_KEYS` in `provider_claude_config.rs`). Only model tier overrides and effort level are allowed; stability vars cannot be overwritten.
 - Chat page model dropdown shows tier-labeled models (Opus/Sonnet/Haiku) via `expandModelsToTiers`, with extra_env overrides applied. Model hot-switching via `set_model` control protocol works for both Anthropic and third-party providers.
 - Packy CX2CC uses fixed-URL template (API key only; base URL https://www.packyapi.com from preset).
@@ -343,6 +343,7 @@ Key phases and their status:
 | 9.x | Room adapter timeout fix: activity-aware timeout, cancel turn, frontend UX | [done] |
 | 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel, old ID removal, label disambiguation | [done] |
 | 9.z | Custom Provider support, native config merge, managed MCP injection, SENSITIVE_KEYS centralization | [done] |
+| 10.a | Managed config injection: hooks/plugins CRUD, settings refactor, session JSON three-layer merge | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

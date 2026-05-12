@@ -4,6 +4,7 @@ use crate::models::{
     ValidatePlatformCredentialsResponse,
 };
 use crate::storage;
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 /// Shared logic for updating user settings with token rotation detection.
@@ -121,5 +122,92 @@ pub fn remove_managed_mcp_server(
     Ok(PluginOperationResult {
         success: true,
         message: format!("Removed managed MCP server '{}'", name),
+    })
+}
+
+// ── Managed hooks commands ──
+
+#[tauri::command]
+pub fn list_managed_hooks() -> HashMap<String, serde_json::Value> {
+    log::debug!("[settings] list_managed_hooks");
+    storage::settings::get_user_settings().hooks
+}
+
+#[tauri::command]
+pub fn add_managed_hook(
+    event: String,
+    groups_json: String,
+) -> Result<PluginOperationResult, String> {
+    log::debug!("[settings] add_managed_hook: event={}", event);
+    let groups: serde_json::Value = serde_json::from_str(&groups_json)
+        .map_err(|e| format!("Invalid groups JSON: {e}"))?;
+    if !groups.is_array() {
+        return Err("Groups must be a JSON array".to_string());
+    }
+    let mut settings = storage::settings::get_user_settings();
+    let existed = settings.hooks.contains_key(&event);
+    settings.hooks.insert(event.clone(), groups);
+    let patch = serde_json::json!({ "hooks": settings.hooks });
+    storage::settings::update_user_settings(patch)?;
+    let verb = if existed { "Updated" } else { "Added" };
+    Ok(PluginOperationResult {
+        success: true,
+        message: format!("{verb} managed hooks for '{}'", event),
+    })
+}
+
+#[tauri::command]
+pub fn remove_managed_hook(event: String) -> Result<PluginOperationResult, String> {
+    log::debug!("[settings] remove_managed_hook: event={}", event);
+    let mut settings = storage::settings::get_user_settings();
+    if settings.hooks.remove(&event).is_none() {
+        return Err(format!("Managed hooks for '{}' not found", event));
+    }
+    let patch = serde_json::json!({ "hooks": settings.hooks });
+    storage::settings::update_user_settings(patch)?;
+    Ok(PluginOperationResult {
+        success: true,
+        message: format!("Removed managed hooks for '{}'", event),
+    })
+}
+
+// ── Managed plugins commands ──
+
+#[tauri::command]
+pub fn list_managed_plugins() -> HashMap<String, bool> {
+    log::debug!("[settings] list_managed_plugins");
+    storage::settings::get_user_settings().enabled_plugins
+}
+
+#[tauri::command]
+pub fn set_managed_plugin(
+    name: String,
+    enabled: bool,
+) -> Result<PluginOperationResult, String> {
+    log::debug!("[settings] set_managed_plugin: name={}, enabled={}", name, enabled);
+    let mut settings = storage::settings::get_user_settings();
+    let existed = settings.enabled_plugins.contains_key(&name);
+    settings.enabled_plugins.insert(name.clone(), enabled);
+    let patch = serde_json::json!({ "enabled_plugins": settings.enabled_plugins });
+    storage::settings::update_user_settings(patch)?;
+    let verb = if existed { "Updated" } else { "Set" };
+    Ok(PluginOperationResult {
+        success: true,
+        message: format!("{} managed plugin '{}' → {}", verb, name, enabled),
+    })
+}
+
+#[tauri::command]
+pub fn remove_managed_plugin(name: String) -> Result<PluginOperationResult, String> {
+    log::debug!("[settings] remove_managed_plugin: name={}", name);
+    let mut settings = storage::settings::get_user_settings();
+    if settings.enabled_plugins.remove(&name).is_none() {
+        return Err(format!("Managed plugin '{}' not found", name));
+    }
+    let patch = serde_json::json!({ "enabled_plugins": settings.enabled_plugins });
+    storage::settings::update_user_settings(patch)?;
+    Ok(PluginOperationResult {
+        success: true,
+        message: format!("Removed managed plugin '{}'", name),
     })
 }

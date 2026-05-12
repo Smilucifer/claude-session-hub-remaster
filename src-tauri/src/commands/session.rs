@@ -621,7 +621,11 @@ pub(crate) async fn start_session_impl(
     // Provider-backed Claude sessions: persist a stable JSON config file and derive
     // the env projection from it. The JSON file is the durable source of truth;
     // env vars are injected from the same materialized config into the CLI process.
-    let mcp_servers = &user_settings.mcp_servers;
+    let managed = crate::agent::provider_claude_config::ManagedConfig {
+        mcp_servers: &user_settings.mcp_servers,
+        hooks: &user_settings.hooks,
+        enabled_plugins: &user_settings.enabled_plugins,
+    };
     let provider_config = match effective_pid {
         Some(pid) => {
             let provider_id = crate::agent::provider_claude_config::platform_to_provider_id(pid);
@@ -639,7 +643,7 @@ pub(crate) async fn start_session_impl(
                         pid,
                         cred,
                         &run_id,
-                        mcp_servers,
+                        &managed,
                     ) {
                         Ok(materialized) => {
                             log::info!(
@@ -659,15 +663,20 @@ pub(crate) async fn start_session_impl(
         }
         None => None,
     };
-    // If no provider config was generated but managed MCP servers exist,
-    // write a minimal settings JSON so MCP servers are injected via --settings.
-    let mcp_only_config_path = if provider_config.is_none() && !mcp_servers.is_empty() {
-        match crate::agent::provider_claude_config::write_mcp_only_settings(&run_id, mcp_servers) {
+    // If no provider config was generated but managed configs exist,
+    // write a minimal settings JSON so managed configs are injected via --settings.
+    let has_managed_configs = !managed.mcp_servers.is_empty()
+        || !managed.hooks.is_empty()
+        || !managed.enabled_plugins.is_empty();
+    let mcp_only_config_path = if provider_config.is_none() && has_managed_configs {
+        match crate::agent::provider_claude_config::write_managed_settings(&run_id, &managed) {
             Ok(path) => {
                 log::info!(
-                    "[session] MCP-only settings written: {} ({} servers)",
+                    "[session] managed settings written: {} (mcp={}, hooks={}, plugins={})",
                     path.display(),
-                    mcp_servers.len()
+                    managed.mcp_servers.len(),
+                    managed.hooks.len(),
+                    managed.enabled_plugins.len()
                 );
                 Some(path)
             }

@@ -1228,6 +1228,50 @@ export async function removeManagedMcpServer(
   return invoke<PluginOperationResult>("remove_managed_mcp_server", { name });
 }
 
+// ── Managed Hooks ──
+
+export async function listManagedHooks(): Promise<Record<string, unknown>> {
+  dbg("api", "listManagedHooks");
+  return invoke<Record<string, unknown>>("list_managed_hooks");
+}
+
+export async function addManagedHook(
+  event: string,
+  groupsJson: string,
+): Promise<PluginOperationResult> {
+  dbg("api", "addManagedHook", { event });
+  return invoke<PluginOperationResult>("add_managed_hook", { event, groupsJson });
+}
+
+export async function removeManagedHook(
+  event: string,
+): Promise<PluginOperationResult> {
+  dbg("api", "removeManagedHook", { event });
+  return invoke<PluginOperationResult>("remove_managed_hook", { event });
+}
+
+// ── Managed Plugins ──
+
+export async function listManagedPlugins(): Promise<Record<string, boolean>> {
+  dbg("api", "listManagedPlugins");
+  return invoke<Record<string, boolean>>("list_managed_plugins");
+}
+
+export async function setManagedPlugin(
+  name: string,
+  enabled: boolean,
+): Promise<PluginOperationResult> {
+  dbg("api", "setManagedPlugin", { name, enabled });
+  return invoke<PluginOperationResult>("set_managed_plugin", { name, enabled });
+}
+
+export async function removeManagedPlugin(
+  name: string,
+): Promise<PluginOperationResult> {
+  dbg("api", "removeManagedPlugin", { name });
+  return invoke<PluginOperationResult>("remove_managed_plugin", { name });
+}
+
 // ── CLI Permissions ──
 
 export interface CliPermissions {

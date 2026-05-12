@@ -1416,6 +1416,7 @@
   "hooks_save": "Save",
   "hooks_saving": "Saving...",
   "hooks_saved": "Hook configuration saved",
+  "hooks_deleted": "Hook configuration deleted",
   "hooks_saveFailed": "Failed to save hooks: {error}",
   "hooks_editWarning": "Editing rebuilds handler config. Custom fields added manually may be lost.",
   "hooks_groupCount": "{count} groups",

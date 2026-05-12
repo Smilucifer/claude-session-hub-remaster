@@ -97,6 +97,75 @@ pub fn cleanup_hook_bridge_at(settings_path: &Path, bridge_path: &Path) {
     }
 }
 
+/// One-time migration: import native hooks from `~/.claude/settings.json` into
+/// Claw GO managed settings (`UserSettings.hooks`). Runs once at startup.
+///
+/// Only imports if:
+/// - `native_hooks_migrated` flag is `false` (first launch after upgrade)
+/// - Native settings has non-empty `hooks`
+/// - Managed `UserSettings.hooks` is empty (don't overwrite user's managed config)
+pub fn migrate_native_hooks() {
+    let mut all = crate::storage::settings::load();
+    if all.user.native_hooks_migrated {
+        return;
+    }
+
+    let native = crate::storage::cli_config::load_cli_config();
+    let native_hooks = match native.get("hooks").and_then(|v| v.as_object()) {
+        Some(h) if !h.is_empty() => h.clone(),
+        _ => {
+            // No native hooks — just mark as migrated and save.
+            all.user.native_hooks_migrated = true;
+            if let Err(e) = crate::storage::settings::save(&all) {
+                log::warn!("[hooks/setup] failed to persist migration flag: {}", e);
+            }
+            return;
+        }
+    };
+
+    if !all.user.hooks.is_empty() {
+        log::info!(
+            "[hooks/setup] native hooks found but managed hooks already exist ({}), skipping import",
+            all.user.hooks.len()
+        );
+        all.user.native_hooks_migrated = true;
+        if let Err(e) = crate::storage::settings::save(&all) {
+            log::warn!("[hooks/setup] failed to persist migration flag: {}", e);
+        }
+        return;
+    }
+
+    // Import native hooks into managed storage.
+    let count = native_hooks.len();
+    let managed_hooks: std::collections::HashMap<String, serde_json::Value> =
+        native_hooks.into_iter().collect();
+    all.user.hooks = managed_hooks;
+    all.user.native_hooks_migrated = true;
+    if let Err(e) = crate::storage::settings::save(&all) {
+        log::warn!(
+            "[hooks/setup] failed to persist migrated hooks: {}. \
+             Native hooks preserved, will retry next launch.",
+            e
+        );
+        return; // Don't remove native hooks if managed save failed.
+    }
+
+    // Remove hooks from native settings only after managed save succeeded.
+    if let Err(e) = crate::storage::cli_config::update_cli_config(serde_json::json!({ "hooks": null })) {
+        log::warn!(
+            "[hooks/setup] failed to remove hooks from native settings: {}. \
+             Hooks imported to managed but native copy remains. \
+             To fix manually: remove hooks from ~/.claude/settings.json",
+            e
+        );
+    } else {
+        log::info!(
+            "[hooks/setup] migrated {} hook event(s) from native to managed settings",
+            count
+        );
+    }
+}
+
 /// Remove all hook array entries whose JSON serialization contains "hook-bridge.mjs".
 /// Returns true if any entries were removed (i.e. settings needs to be written back).
 fn strip_bridge_entries(settings: &mut serde_json::Value) -> bool {

@@ -539,193 +539,176 @@ fn validate_balance_helper(
 
 pub fn update_user_settings(patch: serde_json::Value) -> Result<UserSettings, String> {
     let mut all = load();
-    if let Some(agent) = patch.get("default_agent").and_then(|v| v.as_str()) {
-        all.user.default_agent = agent.to_string();
-    }
-    if let Some(model) = patch.get("default_model") {
-        all.user.default_model = model.as_str().map(|s| s.to_string());
-    }
-    if let Some(tools) = patch.get("allowed_tools").and_then(|v| v.as_array()) {
-        all.user.allowed_tools = tools
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect();
-    }
-    if let Some(wd) = patch.get("working_directory") {
-        all.user.working_directory = wd.as_str().map(|s| s.to_string());
-    }
-    if let Some(mode) = patch.get("provider_mode").and_then(|v| v.as_str()) {
-        all.user.provider_mode = mode.to_string();
-    }
-    if let Some(mode) = patch.get("auth_mode").and_then(|v| v.as_str()) {
-        all.user.auth_mode = mode.to_string();
-    }
-    if let Some(key) = patch.get("anthropic_api_key") {
-        all.user.anthropic_api_key = key
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-    }
-    if let Some(url) = patch.get("anthropic_base_url") {
-        all.user.anthropic_base_url = url
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-    }
-    if let Some(v) = patch.get("auth_env_var") {
-        all.user.auth_env_var = v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
-    }
-    if let Some(mode) = patch.get("permission_mode").and_then(|v| v.as_str()) {
-        all.user.permission_mode = mode.to_string();
-    }
-    if let Some(v) = patch.get("max_budget_usd") {
-        all.user.max_budget_usd = if v.is_null() { None } else { v.as_f64() };
-    }
-    if let Some(v) = patch.get("fallback_model") {
-        all.user.fallback_model = if v.is_null() {
-            None
-        } else {
-            v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string())
-        };
-    }
-    if let Some(v) = patch.get("keybinding_overrides") {
-        if v.is_null() {
-            all.user.keybinding_overrides = vec![];
-        } else {
-            all.user.keybinding_overrides = serde_json::from_value(v.clone())
-                .map_err(|e| format!("Invalid keybinding_overrides: {}", e))?;
-        }
-    }
-    if let Some(v) = patch.get("remote_hosts") {
-        if v.is_null() {
-            all.user.remote_hosts = vec![];
-        } else {
-            all.user.remote_hosts = serde_json::from_value(v.clone())
-                .map_err(|e| format!("Invalid remote_hosts: {}", e))?;
-        }
-    }
-    if let Some(v) = patch.get("platform_credentials") {
-        if v.is_null() {
-            all.user.platform_credentials = vec![];
-        } else {
-            all.user.platform_credentials = serde_json::from_value(v.clone())
-                .map_err(|e| format!("Invalid platform_credentials: {}", e))?;
-        }
-    }
-    if let Some(v) = patch.get("cc_agent_profiles") {
-        if v.is_null() {
-            all.user.cc_agent_profiles = vec![];
-        } else {
-            all.user.cc_agent_profiles = serde_json::from_value(v.clone())
-                .map_err(|e| format!("Invalid cc_agent_profiles: {}", e))?;
-        }
-    }
-    if let Some(v) = patch.get("connection_profiles") {
-        if v.is_null() {
-            all.user.connection_profiles = vec![];
-        } else {
-            all.user.connection_profiles = serde_json::from_value(v.clone())
-                .map_err(|e| format!("Invalid connection_profiles: {}", e))?;
-        }
-    }
-    if let Some(v) = patch.get("balance_helper") {
-        if v.is_null() {
-            all.user.balance_helper = BalanceHelperSettings::default();
-        } else {
-            let mut next = all.user.balance_helper.clone();
-            if let Some(session) = v.get("packy_session") {
-                next.packy_session = session
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(itoken) = v.get("packy_tdc_itoken") {
-                next.packy_tdc_itoken = itoken
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(user_id) = v.get("packy_user_id") {
-                next.packy_user_id = user_id
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(token) = v.get("mimo_service_token") {
-                next.mimo_service_token = token
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(uid) = v.get("mimo_user_id") {
-                next.mimo_user_id = uid
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(slh) = v.get("mimo_slh") {
-                next.mimo_slh = slh
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(ph) = v.get("mimo_ph") {
-                next.mimo_ph = ph
-                    .as_str()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
-            }
-            if let Some(secs) = v.get("auto_refresh_secs") {
-                next.auto_refresh_secs = secs.as_u64().ok_or_else(|| {
-                    "balance_helper.auto_refresh_secs must be a number".to_string()
-                })?;
-            }
-            if let Some(cache) = v.get("cache") {
-                next.cache = if cache.is_null() {
-                    Default::default()
-                } else {
-                    serde_json::from_value(cache.clone())
-                        .map_err(|e| format!("Invalid balance_helper.cache: {}", e))?
-                };
-            }
-            all.user.balance_helper = validate_balance_helper(next)?;
-        }
-    }
-    if let Some(v) = patch.get("active_platform_id") {
-        all.user.active_platform_id = if v.is_null() {
-            None
-        } else {
-            v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string())
-        };
-    }
-    if let Some(v) = patch.get("ui_zoom") {
-        all.user.ui_zoom = validate_ui_zoom(v)?;
-        log::debug!("[storage/settings] ui_zoom patched: {:?}", all.user.ui_zoom);
-    }
-    if let Some(v) = patch.get("onboarding_completed") {
-        all.user.onboarding_completed = v.as_bool().unwrap_or(false);
-    }
-    if let Some(v) = patch.get("windows_msvc_env_mode") {
-        all.user.windows_msvc_env_mode = serde_json::from_value::<WindowsMsvcEnvMode>(v.clone())
-            .map_err(|e| format!("Invalid windows_msvc_env_mode: {}", e))?;
-    }
-    if let Some(v) = patch.get("github_proxy_enabled") {
-        all.user.github_proxy_enabled = v.as_bool().unwrap_or(false);
-    }
-    if let Some(v) = patch.get("github_proxy_port") {
-        all.user.github_proxy_port =
-            v.as_u64().filter(|&p| p >= 1 && p <= 65535).unwrap_or(7890) as u16;
-    }
+    apply_string_field(&mut all.user.default_agent, &patch, "default_agent");
+    apply_optional_string_field(&mut all.user.default_model, &patch, "default_model");
+    apply_string_vec_field(&mut all.user.allowed_tools, &patch, "allowed_tools");
+    apply_optional_string_field(&mut all.user.working_directory, &patch, "working_directory");
+    apply_string_field(&mut all.user.provider_mode, &patch, "provider_mode");
+    apply_string_field(&mut all.user.auth_mode, &patch, "auth_mode");
+    apply_optional_string_empty_as_none(&mut all.user.anthropic_api_key, &patch, "anthropic_api_key");
+    apply_optional_string_empty_as_none(&mut all.user.anthropic_base_url, &patch, "anthropic_base_url");
+    apply_optional_string_empty_as_none(&mut all.user.auth_env_var, &patch, "auth_env_var");
+    apply_string_field(&mut all.user.permission_mode, &patch, "permission_mode");
+    apply_optional_f64_field(&mut all.user.max_budget_usd, &patch, "max_budget_usd");
+    apply_optional_string_empty_as_none(&mut all.user.fallback_model, &patch, "fallback_model");
+    apply_deser_vec_field(&mut all.user.keybinding_overrides, &patch, "keybinding_overrides")?;
+    apply_deser_vec_field(&mut all.user.remote_hosts, &patch, "remote_hosts")?;
+    apply_deser_vec_field(&mut all.user.platform_credentials, &patch, "platform_credentials")?;
+    apply_deser_vec_field(&mut all.user.cc_agent_profiles, &patch, "cc_agent_profiles")?;
+    apply_deser_vec_field(&mut all.user.connection_profiles, &patch, "connection_profiles")?;
+    apply_balance_helper(&mut all.user, &patch)?;
+    apply_optional_string_empty_as_none(&mut all.user.active_platform_id, &patch, "active_platform_id");
+    apply_ui_zoom(&mut all.user, &patch)?;
+    apply_bool_field(&mut all.user.onboarding_completed, &patch, "onboarding_completed");
+    apply_windows_msvc_env_mode(&mut all.user, &patch)?;
+    apply_bool_field(&mut all.user.github_proxy_enabled, &patch, "github_proxy_enabled");
+    apply_port_field(&mut all.user.github_proxy_port, &patch, "github_proxy_port");
+    apply_hashmap_field(&mut all.user.mcp_servers, &patch, "mcp_servers")?;
+    apply_hashmap_field(&mut all.user.hooks, &patch, "hooks")?;
+    apply_hashmap_field(&mut all.user.enabled_plugins, &patch, "enabled_plugins")?;
     all.user.updated_at = crate::models::now_iso();
     save(&all)?;
     Ok(all.user)
+}
+
+// ── Per-field apply functions ──
+
+fn apply_string_field(target: &mut String, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key).and_then(|v| v.as_str()) {
+        *target = v.to_string();
+    }
+}
+
+fn apply_optional_string_field(target: &mut Option<String>, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key) {
+        *target = v.as_str().map(|s| s.to_string());
+    }
+}
+
+fn apply_optional_string_empty_as_none(target: &mut Option<String>, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key) {
+        *target = v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+}
+
+fn apply_optional_f64_field(target: &mut Option<f64>, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key) {
+        *target = if v.is_null() { None } else { v.as_f64() };
+    }
+}
+
+fn apply_string_vec_field(target: &mut Vec<String>, patch: &serde_json::Value, key: &str) {
+    if let Some(arr) = patch.get(key).and_then(|v| v.as_array()) {
+        *target = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+    }
+}
+
+fn apply_bool_field(target: &mut bool, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key) {
+        *target = v.as_bool().unwrap_or(false);
+    }
+}
+
+fn apply_port_field(target: &mut u16, patch: &serde_json::Value, key: &str) {
+    if let Some(v) = patch.get(key) {
+        *target = v.as_u64().filter(|&p| p >= 1 && p <= 65535).unwrap_or(7890) as u16;
+    }
+}
+
+fn apply_deser_vec_field<T: serde::de::DeserializeOwned>(
+    target: &mut Vec<T>,
+    patch: &serde_json::Value,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(v) = patch.get(key) {
+        if v.is_null() {
+            *target = vec![];
+        } else {
+            *target = serde_json::from_value(v.clone())
+                .map_err(|e| format!("Invalid {}: {}", key, e))?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_hashmap_field<V: serde::de::DeserializeOwned + Default>(
+    target: &mut HashMap<String, V>,
+    patch: &serde_json::Value,
+    key: &str,
+) -> Result<(), String> {
+    if let Some(v) = patch.get(key) {
+        if v.is_null() {
+            *target = HashMap::new();
+        } else {
+            *target = serde_json::from_value(v.clone())
+                .map_err(|e| format!("Invalid {}: {}", key, e))?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_ui_zoom(user: &mut UserSettings, patch: &serde_json::Value) -> Result<(), String> {
+    if let Some(v) = patch.get("ui_zoom") {
+        user.ui_zoom = validate_ui_zoom(v)?;
+        log::debug!("[storage/settings] ui_zoom patched: {:?}", user.ui_zoom);
+    }
+    Ok(())
+}
+
+fn apply_windows_msvc_env_mode(user: &mut UserSettings, patch: &serde_json::Value) -> Result<(), String> {
+    if let Some(v) = patch.get("windows_msvc_env_mode") {
+        user.windows_msvc_env_mode = serde_json::from_value::<WindowsMsvcEnvMode>(v.clone())
+            .map_err(|e| format!("Invalid windows_msvc_env_mode: {}", e))?;
+    }
+    Ok(())
+}
+
+fn apply_balance_helper(user: &mut UserSettings, patch: &serde_json::Value) -> Result<(), String> {
+    let v = match patch.get("balance_helper") {
+        Some(v) => v,
+        None => return Ok(()),
+    };
+    if v.is_null() {
+        user.balance_helper = BalanceHelperSettings::default();
+        return Ok(());
+    }
+    let mut next = user.balance_helper.clone();
+    if let Some(session) = v.get("packy_session") {
+        next.packy_session = session.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(itoken) = v.get("packy_tdc_itoken") {
+        next.packy_tdc_itoken = itoken.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(user_id) = v.get("packy_user_id") {
+        next.packy_user_id = user_id.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(token) = v.get("mimo_service_token") {
+        next.mimo_service_token = token.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(uid) = v.get("mimo_user_id") {
+        next.mimo_user_id = uid.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(slh) = v.get("mimo_slh") {
+        next.mimo_slh = slh.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(ph) = v.get("mimo_ph") {
+        next.mimo_ph = ph.as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
+    if let Some(secs) = v.get("auto_refresh_secs") {
+        next.auto_refresh_secs = secs
+            .as_u64()
+            .ok_or_else(|| "balance_helper.auto_refresh_secs must be a number".to_string())?;
+    }
+    if let Some(cache) = v.get("cache") {
+        next.cache = if cache.is_null() {
+            Default::default()
+        } else {
+            serde_json::from_value(cache.clone())
+                .map_err(|e| format!("Invalid balance_helper.cache: {}", e))?
+        };
+    }
+    user.balance_helper = validate_balance_helper(next)?;
+    Ok(())
 }
 
 pub fn get_agent_settings(agent: &str) -> AgentSettings {

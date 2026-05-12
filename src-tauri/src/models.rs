@@ -355,6 +355,18 @@ pub struct UserSettings {
     /// Injected into every generated session JSON via `--settings`.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub mcp_servers: std::collections::HashMap<String, serde_json::Value>,
+    /// Managed hook configs (event name → array of hook groups).
+    /// Overwrites native hooks per-event in generated session JSON.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub hooks: std::collections::HashMap<String, serde_json::Value>,
+    /// Managed plugin enable/disable states (plugin name → enabled).
+    /// Overwrites native enabledPlugins in generated session JSON.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub enabled_plugins: std::collections::HashMap<String, bool>,
+    /// Whether native hooks from `~/.claude/settings.json` have been imported.
+    /// Set to `true` after first-launch migration completes.
+    #[serde(default)]
+    pub native_hooks_migrated: bool,
     pub updated_at: String,
 }
 
@@ -537,6 +549,9 @@ impl Default for UserSettings {
             github_proxy_port: 7890,
             windows_msvc_env_mode: WindowsMsvcEnvMode::Auto,
             mcp_servers: std::collections::HashMap::new(),
+            hooks: std::collections::HashMap::new(),
+            enabled_plugins: std::collections::HashMap::new(),
+            native_hooks_migrated: false,
             updated_at: now_iso(),
         }
     }
