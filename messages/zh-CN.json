@@ -1651,5 +1651,22 @@
   "export_noConversation": "没有可导出的对话",
   "export_htmlSuccess": "已导出 HTML",
   "export_htmlFailed": "导出失败",
-  "export_htmlButton": "导出为 HTML"
+  "export_htmlButton": "导出为 HTML",
+
+  "common_delete": "删除",
+
+  "settings_characters": "AI 角色",
+  "settings_characters_new": "新角色",
+  "settings_characters_edit": "编辑角色",
+  "settings_characters_label": "名称",
+  "settings_characters_role_type": "角色类型",
+  "settings_characters_role_instruction": "角色指令",
+  "settings_characters_role_instruction_hint": "注入到 --append-system-prompt，定义角色行为约束",
+  "settings_characters_provider": "默认 Provider",
+  "settings_characters_model": "默认模型（可选）",
+  "settings_characters_icon": "图标（可选）",
+  "settings_characters_planner": "规划者",
+  "settings_characters_executor": "执行者",
+  "settings_characters_custom": "自定义",
+  "settings_characters_delete_confirm": "确定删除此角色"
 }
