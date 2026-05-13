@@ -1,5 +1,7 @@
-use crate::models::{AiCharacter, AllSettings};
+use crate::group_chat::memory_graph::{compute_relevance_edges, detect_communities, detect_knowledge_gaps};
+use crate::models::{AiCharacter, AllSettings, CommunityInfo, KnowledgeGapInfo, MemoryGraphData, MemoryNode, MemorySource};
 use crate::storage;
+use std::io::Write;
 
 #[tauri::command]
 pub fn list_characters() -> Result<Vec<AiCharacter>, String> {
@@ -107,6 +109,166 @@ pub fn delete_character(id: String) -> Result<(), String> {
     }
     all.user.updated_at = crate::models::now_iso();
     save_all(&all)
+}
+
+// --- Memory CRUD ---
+
+#[tauri::command]
+pub async fn list_character_memories(
+    character_id: String,
+) -> Result<Vec<MemoryNode>, String> {
+    storage::characters::read_all_memory_log_entries(&character_id)
+}
+
+#[tauri::command]
+pub async fn get_character_memory(
+    character_id: String,
+    memory_id: String,
+) -> Result<Option<MemoryNode>, String> {
+    let entries = storage::characters::read_all_memory_log_entries(&character_id)?;
+    Ok(entries.into_iter().find(|n| n.id == memory_id))
+}
+
+#[tauri::command]
+pub async fn create_character_memory(
+    character_id: String,
+    content: String,
+    memory_type: String,
+    confidence: f64,
+    tags: Vec<String>,
+) -> Result<MemoryNode, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let node = MemoryNode {
+        id: uuid::Uuid::new_v4().to_string(),
+        character_id: character_id.clone(),
+        content: content.clone(),
+        memory_type: memory_type.clone(),
+        confidence,
+        source: MemorySource {
+            kind: "manual".to_string(),
+            run_id: None,
+            group_chat_id: None,
+        },
+        tags: tags.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    // 1. Append to authoritative log
+    storage::characters::append_memory_log(&character_id, &node)?;
+
+    // 2. Update graph
+    let existing = storage::characters::read_all_memory_log_entries(&character_id)?;
+    let mut graph = storage::characters::load_memory_graph(&character_id)?;
+    graph.nodes.push(node.clone());
+    let new_edges = compute_relevance_edges(&node, &existing, &graph.edges);
+    graph.edges.extend(new_edges);
+    let _ = storage::characters::save_memory_graph(&character_id, &graph);
+
+    // 3. LanceDB upsert (fire-and-forget if embedding fails)
+    if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(&content).await {
+        let _ = crate::commands::vectorstore::vector_upsert(
+            character_id.clone(),
+            node.id.clone(),
+            embedding_vec,
+        )
+        .await;
+    }
+
+    Ok(node)
+}
+
+#[tauri::command]
+pub async fn update_character_memory(
+    character_id: String,
+    memory_id: String,
+    content: Option<String>,
+    memory_type: Option<String>,
+    confidence: Option<f64>,
+    tags: Option<Vec<String>>,
+) -> Result<MemoryNode, String> {
+    let mut entries = storage::characters::read_all_memory_log_entries(&character_id)?;
+    let idx = entries
+        .iter()
+        .position(|n| n.id == memory_id)
+        .ok_or("Memory not found")?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(ref c) = content {
+        entries[idx].content = c.clone();
+    }
+    if let Some(t) = memory_type {
+        entries[idx].memory_type = t;
+    }
+    if let Some(c) = confidence {
+        entries[idx].confidence = c;
+    }
+    if let Some(t) = tags {
+        entries[idx].tags = t;
+    }
+    entries[idx].updated_at = now;
+
+    let updated = entries[idx].clone();
+
+    // Rewrite log
+    let path = storage::characters::memory_log_path(&character_id);
+    let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    for node in &entries {
+        let line = serde_json::to_string(node).map_err(|e| e.to_string())? + "\n";
+        file.write_all(line.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Update vector if content changed
+    if let Some(ref c) = content {
+        let _ =
+            crate::commands::vectorstore::vector_delete(character_id.clone(), memory_id.clone())
+                .await;
+        if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(c).await {
+            let _ = crate::commands::vectorstore::vector_upsert(
+                character_id.clone(),
+                memory_id,
+                embedding_vec,
+            )
+            .await;
+        }
+    }
+
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn delete_character_memory(
+    character_id: String,
+    memory_id: String,
+) -> Result<(), String> {
+    storage::characters::delete_memory_from_log(&character_id, &memory_id)?;
+    let _ = crate::commands::vectorstore::vector_delete(character_id, memory_id).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_memory_graph(
+    character_id: String,
+) -> Result<MemoryGraphData, String> {
+    storage::characters::load_memory_graph(&character_id)
+}
+
+#[tauri::command]
+pub async fn get_memory_communities(
+    character_id: String,
+) -> Result<Vec<CommunityInfo>, String> {
+    let graph = storage::characters::load_memory_graph(&character_id)?;
+    Ok(detect_communities(&graph.nodes, &graph.edges))
+}
+
+#[tauri::command]
+pub async fn get_knowledge_gaps(
+    character_id: String,
+) -> Result<Vec<KnowledgeGapInfo>, String> {
+    let graph = storage::characters::load_memory_graph(&character_id)?;
+    let communities = detect_communities(&graph.nodes, &graph.edges);
+    Ok(detect_knowledge_gaps(&graph.nodes, &graph.edges, &communities))
 }
 
 fn load_all() -> Result<AllSettings, String> {
