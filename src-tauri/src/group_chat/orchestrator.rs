@@ -393,6 +393,13 @@ async fn execute_pipe_turn(
     // GroupChat sessions run in plan/read-only mode.
     adapter_settings.permission_mode = Some("plan".to_string());
 
+    // Inject role-based system prompt from the participant's linked character.
+    if let Some(role_prompt) =
+        resolve_participant_system_prompt(participant, &user_settings.ai_characters)
+    {
+        adapter_settings.append_system_prompt = Some(role_prompt);
+    }
+
     let profile = match storage::settings::find_connection_profile(
         &user_settings,
         &run.agent,
@@ -479,6 +486,36 @@ async fn execute_pipe_turn(
             .map(|run| run_status_label(run.status.clone()).to_string())
             .unwrap_or_else(|| "complete".to_string()),
         error: completed_run.and_then(|run| run.error_message),
+    }
+}
+
+/// Build a system prompt for a participant based on their role type and optional custom instruction.
+fn build_role_system_prompt(role_type: &str, role_instruction: &Option<String>) -> String {
+    let base = match role_type {
+        "planner" => {
+            "你可以读取文件和搜索代码来辅助规划。你不可以执行修改文件系统或运行命令的工具。"
+        }
+        "executor" => "你严格按照计划执行任务。你不可以偏离计划内容。",
+        _ => "",
+    };
+    let custom = role_instruction.as_deref().unwrap_or("");
+    format!("{}\n{}", base, custom).trim().to_string()
+}
+
+/// Look up the AiCharacter whose label matches the participant's label,
+/// then build a role system prompt from its role_type and role_instruction.
+fn resolve_participant_system_prompt(
+    participant: &GroupChatParticipant,
+    ai_characters: &[crate::models::AiCharacter],
+) -> Option<String> {
+    let character = ai_characters
+        .iter()
+        .find(|c| c.label.eq_ignore_ascii_case(&participant.label))?;
+    let prompt = build_role_system_prompt(&character.role_type, &character.role_instruction);
+    if prompt.is_empty() {
+        None
+    } else {
+        Some(prompt)
     }
 }
 
