@@ -8,6 +8,7 @@
     disabled = false,
     loading = false,
     class: className = "",
+    title = "",
     onclick,
     children,
   }: {
@@ -16,6 +17,7 @@
     disabled?: boolean;
     loading?: boolean;
     class?: string;
+    title?: string;
     onclick?: (e: MouseEvent) => void;
     children?: import("svelte").Snippet;
   } = $props();
@@ -43,6 +45,7 @@
   class="{base} {variants[variant]} {sizes[size]} {className}"
   disabled={disabled || loading}
   {onclick}
+  {title}
 >
   {#if loading}
     <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">

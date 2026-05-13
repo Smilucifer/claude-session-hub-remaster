@@ -291,10 +291,34 @@ export async function updateCharacter(
     defaultProvider?: string;
     defaultModel?: string | null;
     icon?: string | null;
+    avatarPath?: string | null;
+    personality?: string | null;
+    expertise?: string[];
+    memoryConfig?: import("./types").MemoryConfig | null;
   },
 ): Promise<AiCharacter> {
   dbg("api", "updateCharacter", { id, ...updates });
-  return invoke<AiCharacter>("update_character", { id, ...updates });
+  return invoke<AiCharacter>("update_character", {
+    id,
+    label: updates.label,
+    roleType: updates.roleType,
+    roleInstruction: updates.roleInstruction,
+    defaultProvider: updates.defaultProvider,
+    defaultModel: updates.defaultModel,
+    icon: updates.icon,
+    avatarPath: updates.avatarPath,
+    personality: updates.personality,
+    expertise: updates.expertise,
+    memoryConfig: updates.memoryConfig,
+  });
+}
+
+export async function uploadCharacterAvatar(
+  characterId: string,
+  filePath: string,
+): Promise<string> {
+  dbg("api", "uploadCharacterAvatar", { characterId, filePath });
+  return invoke<string>("upload_character_avatar", { characterId, filePath });
 }
 
 export async function deleteCharacter(id: string): Promise<void> {

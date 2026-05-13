@@ -57,6 +57,10 @@ pub fn update_character(
     default_provider: Option<String>,
     default_model: Option<Option<String>>,
     icon: Option<Option<String>>,
+    avatar_path: Option<Option<String>>,
+    personality: Option<Option<String>>,
+    expertise: Option<Vec<String>>,
+    memory_config: Option<Option<crate::models::MemoryConfig>>,
 ) -> Result<AiCharacter, String> {
     log::debug!("[characters] update_character: id={}", id);
     let mut all = load_all()?;
@@ -88,6 +92,18 @@ pub fn update_character(
     }
     if let Some(v) = icon {
         character.icon = v;
+    }
+    if let Some(v) = avatar_path {
+        character.avatar_path = v;
+    }
+    if let Some(v) = personality {
+        character.personality = v;
+    }
+    if let Some(v) = expertise {
+        character.expertise = v;
+    }
+    if let Some(v) = memory_config {
+        character.memory_config = v;
     }
     character.updated_at = crate::models::now_iso();
 

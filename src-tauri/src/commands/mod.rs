@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod avatar;
 pub mod artifacts;
 pub mod balance;
 pub mod characters;

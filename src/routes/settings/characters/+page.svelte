@@ -9,6 +9,7 @@
   import { t } from "$lib/i18n/index.svelte";
   import type { MessageKey } from "$lib/i18n/types";
   import { dbgWarn } from "$lib/utils/debug";
+  import CharacterMemoryPanel from "$lib/components/CharacterMemoryPanel.svelte";
 
   // ── State ──
   let characters = $state<AiCharacter[]>([]);
@@ -25,6 +26,13 @@
   let formDefaultModel = $state("");
   let formRoleInstruction = $state("");
   let formIcon = $state("");
+  let formPersonality = $state("");
+  let formExpertise = $state<string[]>([]);
+  let expertiseInput = $state("");
+  let formAutoLearn = $state(false);
+  let formRetentionDays = $state<number | undefined>(undefined);
+  let editingAvatar = $state<string | null>(null);
+  let memoryPanelCharId = $state<string | null>(null);
 
   const ROLE_TYPES = ["planner", "executor", "custom"] as const;
 
@@ -53,6 +61,12 @@
     formDefaultModel = "";
     formRoleInstruction = "";
     formIcon = "";
+    formPersonality = "";
+    formExpertise = [];
+    expertiseInput = "";
+    formAutoLearn = false;
+    formRetentionDays = undefined;
+    editingAvatar = null;
     editingId = null;
   }
 
@@ -69,6 +83,12 @@
     formDefaultModel = char.default_model ?? "";
     formRoleInstruction = char.role_instruction ?? "";
     formIcon = char.icon ?? "";
+    formPersonality = char.personality ?? "";
+    formExpertise = char.expertise ? [...char.expertise] : [];
+    expertiseInput = "";
+    formAutoLearn = char.memory_config?.auto_learn ?? false;
+    formRetentionDays = char.memory_config?.retention_days ?? undefined;
+    editingAvatar = char.avatar_path ?? null;
     showForm = true;
   }
 
@@ -96,6 +116,12 @@
           defaultProvider,
           defaultModel,
           icon,
+          avatarPath: editingAvatar ?? null,
+          personality: formPersonality.trim() || null,
+          expertise: formExpertise,
+          memoryConfig: formAutoLearn
+            ? { auto_learn: true, retention_days: formRetentionDays ?? undefined }
+            : null,
         });
         characters = characters.map((c) => (c.id === editingId ? updated : c));
       } else {
@@ -144,6 +170,15 @@
   function providerLabel(id: string): string {
     return PHASE7_PROVIDERS.find((p) => p.id === id)?.label ?? id;
   }
+
+  function fileSrc(path: string | null | undefined): string {
+    if (!path) return "";
+    try {
+      return (window as any).__TAURI__?.core?.convertFileSrc?.(path) ?? path;
+    } catch {
+      return path;
+    }
+  }
 </script>
 
 {#if loading}
@@ -178,8 +213,16 @@
         {#each characters as char (char.id)}
           <Card class="p-4">
             <div class="flex items-start gap-3">
-              <!-- Icon -->
-              <span class="text-2xl shrink-0 mt-0.5">{char.icon || "\u{1F916}"}</span>
+              <!-- Icon / Avatar -->
+              {#if char.avatar_path}
+                <img
+                  src={fileSrc(char.avatar_path)}
+                  alt=""
+                  class="w-10 h-10 rounded-xl object-cover shrink-0 mt-0.5"
+                />
+              {:else}
+                <span class="text-2xl shrink-0 mt-0.5">{char.icon || "\u{1F916}"}</span>
+              {/if}
 
               <!-- Content -->
               <div class="flex-1 min-w-0">
@@ -199,15 +242,30 @@
                     / {char.default_model}
                   {/if}
                 </p>
-                {#if char.role_instruction}
-                  <p class="text-xs text-muted-foreground/70 line-clamp-2">
-                    {truncate(char.role_instruction, 120)}
+                {#if char.personality}
+                  <p class="text-xs text-muted-foreground/70 line-clamp-1 mt-0.5">
+                    {truncate(char.personality, 80)}
                   </p>
+                {/if}
+                {#if char.expertise && char.expertise.length > 0}
+                  <div class="flex flex-wrap gap-1 mt-1">
+                    {#each char.expertise as tag}
+                      <span class="text-[10px] bg-primary/5 text-primary px-1.5 py-0.5 rounded">{tag}</span>
+                    {/each}
+                  </div>
                 {/if}
               </div>
 
               <!-- Actions -->
               <div class="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => (memoryPanelCharId = char.id)}
+                  title="管理记忆"
+                >
+                  记忆
+                </Button>
                 <Button variant="ghost" size="icon" onclick={() => openEditForm(char)}>
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
@@ -228,6 +286,18 @@
       </div>
     {/if}
   </div>
+{/if}
+
+<!-- Character Memory Panel -->
+{#if memoryPanelCharId}
+  {@const char = characters.find((c) => c.id === memoryPanelCharId)}
+  <CharacterMemoryPanel
+    characterId={memoryPanelCharId}
+    characterLabel={char?.label ?? ""}
+    characterIcon={char?.icon ?? ""}
+    open={true}
+    onclose={() => (memoryPanelCharId = null)}
+  />
 {/if}
 
 <!-- Create/Edit dialog -->
@@ -334,6 +404,121 @@
           bind:value={formIcon}
           placeholder="🤖"
         />
+      </div>
+
+      <!-- Avatar upload -->
+      <div>
+        <label class="text-[10px] uppercase text-[#666] block mb-1">Avatar</label>
+        <div class="flex gap-3 items-start">
+          {#if editingAvatar}
+            <img src={fileSrc(editingAvatar)} alt="" class="w-16 h-16 rounded-xl object-cover shrink-0" />
+          {:else}
+            <div class="w-16 h-16 rounded-xl bg-[#1a1a2e] flex items-center justify-center text-2xl shrink-0">?</div>
+          {/if}
+          <div class="flex flex-col gap-1">
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              class="text-xs"
+              onchange={async (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (!file || !editingId) return;
+                try {
+                  const path = await api.uploadCharacterAvatar(editingId, (file as any).path ?? file.name);
+                  editingAvatar = path;
+                } catch (err) {
+                  dbgWarn("settings/characters", "avatar upload failed", err);
+                }
+              }}
+            />
+            {#if editingAvatar}
+              <button
+                class="text-[11px] text-destructive hover:underline text-left"
+                onclick={() => (editingAvatar = null)}
+              >移除头像</button>
+            {/if}
+          </div>
+        </div>
+      </div>
+
+      <!-- Personality -->
+      <div class="space-y-1.5">
+        <label class="text-[10px] uppercase text-[#666] block mb-1">Personality</label>
+        <textarea
+          bind:value={formPersonality}
+          placeholder="Character personality..."
+          rows={3}
+          class="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+        ></textarea>
+      </div>
+
+      <!-- Expertise tags -->
+      <div class="space-y-1.5">
+        <label class="text-[10px] uppercase text-[#666] block mb-1">Expertise</label>
+        {#if formExpertise.length > 0}
+          <div class="flex flex-wrap gap-1 mb-1.5">
+            {#each formExpertise as tag, i}
+              <span class="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs px-2 py-0.5 rounded">
+                {tag}
+                <button
+                  class="hover:text-destructive transition-colors leading-none"
+                  onclick={() => {
+                    formExpertise = formExpertise.filter((_, idx) => idx !== i);
+                  }}
+                >&times;</button>
+              </span>
+            {/each}
+          </div>
+        {/if}
+        <div class="flex gap-1">
+          <input
+            bind:value={expertiseInput}
+            placeholder="Add expertise..."
+            class="flex-1 h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onkeydown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const tag = expertiseInput.trim();
+                if (tag && !formExpertise.includes(tag)) {
+                  formExpertise = [...formExpertise, tag];
+                }
+                expertiseInput = "";
+              }
+            }}
+          />
+          <button
+            class="bg-[#1a1a2e] px-3 rounded text-xs hover:bg-[#252545] transition-colors"
+            onclick={() => {
+              const tag = expertiseInput.trim();
+              if (tag && !formExpertise.includes(tag)) {
+                formExpertise = [...formExpertise, tag];
+              }
+              expertiseInput = "";
+            }}
+          >+</button>
+        </div>
+      </div>
+
+      <!-- Memory config -->
+      <div class="space-y-1.5">
+        <label class="text-[10px] uppercase text-[#666] block mb-1">Memory Config</label>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" class="w-3 h-3" bind:checked={formAutoLearn} />
+          <span class="text-xs">Auto-learn from conversations</span>
+        </div>
+        {#if formAutoLearn}
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-[11px] text-muted-foreground">Retention days:</span>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              bind:value={formRetentionDays}
+              placeholder="30"
+              class="w-20 h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+        {/if}
       </div>
 
       <!-- Actions -->

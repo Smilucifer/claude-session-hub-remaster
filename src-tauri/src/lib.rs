@@ -186,6 +186,7 @@ pub fn run() {
             commands::characters::get_memory_graph,
             commands::characters::get_memory_communities,
             commands::characters::get_knowledge_gaps,
+            commands::avatar::upload_character_avatar,
             commands::memos::list_memos,
             commands::memos::add_memo,
             commands::memos::update_memo,
