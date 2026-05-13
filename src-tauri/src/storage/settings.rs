@@ -472,6 +472,7 @@ pub fn get_embedding_config() -> Option<EmbeddingConfig> {
 pub fn update_embedding_config(config: EmbeddingConfig) -> Result<EmbeddingConfig, String> {
     let mut all = load();
     all.user.embedding_config = Some(config.clone());
+    all.user.updated_at = crate::models::now_iso();
     save(&all)?;
     Ok(config)
 }

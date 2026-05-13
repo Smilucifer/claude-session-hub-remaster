@@ -4,6 +4,26 @@ use serde_json::Value;
 use std::time::Instant;
 use tauri::command;
 
+fn build_embedding_request(
+    config: &EmbeddingConfig,
+    input: &str,
+    timeout_secs: u64,
+) -> Result<reqwest::RequestBuilder, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = serde_json::json!({
+        "input": input,
+        "model": config.model,
+    });
+    let mut req = client.post(&config.endpoint).json(&body);
+    if let Some(ref key) = config.api_key {
+        req = req.header("Authorization", format!("Bearer {}", key));
+    }
+    Ok(req)
+}
+
 #[command]
 pub async fn get_embedding_config() -> Result<Option<EmbeddingConfig>, String> {
     Ok(settings::get_embedding_config())
@@ -22,21 +42,8 @@ pub async fn test_embedding_connection() -> Result<TestEmbeddingResult, String> 
         return Err("Embedding is disabled".into());
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| e.to_string())?;
-
     let start = Instant::now();
-    let body = serde_json::json!({
-        "input": "test connection",
-        "model": config.model,
-    });
-
-    let mut req = client.post(&config.endpoint).json(&body);
-    if let Some(ref key) = config.api_key {
-        req = req.header("Authorization", format!("Bearer {}", key));
-    }
+    let req = build_embedding_request(&config, "test connection", 5)?;
 
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let latency = start.elapsed().as_millis() as u64;
@@ -73,20 +80,9 @@ pub async fn fetch_embedding(text: &str) -> Result<Vec<f32>, String> {
         return Err("Embedding is disabled".into());
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let body = serde_json::json!({
-        "input": &text[..text.len().min(2000)],
-        "model": config.model,
-    });
-
-    let mut req = client.post(&config.endpoint).json(&body);
-    if let Some(ref key) = config.api_key {
-        req = req.header("Authorization", format!("Bearer {}", key));
-    }
+    // Use char-based truncation to avoid UTF-8 byte-slice panic
+    let truncated: String = text.chars().take(2000).collect();
+    let req = build_embedding_request(&config, &truncated, 3)?;
 
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let json: Value = resp.json().await.map_err(|e| e.to_string())?;
