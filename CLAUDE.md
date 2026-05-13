@@ -8,10 +8,11 @@ This repository is a Windows-first Tauri desktop app with a SvelteKit frontend a
 
 The core product model is:
 - `Run` is the smallest execution unit.
-- `Room` is an orchestration layer built on top of one or more runs.
+- `GroupChat` (formerly Room) is an orchestration layer built on top of one or more runs.
+- `AiCharacter` is a reusable persona template with role_type, role_instruction, and default provider/model, stored in UserSettings.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 9.z (2026-05-12). Custom Provider support, native config merge (hooks/plugins/env survive `--settings`), managed MCP server injection, SENSITIVE_KEYS centralization.
+**Current phase:** Phase 10 (2026-05-13). Group Chat refactor — Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt injection, Auto-chain routing.
 
 ## Standard workflow
 
@@ -90,8 +91,8 @@ Frontend Vitest only includes `src/**/*.test.ts`.
 
 ```bash
 npm test -- src/lib/stores/memo-store.test.ts
-npm test -- src/lib/stores/room-store.test.ts
-npm test -- src/lib/utils/room-ui.test.ts
+npm test -- src/lib/stores/group-chat-store.test.ts
+npm test -- src/lib/utils/agent-capabilities.test.ts
 ```
 
 Rust single-module examples:
@@ -107,10 +108,10 @@ If narrowing Rust tests further, use the module path pattern accepted by `cargo 
 
 - `src/`: SvelteKit frontend (Svelte 5 runes).
 - `src/lib/stores/`: stateful frontend stores; the main app behavior is coordinated here.
-- `src/lib/components/`: shared UI components — GlobalMemoPanel, ChatMessage, CommandPalette, RoomStepper, modals, and provider/settings panels.
-- `src/lib/utils/`: frontend utilities — provider-catalog, room-ui, format, agent-capabilities, and i18n helpers.
+- `src/lib/components/`: shared UI components — GlobalMemoPanel, ChatMessage, CommandPalette, GroupChatStepper, GroupChatLayout, PlanPanel, modals, and provider/settings panels.
+- `src/lib/utils/`: frontend utilities — provider-catalog, format, agent-capabilities, sidebar-groups, and i18n helpers.
 - `src/lib/transport/`: transport abstraction between desktop Tauri IPC and browser/WebSocket mode.
-- `src/routes/`: route-level UI pages — chat, rooms, memory, explorer, plugins, usage, history, settings. (`/memo` now redirects to `/chat`; memo is a global pop-out panel.)
+- `src/routes/`: route-level UI pages — chat, memory, explorer, plugins, usage, history, settings, settings/characters. (`/memo` redirects to `/chat`; memo is a global pop-out panel. Group chats are accessed from `/chat` with sidebar navigation.)
 - `src-tauri/src/commands/`: Tauri IPC command surface consumed by the frontend.
 - `src-tauri/src/agent/`: agent launch, session, stream, PTY (including native PTY for Codex), native transcript parsing, and Windows toolchain handling.
 - `src-tauri/src/room/`: room orchestration, room-specific execution adapters, and roundtable prompts.
@@ -127,7 +128,7 @@ The frontend is not organized around thin pages with all logic inline. The impor
 
 Key stores:
 - `src/lib/stores/session-store.svelte.ts`: the single source of truth for chat session state. It owns the session phase/state machine, timeline, tool events, usage, permissions, elicitation prompts, task notifications, and session metadata.
-- `src/lib/stores/room-store.svelte.ts`: manages room list/detail state, room creation, participant creation, run attachment, roundtable messaging, one-click Debate/Summary actions, and stepper snapshot state.
+- `src/lib/stores/group-chat-store.svelte.ts`: manages group chat list/detail state, group chat creation, participant creation, run attachment, roundtable messaging, one-click Debate/Summary actions, stepper snapshot state, and onboarding flow.
 - `src/lib/stores/memo-store.svelte.ts`: handles global-only memos in the pop-out panel (project-scoped memo was removed from the visible UI in Phase 7; the backend still supports it for backward compatibility).
 
 When debugging UI behavior, check stores before editing route components.
@@ -147,7 +148,9 @@ The frontend mainly talks to Rust through Tauri commands in `src-tauri/src/comma
 Important command groups:
 - `commands/chat.rs`: chat send path for `pipe_exec` runs, attachment staging, and spawn flow.
 - `commands/session.rs`: actor-backed session lifecycle, auth/env resolution, resume/stop flow, provider-native launch config generation, and Windows MSVC env injection.
-- `commands/rooms.rs`: room CRUD, participant creation, run attachment, room capability checks, `list_room_run_index` (sidebar grouping), and `get_room_turn_snapshot` (stepper replay).
+- `commands/group_chat.rs`: group chat CRUD, participant creation, run attachment, `list_group_chat_run_index` (sidebar grouping), and `get_group_chat_turn_snapshot` (stepper replay).
+- `commands/characters.rs`: AiCharacter CRUD (list/create/update/delete_character).
+- `commands/plans.rs`: PlanArtifact CRUD (get/create/update/approve/complete_plan).
 - `commands/balance.rs`: DeepSeek, Packy, and MiMo balance/usage queries (Phase 7 balance helper with cookie-based auth for MiMo).
 - `commands/runs.rs`, `commands/history.rs`, `commands/memos.rs`, `commands/settings.rs`: persistence-backed app features.
 
@@ -192,44 +195,45 @@ Provider-native launch config generation (Phase 9.z):
 
 Do not collapse provider selection, model display, and actual CLI spawn logic into a single assumption.
 
-### 6. Run and Room are both persisted local-first objects
+### 6. Run and GroupChat are both persisted local-first objects
 
 The app persists state to local storage files rather than treating sessions as purely in-memory.
 
 Key storage modules:
 - `src-tauri/src/storage/runs.rs`: creates and updates `RunMeta`, resolves connection profile/platform snapshots, and stores per-run metadata.
-- `src-tauri/src/storage/rooms.rs`: stores `room.json`, public timeline JSONL, private turns, research artifacts, and `.arena` room-local context files.
+- `src-tauri/src/storage/group_chats.rs`: stores `group_chat.json`, public timeline JSONL, private turns, plan artifacts, and participant meta files. Uses per-ID mutex locking for concurrent access safety.
 - `src-tauri/src/storage/events.rs`, `artifacts.rs`, `memos.rs`, `settings.rs`: supporting persistence.
 
 Useful mental model:
 - A `Run` is the persisted execution record.
-- A `Room` is a persisted orchestration container that references runs.
-- Deleting a room should not imply deleting the linked runs.
-- Backend room memo fields are kept for old data compatibility even though the Room page UI no longer renders them.
+- A `GroupChat` is a persisted orchestration container that references runs.
+- Deleting a group chat should not imply deleting the linked runs.
+- Each group chat can have an active `PlanArtifact` with tasks, status tracking, and user notes.
 
-### 7. Room orchestration is more than simple grouping
+### 7. Group Chat orchestration is more than simple grouping
 
-Rooms are not just folders for runs. The backend actively orchestrates room turns.
+Group chats are not just folders for runs. The backend actively orchestrates turns.
 
-`src-tauri/src/room/orchestrator.rs` handles:
+`src-tauri/src/group_chat/orchestrator.rs` handles:
 - fanout turns
 - `@debate`
 - `@summary @name`
 - `@DisplayName message` (SingleTarget — public turn to only the named participant)
 - `/dm @Name message` (Private — private turn, content hidden from public timeline)
-- driver/review and research-oriented room flows
+- auto-chain routing: after SingleTarget, scans response for `@mentions` and chains up to 3 hops
+- role-based system prompt injection via `--append-system-prompt` from linked AiCharacter
 
-The frontend Room page uses a three-pane workspace layout:
-- Three equal-width, scrollable participant panes fill the primary space.
-- Pane headers show participant label, provider/model metadata, status badge, and elapsed time.
-- A `RoomStepper` component below the panes replaces the old History strip, showing turn-by-turn status with clickable snapshot replay (purple banner + pane content overlay).
-- The action toolbar (Debate/Summary/summarizer selector) and composer are fixed at the bottom.
-- Room participant runs appear in a virtual "Rooms" folder in the sidebar, separate from project-grouped runs.
+The frontend group chat page uses a multi-pane workspace layout:
+- Participant panels with toggleable visibility, showing label, provider/model, status badge, and elapsed time.
+- `GroupChatStepper` component showing turn-by-turn status with clickable snapshot replay.
+- `PlanPanel` component for task checklist management (status cycling, approve/complete, user notes).
+- The action toolbar (Debate/Summary/summarizer selector) and composer with `@mention` autocomplete.
+- Group chat participant runs appear in a virtual "Group Chats" folder in the sidebar.
 
-If changing room behavior, inspect both:
-- `src/lib/stores/room-store.svelte.ts`
-- `src/routes/rooms/+page.svelte`
-- `src-tauri/src/room/orchestrator.rs`
+If changing group chat behavior, inspect both:
+- `src/lib/stores/group-chat-store.svelte.ts`
+- `src/lib/components/GroupChatLayout.svelte`
+- `src-tauri/src/group_chat/orchestrator.rs`
 
 ### 8. Memo is a global pop-out panel, not a full page
 
@@ -273,7 +277,7 @@ Important backend support already exists for Windows-native CLI execution:
 
 **MSVC injection enhancements (Phase 8):**
 - Auto-detection extended: `CMakeLists.txt`, `vcpkg.json`, `*.sln`, `*.vcxproj`, `*.pro`, `*.pri` (root-only).
-- Chat/Room policy split: `MsvcPolicy` enum — chat uses `AllowByMode`, rooms use `Disabled` (backend-enforced).
+- Chat/GroupChat policy split: `MsvcPolicy` enum — chat uses `AllowByMode`, group chats use `Disabled` (backend-enforced).
 - `msvc_injected: Option<bool>` propagated via `BusEvent::SessionInit` to frontend; MSVC badge in `SessionStatusBar`.
 - `MsvcEnvSkipReason::RoomPolicy` (distinct from `DisabledByUser`) for diagnostics.
 
@@ -319,7 +323,7 @@ These are already established patterns in the repo and should be preserved:
 - Tests are colocated where practical; frontend tests use `*.test.ts`, Rust tests stay near the module under test.
 - Conventional Commit style is used in git history (`feat:`, `fix:`, `chore:`).
 - Do not commit API keys, local settings, or generated runtime state.
-- `.arena` files are local runtime context mirrors and may contain room/run context, memo text, and recent public previews; they are not shareable artifacts.
+- `.arena` files are local runtime context mirrors (legacy from Room era) and may contain run context, memo text, and recent public previews; they are not shareable artifacts.
 
 ## Implementation history
 
@@ -343,6 +347,7 @@ Key phases and their status:
 | 9.x | Room adapter timeout fix: activity-aware timeout, cancel turn, frontend UX | [done] |
 | 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel, old ID removal, label disambiguation | [done] |
 | 9.z | Custom Provider support, native config merge, managed MCP injection, SENSITIVE_KEYS centralization | [done] |
+| 10 | Group Chat refactor: Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt, Auto-chain | [done] |
 
 Detailed plans and review responses are in `docs/`.
 
@@ -354,3 +359,5 @@ Detailed plans and review responses are in `docs/`.
 - Frontend test environment is `node`, configured in `vitest.config.ts`.
 - Provider-native launch config templates are in `src-tauri/src/commands/session.rs` (builder boundary).
 - The PTY-based native adapter (`native_pty.rs` + `native_transcript.rs`) is the canonical execution path for Codex. Do not reintroduce `codex exec` or pipe-based execution for native CLI providers.
+- Group chat participant meta (delivery cursor, session turn count, session seq) is stored at `group-chats/{id}/participants/{participant_id}.meta.json`.
+- Plan artifacts are stored at `group-chats/{id}/plan.json` with atomic writes (tmp+rename).

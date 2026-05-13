@@ -272,6 +272,7 @@ export async function updatePlan(
   title?: string,
   tasks?: PlanTaskInput[],
   userNotes?: string,
+  clearUserNotes?: boolean,
 ): Promise<PlanArtifact> {
   dbg("api", "updatePlan", { planId, title, taskCount: tasks?.length });
   return invoke<PlanArtifact>("update_plan", {
@@ -279,6 +280,7 @@ export async function updatePlan(
     title: title ?? null,
     tasks: tasks ?? null,
     userNotes: userNotes ?? null,
+    clearUserNotes: clearUserNotes ?? null,
   });
 }
 

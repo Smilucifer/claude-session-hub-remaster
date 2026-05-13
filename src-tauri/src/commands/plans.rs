@@ -46,9 +46,10 @@ pub fn update_plan(
     title: Option<String>,
     tasks: Option<Vec<PlanTaskInput>>,
     user_notes: Option<String>,
+    clear_user_notes: Option<bool>,
 ) -> Result<PlanArtifact, String> {
     let plan_tasks = tasks.map(|t| t.into_iter().map(into_plan_task).collect());
-    storage::group_chats::update_plan(&plan_id, title, plan_tasks, user_notes)
+    storage::group_chats::update_plan(&plan_id, title, plan_tasks, user_notes, clear_user_notes.unwrap_or(false))
 }
 
 #[tauri::command]

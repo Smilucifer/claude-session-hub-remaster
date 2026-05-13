@@ -44,11 +44,21 @@ fn participants_dir(group_chat_id: &str) -> PathBuf {
         .join("participants")
 }
 
+fn validate_participant_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.contains('/') || id.contains('\\') || id == "." || id == ".." {
+        return Err(format!("Invalid participant id: {}", id));
+    }
+    Ok(())
+}
+
 fn participant_meta_path(group_chat_id: &str, participant_id: &str) -> PathBuf {
     participants_dir(group_chat_id).join(format!("{participant_id}.meta.json"))
 }
 
 pub fn load_participant_meta(group_chat_id: &str, participant_id: &str) -> ParticipantMeta {
+    if validate_participant_id(participant_id).is_err() {
+        return ParticipantMeta::default();
+    }
     let path = participant_meta_path(group_chat_id, participant_id);
     fs::read_to_string(&path)
         .ok()
@@ -61,6 +71,7 @@ pub fn save_participant_meta(
     participant_id: &str,
     meta: &ParticipantMeta,
 ) -> Result<(), String> {
+    validate_participant_id(participant_id)?;
     let dir = participants_dir(group_chat_id);
     storage::ensure_dir(&dir).map_err(|e| e.to_string())?;
     let path = participant_meta_path(group_chat_id, participant_id);
@@ -86,33 +97,32 @@ pub fn advance_delivery_cursor(
 
 // ── Visibility filter (Task 37) ──
 
-/// Filter turns based on the given mode and participant identity.
+/// Filter turns based on each turn's own mode and participant identity.
 ///
-/// Rules:
-/// - `Fanout`: all turns visible
-/// - `Debate`: all turns visible
-/// - `Summary`: all turns visible
-/// - `Private`: only turns where participant is sender or target
-/// - `SingleTarget`: only turns where participant is sender or target
+/// Rules (applied per-turn):
+/// - `Fanout`: visible to all
+/// - `Debate`: visible to all
+/// - `Summary`: visible to all
+/// - `Private`: only visible if participant is sender or target
+/// - `SingleTarget`: only visible if participant is sender or target
 pub fn filter_visible_messages(
     turns: &[GroupChatTurn],
     participant_id: &str,
-    mode: &GroupChatTurnMode,
 ) -> Vec<GroupChatTurn> {
-    match mode {
-        GroupChatTurnMode::Fanout
-        | GroupChatTurnMode::Debate
-        | GroupChatTurnMode::Summary => turns.to_vec(),
-        GroupChatTurnMode::Private | GroupChatTurnMode::SingleTarget => turns
-            .iter()
-            .filter(|turn| {
+    turns
+        .iter()
+        .filter(|turn| match turn.mode {
+            GroupChatTurnMode::Fanout
+            | GroupChatTurnMode::Debate
+            | GroupChatTurnMode::Summary => true,
+            GroupChatTurnMode::Private | GroupChatTurnMode::SingleTarget => {
                 let is_sender = turn.responses.iter().any(|r| r.participant_id == participant_id);
                 let is_target = turn.target_participant_ids.iter().any(|id| id == participant_id);
                 is_sender || is_target
-            })
-            .cloned()
-            .collect(),
-    }
+            }
+        })
+        .cloned()
+        .collect()
 }
 
 // ── Session handoff (Task 38) ──
@@ -314,7 +324,7 @@ mod tests {
             make_turn(1, GroupChatTurnMode::Fanout, "p1", vec![]),
             make_turn(2, GroupChatTurnMode::Fanout, "p2", vec![]),
         ];
-        let visible = filter_visible_messages(&turns, "p1", &GroupChatTurnMode::Fanout);
+        let visible = filter_visible_messages(&turns, "p1");
         assert_eq!(visible.len(), 2);
     }
 
@@ -324,7 +334,7 @@ mod tests {
             make_turn(1, GroupChatTurnMode::Debate, "p1", vec![]),
             make_turn(2, GroupChatTurnMode::Debate, "p2", vec![]),
         ];
-        let visible = filter_visible_messages(&turns, "p1", &GroupChatTurnMode::Debate);
+        let visible = filter_visible_messages(&turns, "p1");
         assert_eq!(visible.len(), 2);
     }
 
@@ -334,7 +344,7 @@ mod tests {
             make_turn(1, GroupChatTurnMode::Summary, "p1", vec![]),
             make_turn(2, GroupChatTurnMode::Summary, "p2", vec![]),
         ];
-        let visible = filter_visible_messages(&turns, "p1", &GroupChatTurnMode::Summary);
+        let visible = filter_visible_messages(&turns, "p1");
         assert_eq!(visible.len(), 2);
     }
 
@@ -345,7 +355,7 @@ mod tests {
             make_turn(2, GroupChatTurnMode::Private, "p3", vec!["p4"]),
             make_turn(3, GroupChatTurnMode::Private, "p5", vec!["p1"]),
         ];
-        let visible = filter_visible_messages(&turns, "p1", &GroupChatTurnMode::Private);
+        let visible = filter_visible_messages(&turns, "p1");
         assert_eq!(visible.len(), 2);
         assert_eq!(visible[0].idx, 1);
         assert_eq!(visible[1].idx, 3);
@@ -357,9 +367,23 @@ mod tests {
             make_turn(1, GroupChatTurnMode::SingleTarget, "p1", vec!["p2"]),
             make_turn(2, GroupChatTurnMode::SingleTarget, "p3", vec!["p4"]),
         ];
-        let visible = filter_visible_messages(&turns, "p2", &GroupChatTurnMode::SingleTarget);
+        let visible = filter_visible_messages(&turns, "p2");
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].idx, 1);
+    }
+
+    #[test]
+    fn mixed_modes_filter_per_turn() {
+        let turns = vec![
+            make_turn(1, GroupChatTurnMode::Fanout, "p1", vec![]),
+            make_turn(2, GroupChatTurnMode::Private, "p3", vec!["p4"]),
+            make_turn(3, GroupChatTurnMode::SingleTarget, "p1", vec!["p2"]),
+        ];
+        // p2 sees: turn-1 (fanout), turn-3 (sender/target), but NOT turn-2 (private, not involved)
+        let visible = filter_visible_messages(&turns, "p2");
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].idx, 1);
+        assert_eq!(visible[1].idx, 3);
     }
 
     #[test]

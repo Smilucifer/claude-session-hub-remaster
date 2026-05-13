@@ -1473,7 +1473,6 @@ mod tests {
             "challenge assumptions",
             &[public_turn()],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
-            None,
         );
 
         assert!(prompt.contains("challenge assumptions"));
@@ -1522,7 +1521,6 @@ mod tests {
                 participant("p3", "Cara"),
                 participant("p4", "Dana"),
             ],
-            None,
         );
 
         assert!(prompt.contains("## 另两家上一轮观点"));
@@ -1560,7 +1558,6 @@ mod tests {
             "",
             &[fanout, summary],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
-            None,
         );
 
         assert!(prompt.contains("Bob answer"));

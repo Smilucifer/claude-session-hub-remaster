@@ -276,7 +276,9 @@ fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<GroupChatTurn>, 
             dedup.insert(turn.id.clone(), turn);
         }
     }
-    Ok(dedup.into_values().collect())
+    let mut turns: Vec<GroupChatTurn> = dedup.into_values().collect();
+    turns.sort_by_key(|t| t.idx);
+    Ok(turns)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -453,6 +455,7 @@ pub fn update_plan(
     title: Option<String>,
     tasks: Option<Vec<PlanTask>>,
     user_notes: Option<String>,
+    clear_user_notes: bool,
 ) -> Result<PlanArtifact, String> {
     let room = find_plan_group_chat(plan_id)
         .ok_or_else(|| format!("Plan {} not found", plan_id))?;
@@ -472,7 +475,9 @@ pub fn update_plan(
     if let Some(tasks) = tasks {
         plan.tasks = tasks;
     }
-    if user_notes.is_some() {
+    if clear_user_notes {
+        plan.user_notes = None;
+    } else if user_notes.is_some() {
         plan.user_notes = user_notes;
     }
     plan.updated_at = now_iso();

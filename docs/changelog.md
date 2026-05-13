@@ -1,5 +1,53 @@
 # Changelog / 更新日志
 
+## Phase 10 (2026-05-13)
+
+### v2.0.0 — Group Chat 重构
+
+**Room → GroupChat 重命名:**
+- 后端 `room/` → `group_chat/`，`storage/rooms.rs` → `storage/group_chats.rs`，`commands/rooms.rs` → `commands/group_chat.rs`
+- 前端 `room-store` → `group-chat-store`，`RoomStepper` → `GroupChatStepper`
+- 所有 i18n keys `room_*` → `groupChat_*`
+- 旧 Room 页面删除，群聊入口整合至 `/chat` 路由 + 侧边栏
+
+**Character Library (角色库):**
+- `AiCharacter` 模型：label、role_type（planner/executor）、role_instruction、default_provider/model、icon
+- 存储于 `UserSettings.ai_characters`
+- Settings → Characters CRUD 页面（创建/编辑/删除）
+- 前端 4 个 Tauri 命令：list/create/update/delete_character
+
+**Plan Mechanism (计划机制):**
+- `PlanArtifact` 模型：title、tasks（PlanTask[]）、status（draft/active/completed）、user_notes
+- 每个群聊可关联一个活跃计划，存储于 `group-chats/{id}/plan.json`
+- `PlanPanel` 组件：任务清单、状态循环、approve/complete 按钮、用户备注
+- 前端 5 个 Tauri 命令：get/create/update/approve/complete_plan
+- `update_plan` 支持 `clear_user_notes` 参数清除备注
+
+**Context Management MVP (上下文管理):**
+- `ParticipantMeta`：delivery_cursor、session_turn_count、session_seq
+- `filter_visible_messages`：按每条 turn 自身的 mode 过滤可见性（Private/SingleTarget 仅 sender+target 可见）
+- `check_handoff`：turn 计数阈值（25 turns）触发 session handoff
+- `build_bootstrap_context`：模板截断（~2000 tokens）构建新 session 引导上下文
+- `reset_session_after_handoff`：重置 session 状态
+
+**Role System Prompt (角色系统提示):**
+- `build_role_system_prompt`：根据 role_type（planner/executor）+ role_instruction 生成系统提示
+- `resolve_participant_system_prompt`：查找匹配的 AiCharacter，注入 `--append-system-prompt`
+- planner 角色：只读，可规划但不可执行
+- executor 角色：严格按计划执行
+
+**Auto-chain Routing (自动链式路由):**
+- SingleTarget 回复中扫描 `@Label` 提及，自动链式调用（最多 3 跳）
+- 循环检测：`HashSet` 记录已链式参与者
+- `CancellationToken` 传播支持取消
+
+**其他改进:**
+- `list_turns_jsonl` 返回结果按 `idx` 排序（修复 HashMap 迭代顺序不确定问题）
+- `participant_id` 路径遍历校验（拒绝包含 `../` 或 `/` 的 ID）
+- 群聊存储使用 per-ID mutex 锁保证并发安全
+- 侧边栏群聊分组：折叠列表 + "新群聊"按钮 + 创建对话框（名称 + CWD 选择器）
+- 首次使用引导：自动创建 Planner 角色
+
 ## Phase 9.z (2026-05-12)
 
 ### Custom Provider 支持 + Native Config Merge + Managed MCP
