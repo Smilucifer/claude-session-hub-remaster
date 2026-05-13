@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  canUseRoomActor,
-  canUseRoomActorRun,
-  canUseRoomParticipantRun,
-  capabilitiesForAgent,
-} from "./agent-capabilities";
+import { capabilitiesForAgent } from "./agent-capabilities";
 
 describe("agent capability matrix", () => {
   it("maps Claude and Codex explicitly", () => {
@@ -26,19 +21,5 @@ describe("agent capability matrix", () => {
       resume: "latest",
       prompt_injection: null,
     });
-  });
-
-  it("requires a run-level session actor path for Room actors", () => {
-    expect(canUseRoomActorRun({ agent: "claude", execution_path: "session_actor" })).toBe(true);
-    expect(canUseRoomActorRun({ agent: "claude", execution_path: "pipe_exec" })).toBe(false);
-    expect(canUseRoomActorRun({ agent: "codex", execution_path: "pipe_exec" })).toBe(false);
-  });
-
-  it("allows Rooms to attach native pipe participants", () => {
-    expect(canUseRoomParticipantRun({ agent: "claude", execution_path: "session_actor" })).toBe(
-      true,
-    );
-    expect(canUseRoomParticipantRun({ agent: "codex", execution_path: "pipe_exec" })).toBe(true);
-    expect(canUseRoomParticipantRun({ agent: "unknown", execution_path: "pipe_exec" })).toBe(false);
   });
 });

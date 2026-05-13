@@ -1,4 +1,4 @@
-import type { AgentCapabilities, AgentKind, ExecutionPath } from "$lib/types";
+import type { AgentCapabilities, AgentKind } from "$lib/types";
 
 export function capabilitiesForAgent(agent: string): AgentCapabilities {
   const kind = normalizeAgentKind(agent);
@@ -39,23 +39,6 @@ export function capabilitiesForAgent(agent: string): AgentCapabilities {
     context_usage: false,
     permission_protocol: false,
   };
-}
-
-export function canUseRoomActor(agent: string): boolean {
-  return capabilitiesForAgent(agent).stream_session;
-}
-
-export function canUseRoomActorRun(run: { agent: string; execution_path: ExecutionPath }): boolean {
-  return canUseRoomActor(run.agent) && run.execution_path === "session_actor";
-}
-
-export function canUseRoomParticipantRun(run: {
-  agent: string;
-  execution_path: ExecutionPath;
-}): boolean {
-  const capabilities = capabilitiesForAgent(run.agent);
-  if (run.execution_path === "session_actor") return capabilities.stream_session;
-  return capabilities.pipe_exec;
 }
 
 function normalizeAgentKind(agent: string): AgentKind {
