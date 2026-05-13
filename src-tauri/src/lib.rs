@@ -434,6 +434,23 @@ pub fn run() {
         _ => {}
     }
 
+    // Spawn background lifecycle maintenance (log compaction, etc.)
+    std::thread::spawn(|| {
+        let chars_dir = crate::storage::data_dir().join("characters");
+        if let Ok(entries) = std::fs::read_dir(&chars_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    let r = crate::group_chat::data_lifecycle::compact_memory_log_if_needed(name);
+                    match r {
+                        Ok(true) => log::info!("Compacted memory log for character {}", name),
+                        Err(e) => log::warn!("Compaction failed for {}: {}", name, e),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    });
+
     let app = builder.build(tauri::generate_context!())
         .expect("error while building tauri application");
 
