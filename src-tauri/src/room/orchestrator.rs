@@ -10,7 +10,6 @@ use crate::room::adapter::{
     adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
 use crate::room::models::{
-    ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult,
     RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode,
 };
 use crate::{
@@ -754,131 +753,6 @@ fn truncate_roundtable_text(text: &str, max_chars: usize, style: DebateViewStyle
     }
 }
 
-fn build_research_artifact(
-    room: &crate::room::models::Room,
-    turn: &RoomTurn,
-    topic: &str,
-    generated_at: &str,
-) -> ResearchArtifact {
-    ResearchArtifact {
-        schema_version: 2,
-        room_id: room.id.clone(),
-        topic: topic.to_string(),
-        turn_id: turn.id.clone(),
-        generated_at: generated_at.to_string(),
-        results: turn
-            .responses
-            .iter()
-            .map(|response| ResearchResult {
-                participant_id: response.participant_id.clone(),
-                run_id: response.run_id.clone(),
-                label: participant_label(&room.participants, &response.participant_id),
-                status: response.status.clone(),
-                preview: response.preview.clone(),
-                error: response.error.clone(),
-            })
-            .collect(),
-        memory_candidates: extract_arena_memory_candidates(turn, generated_at),
-    }
-}
-
-fn extract_arena_memory_candidates(
-    turn: &RoomTurn,
-    generated_at: &str,
-) -> Vec<ArenaMemoryCandidate> {
-    let mut candidates = Vec::new();
-    for response in &turn.responses {
-        let text = full_response_text(response).or_else(|| response.preview.clone());
-        let Some(text) = text else {
-            continue;
-        };
-        for line in text.lines() {
-            let line = line
-                .trim()
-                .trim_start_matches("- ")
-                .trim_start_matches("* ")
-                .trim();
-            let Some((kind, text)) = parse_memory_candidate_line(line) else {
-                continue;
-            };
-            if text.is_empty() {
-                continue;
-            }
-            candidates.push(ArenaMemoryCandidate {
-                id: uuid::Uuid::new_v4().to_string(),
-                kind,
-                text: text.to_string(),
-                source_participant_id: response.participant_id.clone(),
-                source_run_id: response.run_id.clone(),
-                source_turn_id: turn.id.clone(),
-                created_at: generated_at.to_string(),
-            });
-        }
-    }
-    candidates
-}
-
-fn full_response_text(response: &RoomResponseRef) -> Option<String> {
-    if response.event_seq_end < response.event_seq_start {
-        return None;
-    }
-
-    let mut texts = Vec::new();
-
-    for event in crate::storage::events::list_bus_events(
-        &response.run_id,
-        Some(response.event_seq_start.saturating_sub(1)),
-    ) {
-        let seq = event.get("_seq").and_then(|v| v.as_u64()).unwrap_or(0);
-        if seq > response.event_seq_end {
-            continue;
-        }
-        if event.get("type").and_then(|v| v.as_str()) == Some("message_complete") {
-            if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
-                if !text.trim().is_empty() {
-                    texts.push(text.to_string());
-                }
-            }
-        }
-    }
-
-    for event in crate::storage::events::list_events(
-        &response.run_id,
-        response.event_seq_start.saturating_sub(1),
-    ) {
-        if event.seq > response.event_seq_end {
-            continue;
-        }
-        if matches!(event.event_type, crate::models::RunEventType::Assistant) {
-            if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                if !text.trim().is_empty() {
-                    texts.push(text.to_string());
-                }
-            }
-        }
-    }
-
-    if texts.is_empty() {
-        None
-    } else {
-        Some(texts.join("\n"))
-    }
-}
-
-fn parse_memory_candidate_line(line: &str) -> Option<(ArenaMemoryKind, &str)> {
-    let lower = line.to_ascii_lowercase();
-    if lower.starts_with("[fact]") {
-        return Some((ArenaMemoryKind::Fact, line[6..].trim()));
-    }
-    if lower.starts_with("[decision]") {
-        return Some((ArenaMemoryKind::Decision, line[10..].trim()));
-    }
-    if lower.starts_with("[lesson]") {
-        return Some((ArenaMemoryKind::Lesson, line[8..].trim()));
-    }
-    None
-}
-
 fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> String {
     participants
         .iter()
@@ -1431,29 +1305,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_driver_review_commands() {
-        assert_eq!(
-            parse_driver_command("/review @Alice @Bob check the patch").unwrap(),
-            DriverCommand::Review {
-                targets: vec!["Alice".to_string(), "Bob".to_string()],
-                input: "check the patch".to_string(),
-            }
-        );
-        assert_eq!(
-            parse_driver_command("/review check the patch").unwrap(),
-            DriverCommand::Review {
-                targets: vec![],
-                input: "check the patch".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn driver_requires_explicit_review_command() {
-        assert!(parse_driver_command("check the patch").is_err());
-    }
-
-    #[test]
     fn debate_prompt_excludes_target_previous_response() {
         let prompt = build_debate_prompt(
             &participant("p1", "Alice"),
@@ -1566,33 +1417,9 @@ mod tests {
     }
 
     #[test]
-    fn driver_review_prompt_includes_readonly_context_and_run_refs() {
-        let mut driver = participant("driver", "Driver");
-        driver.role = "driver".to_string();
-        let mut reviewer = participant("reviewer", "Reviewer");
-        reviewer.role = "copilot".to_string();
-        let prompt = build_driver_review_prompt(
-            "Check the patch",
-            &[public_turn()],
-            &[driver, reviewer],
-            "Room memo",
-            "D:/work/app",
-            "D:/data/rooms/room-1/.arena",
-        );
-
-        assert!(prompt.contains("read-only"));
-        assert!(prompt.contains("Check the patch"));
-        assert!(prompt.contains("Room memo"));
-        assert!(prompt.contains("run-driver"));
-        assert!(prompt.contains("run-reviewer"));
-        assert!(prompt.contains(".arena"));
-        assert!(prompt.contains("Which API should we use?"));
-    }
-
-    #[test]
     fn fanout_sends_same_message_to_active_peers_and_records_public_turn() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
             crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
@@ -1644,7 +1471,7 @@ mod tests {
     #[test]
     fn fanout_dispatches_to_all_targets_before_waiting_for_completion() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
             crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
@@ -1691,7 +1518,7 @@ mod tests {
     #[test]
     fn explicit_target_without_active_actor_returns_error_without_turn() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-p1");
             crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
                 .unwrap();
@@ -1714,7 +1541,7 @@ mod tests {
     #[test]
     fn concurrent_room_sends_allocate_unique_turn_indexes() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-a");
             crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
                 .unwrap();
@@ -1785,9 +1612,9 @@ mod tests {
     fn shared_run_across_rooms_is_not_sent_concurrently() {
         with_temp_data_dir(|| {
             let room_a =
-                crate::storage::rooms::create_room("Room A".into(), "".into(), None).unwrap();
+                crate::storage::rooms::create_room("Room A".into(), None).unwrap();
             let room_b =
-                crate::storage::rooms::create_room("Room B".into(), "".into(), None).unwrap();
+                crate::storage::rooms::create_room("Room B".into(), None).unwrap();
             create_run("run-shared");
             crate::storage::rooms::attach_run(
                 &room_a.id,
@@ -1855,7 +1682,7 @@ mod tests {
     #[test]
     fn debate_sends_peer_context_excluding_each_targets_own_response() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
             crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
@@ -2009,7 +1836,7 @@ mod tests {
     #[test]
     fn summary_routes_to_exactly_one_target() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
             crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
@@ -2043,7 +1870,7 @@ mod tests {
     #[test]
     fn private_message_writes_private_store_only() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
             crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
@@ -2082,414 +1909,4 @@ mod tests {
         });
     }
 
-    #[test]
-    fn driver_review_routes_to_copilots_and_records_review_turn() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Driver Room".into(),
-                "Review implementation".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Driver,
-            )
-            .unwrap();
-            create_run("run-driver");
-            create_run("run-a");
-            create_run("run-b");
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-driver",
-                Some("Lead".to_string()),
-                Some("driver".to_string()),
-            )
-            .unwrap();
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-a",
-                Some("Alice".to_string()),
-                Some("copilot".to_string()),
-            )
-            .unwrap();
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-b",
-                Some("Bob".to_string()),
-                Some("copilot".to_string()),
-            )
-            .unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-                let (tx_driver, mut rx_driver) = tokio::sync::mpsc::channel(1);
-                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
-                let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(1);
-                sessions.lock().await.insert(
-                    "run-driver".to_string(),
-                    actor_handle("run-driver", tx_driver),
-                );
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-b".to_string(), actor_handle("run-b", tx_b));
-
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_driver_turn(&room_id, "/review @Alice patch risk", &sessions).await
-                    }
-                });
-
-                let alice_prompt = receive_text(&mut rx_a).await;
-                let turn = send_task.await.unwrap().unwrap();
-
-                assert!(alice_prompt.contains("read-only"));
-                assert!(alice_prompt.contains("patch risk"));
-                assert!(rx_driver.try_recv().is_err());
-                assert!(rx_b.try_recv().is_err());
-                assert_eq!(turn.mode, RoomTurnMode::Review);
-                assert_eq!(turn.target_participant_ids.len(), 1);
-
-                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
-                assert_eq!(stored.len(), 1);
-                assert_eq!(stored[0].mode, RoomTurnMode::Review);
-
-                let arena = crate::storage::data_dir()
-                    .join("rooms")
-                    .join(&room.id)
-                    .join(".arena");
-                assert!(arena.join("context.md").exists());
-                assert!(arena.join("state.md").exists());
-                assert!(arena.join("memory").exists());
-                let driver_mcp = arena.join("driver-mcp.json");
-                assert!(driver_mcp.exists());
-                let driver_mcp_text = std::fs::read_to_string(driver_mcp).unwrap();
-                assert!(driver_mcp_text.contains("Review implementation"));
-                assert!(driver_mcp_text.contains("patch risk"));
-            });
-        });
-    }
-
-    #[test]
-    fn research_prompt_frames_participant_scoped_subtask() {
-        let mut alice = participant("p1", "Alice");
-        alice.role = "researcher".to_string();
-        let prompt = build_research_prompt(
-            &alice,
-            "Compare local vector database options",
-            &[public_turn()],
-            &[alice.clone(), participant("p2", "Bob")],
-            "Prefer local-first tools.",
-        );
-
-        assert!(prompt.contains("Research topic"));
-        assert!(prompt.contains("Compare local vector database options"));
-        assert!(prompt.contains("Alice"));
-        assert!(prompt.contains("researcher"));
-        assert!(prompt.contains("structured research result"));
-        assert!(prompt.contains("Prefer local-first tools."));
-        assert!(prompt.contains("Which API should we use?"));
-        assert!(prompt.contains("Arena Memory Candidates"));
-        assert!(prompt.contains("[fact]"));
-        assert!(prompt.contains("[decision]"));
-        assert!(prompt.contains("[lesson]"));
-    }
-
-    #[test]
-    fn research_artifact_extracts_arena_memory_candidates_from_marked_previews() {
-        let alice = participant("p1", "Alice");
-        let room = crate::room::models::Room {
-            id: "room-1".to_string(),
-            kind: RoomKind::Research,
-            name: "Research Room".to_string(),
-            description: String::new(),
-            cwd: Some("D:/work/app".to_string()),
-            memo: String::new(),
-            participants: vec![alice.clone()],
-            seat_memories: std::collections::HashMap::new(),
-            seat_memory_inbox: std::collections::HashMap::new(),
-            seat_profile: None,
-            last_checkpoint_turn: 0,
-            last_checkpoint_at: None,
-            created_at: "2026-05-02T00:00:00Z".to_string(),
-            updated_at: "2026-05-02T00:00:00Z".to_string(),
-        };
-        let turn = RoomTurn {
-            id: "turn-1".to_string(),
-            idx: 1,
-            mode: RoomTurnMode::Research,
-            user_input: "Compare options".to_string(),
-            target_participant_ids: vec![alice.id.clone()],
-            responses: vec![RoomResponseRef {
-                participant_id: alice.id.clone(),
-                run_id: alice.run_id.clone(),
-                event_seq_start: 1,
-                event_seq_end: 2,
-                preview: Some(
-                    "[fact] SQLite is already embedded.\n- [decision] Prefer local storage first.\n* [lesson] Keep snapshots append-only."
-                        .to_string(),
-                ),
-                status: "complete".to_string(),
-                error: None,
-            }],
-            started_at: "2026-05-02T00:00:00Z".to_string(),
-            completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-        };
-
-        let artifact =
-            build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-        assert_eq!(artifact.schema_version, 2);
-        assert_eq!(artifact.memory_candidates.len(), 3);
-        assert_eq!(artifact.memory_candidates[0].kind, ArenaMemoryKind::Fact);
-        assert_eq!(
-            artifact.memory_candidates[1].text,
-            "Prefer local storage first."
-        );
-        assert_eq!(
-            artifact.memory_candidates[2].source_turn_id,
-            "turn-1".to_string()
-        );
-    }
-
-    #[test]
-    fn research_artifact_extracts_memory_candidates_from_full_response_events() {
-        with_temp_data_dir(|| {
-            create_run("run-p1");
-            let alice = participant("p1", "Alice");
-            let room = crate::room::models::Room {
-                id: "room-1".to_string(),
-                kind: RoomKind::Research,
-                name: "Research Room".to_string(),
-                description: String::new(),
-                cwd: Some("D:/work/app".to_string()),
-                memo: String::new(),
-                participants: vec![alice.clone()],
-                seat_memories: std::collections::HashMap::new(),
-                seat_memory_inbox: std::collections::HashMap::new(),
-                seat_profile: None,
-                last_checkpoint_turn: 0,
-                last_checkpoint_at: None,
-                created_at: "2026-05-02T00:00:00Z".to_string(),
-                updated_at: "2026-05-02T00:00:00Z".to_string(),
-            };
-            let full_text = format!(
-                "{}\n\nArena Memory Candidates\n[fact] SQLite is already embedded.",
-                "Introductory research context. ".repeat(8)
-            );
-            let event = crate::storage::events::append_event(
-                &alice.run_id,
-                crate::models::RunEventType::Assistant,
-                serde_json::json!({ "text": full_text }),
-            )
-            .unwrap();
-            let turn = RoomTurn {
-                id: "turn-1".to_string(),
-                idx: 1,
-                mode: RoomTurnMode::Research,
-                user_input: "Compare options".to_string(),
-                target_participant_ids: vec![alice.id.clone()],
-                responses: vec![RoomResponseRef {
-                    participant_id: alice.id.clone(),
-                    run_id: alice.run_id.clone(),
-                    event_seq_start: event.seq,
-                    event_seq_end: event.seq,
-                    preview: Some("Introductory research context.".to_string()),
-                    status: "complete".to_string(),
-                    error: None,
-                }],
-                started_at: "2026-05-02T00:00:00Z".to_string(),
-                completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-            };
-
-            let artifact =
-                build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-            assert_eq!(artifact.memory_candidates.len(), 1);
-            assert_eq!(
-                artifact.memory_candidates[0].text,
-                "SQLite is already embedded."
-            );
-        });
-    }
-
-    #[test]
-    fn research_artifact_extracts_memory_candidates_from_bus_message_complete_events() {
-        with_temp_data_dir(|| {
-            create_run("run-p1");
-            let alice = participant("p1", "Alice");
-            let writer = crate::storage::events::EventWriter::new();
-            crate::storage::events::persist_bus_event(
-                &writer,
-                &alice.run_id,
-                &crate::models::BusEvent::MessageComplete {
-                    run_id: alice.run_id.clone(),
-                    message_id: "msg-1".to_string(),
-                    text: format!(
-                        "{}\n\nArena Memory Candidates\n[decision] Keep research artifacts append-only.",
-                        "Detailed findings before candidates. ".repeat(8)
-                    ),
-                    parent_tool_use_id: None,
-                    model: None,
-                    stop_reason: None,
-                    message_usage: None,
-                },
-            )
-            .unwrap();
-            let room = crate::room::models::Room {
-                id: "room-1".to_string(),
-                kind: RoomKind::Research,
-                name: "Research Room".to_string(),
-                description: String::new(),
-                cwd: Some("D:/work/app".to_string()),
-                memo: String::new(),
-                participants: vec![alice.clone()],
-                seat_memories: std::collections::HashMap::new(),
-                seat_memory_inbox: std::collections::HashMap::new(),
-                seat_profile: None,
-                last_checkpoint_turn: 0,
-                last_checkpoint_at: None,
-                created_at: "2026-05-02T00:00:00Z".to_string(),
-                updated_at: "2026-05-02T00:00:00Z".to_string(),
-            };
-            let turn = RoomTurn {
-                id: "turn-1".to_string(),
-                idx: 1,
-                mode: RoomTurnMode::Research,
-                user_input: "Compare options".to_string(),
-                target_participant_ids: vec![alice.id.clone()],
-                responses: vec![RoomResponseRef {
-                    participant_id: alice.id.clone(),
-                    run_id: alice.run_id.clone(),
-                    event_seq_start: 1,
-                    event_seq_end: 1,
-                    preview: Some("Detailed findings before candidates.".to_string()),
-                    status: "complete".to_string(),
-                    error: None,
-                }],
-                started_at: "2026-05-02T00:00:00Z".to_string(),
-                completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-            };
-
-            let artifact =
-                build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-            assert_eq!(artifact.memory_candidates.len(), 1);
-            assert_eq!(
-                artifact.memory_candidates[0].kind,
-                ArenaMemoryKind::Decision
-            );
-            assert_eq!(
-                artifact.memory_candidates[0].text,
-                "Keep research artifacts append-only."
-            );
-        });
-    }
-
-    #[test]
-    fn research_turn_fans_out_and_writes_structured_artifact() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "Compare approaches".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            crate::storage::rooms::update_memo(&room.id, "Prefer local-first tools.".to_string())
-                .unwrap();
-            create_run("run-a");
-            create_run("run-b");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
-                .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
-                .unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-a", "run-b").await;
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_research_turn(
-                            &room_id,
-                            "Compare local vector database options",
-                            &sessions,
-                        )
-                        .await
-                    }
-                });
-
-                let alice_prompt = receive_text(&mut rx_a).await;
-                let bob_prompt = receive_text(&mut rx_b).await;
-                let turn = send_task.await.unwrap().unwrap();
-
-                assert!(alice_prompt.contains("Compare local vector database options"));
-                assert!(alice_prompt.contains("Alice"));
-                assert!(bob_prompt.contains("Compare local vector database options"));
-                assert!(bob_prompt.contains("Bob"));
-                assert_ne!(alice_prompt, bob_prompt);
-                assert_eq!(turn.mode, RoomTurnMode::Research);
-                assert_eq!(turn.target_participant_ids.len(), 2);
-
-                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
-                assert_eq!(stored.len(), 1);
-                assert_eq!(stored[0].mode, RoomTurnMode::Research);
-            });
-        });
-    }
-
-    #[test]
-    fn research_turn_does_not_persist_public_turn_when_artifact_write_fails() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "Compare approaches".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            create_run("run-a");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
-                .unwrap();
-
-            let research_path = crate::storage::data_dir()
-                .join("rooms")
-                .join(&room.id)
-                .join("research");
-            std::fs::write(&research_path, "block writes").unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
-
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_research_turn(&room_id, "Compare local storage options", &sessions)
-                            .await
-                    }
-                });
-
-                let _prompt = receive_text(&mut rx_a).await;
-                let error = send_task.await.unwrap().unwrap_err();
-
-                assert!(error.contains("research"));
-                assert!(crate::storage::rooms::list_public_turns(&room.id)
-                    .unwrap()
-                    .is_empty());
-            });
-        });
-    }
 }

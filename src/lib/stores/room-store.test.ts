@@ -22,12 +22,10 @@ import { RoomStore } from "./room-store.svelte";
 import * as api from "$lib/api";
 import { capabilitiesForAgent } from "$lib/utils/agent-capabilities";
 
-function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtable"): RoomSummary {
+function summary(id: string, name: string): RoomSummary {
   return {
     id,
-    kind,
     name,
-    description: "",
     cwd: undefined,
     participant_count: 0,
     memo_preview: undefined,
@@ -35,20 +33,14 @@ function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtab
   };
 }
 
-function detail(id: string, name: string, kind: RoomDetail["kind"] = "roundtable"): RoomDetail {
+function detail(id: string, name: string): RoomDetail {
   return {
     id,
-    kind,
     name,
-    description: "",
     cwd: undefined,
     memo: "",
     participants: [],
     turns: [],
-    research_artifact: null,
-    seat_memories: {},
-    seat_memory_inbox: {},
-    seat_profile: null,
     created_at: "2026-04-30T00:00:00Z",
     updated_at: "2026-04-30T00:00:00Z",
   };
@@ -87,23 +79,12 @@ describe("RoomStore", () => {
     vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "New Room"));
     vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "New Room")]);
 
-    await store.createRoom("New Room", "", "D:/work");
+    await store.createRoom("New Room", "D:/work");
 
-    expect(api.createRoom).toHaveBeenCalledWith("New Room", "", "D:/work", undefined);
+    expect(api.createRoom).toHaveBeenCalledWith("New Room", "D:/work");
     expect(store.selectedRoomId).toBe("r1");
     expect(store.room?.name).toBe("New Room");
     expect(store.rooms).toEqual([summary("r1", "New Room")]);
-  });
-
-  it("creates a driver room and selects it", async () => {
-    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Driver Room", "driver"));
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Driver Room", "driver")]);
-
-    await store.createRoom("Driver Room", "", "D:/work", "driver");
-
-    expect(api.createRoom).toHaveBeenCalledWith("Driver Room", "", "D:/work", "driver");
-    expect(store.selectedRoomId).toBe("r1");
-    expect(store.room?.kind).toBe("driver");
   });
 
   it("creates a fixed three-seat roundtable and starts all participants", async () => {
@@ -247,17 +228,6 @@ describe("RoomStore", () => {
     expect(api.createRoom).not.toHaveBeenCalled();
     expect(api.createRoomParticipant).not.toHaveBeenCalled();
     expect(store.saving).toBe(false);
-  });
-
-  it("creates a research room and selects it", async () => {
-    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Research Room", "research"));
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Research Room", "research")]);
-
-    await store.createRoom("Research Room", "", "D:/work", "research");
-
-    expect(api.createRoom).toHaveBeenCalledWith("Research Room", "", "D:/work", "research");
-    expect(store.selectedRoomId).toBe("r1");
-    expect(store.room?.kind).toBe("research");
   });
 
   it("updates selected room after attaching a run", async () => {

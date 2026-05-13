@@ -1,5 +1,5 @@
 import * as api from "$lib/api";
-import type { RoomDetail, RoomKind, MemoryKind, RoomSummary, RoomTurnSnapshot } from "$lib/types";
+import type { RoomDetail, RoomSummary, RoomTurnSnapshot } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 import {
   getPhase7Provider,
@@ -82,11 +82,11 @@ export class RoomStore {
     }
   }
 
-  async createRoom(name: string, description = "", cwd?: string, kind?: RoomKind): Promise<void> {
+  async createRoom(name: string, cwd?: string): Promise<void> {
     this.saving = true;
     this.error = null;
     try {
-      const room = await api.createRoom(name, description, cwd, kind);
+      const room = await api.createRoom(name, cwd);
       this.selectedRoomId = room.id;
       this.room = room;
       await this.loadRooms();
@@ -101,7 +101,6 @@ export class RoomStore {
 
   async createRoundtableWithParticipants(
     name: string,
-    description: string,
     cwd: string,
     seats: RoundtableSeatDraft[],
   ): Promise<void> {
@@ -111,7 +110,7 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
-      const room = await api.createRoom(name, description, cwd, "roundtable");
+      const room = await api.createRoom(name, cwd);
       this.selectedRoomId = room.id;
       this.room = room;
       for (const seat of seats) {
@@ -347,47 +346,6 @@ export class RoomStore {
       throw e;
     } finally {
       this.saving = false;
-    }
-  }
-
-  async addSeatMemory(
-    participantId: string,
-    kind: MemoryKind,
-    key: string,
-    content: string,
-  ): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.addSeatMemoryEntry(this.selectedRoomId, participantId, kind, key, content);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "addSeatMemory error", e);
-    }
-  }
-
-  async deleteSeatMemory(participantId: string, entryId: string): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.deleteSeatMemoryEntry(this.selectedRoomId, participantId, entryId);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "deleteSeatMemory error", e);
-    }
-  }
-
-  async clearSeatMemory(participantId: string): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.clearSeatMemory(this.selectedRoomId, participantId);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "clearSeatMemory error", e);
     }
   }
 }

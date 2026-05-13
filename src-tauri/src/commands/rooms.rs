@@ -3,7 +3,7 @@ use crate::agent::spawn_locks::SpawnLocks;
 use crate::agent::stream::ProcessMap;
 use crate::models::{ExecutionPath, RunMeta, RunStatus};
 use crate::room::adapter::{can_use_room_actor_run, AgentCapabilities};
-use crate::room::models::{RoomDetail, RoomKind, RoomParticipantDetail, RoomSummary};
+use crate::room::models::{RoomDetail, RoomParticipantDetail, RoomSummary};
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
 use std::sync::Arc;
@@ -25,17 +25,11 @@ fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
 
     Ok(RoomDetail {
         id: room.id,
-        kind: room.kind,
         name: room.name,
-        description: room.description,
         cwd: room.cwd,
         memo: room.memo,
         participants,
         turns: storage::rooms::list_public_turns(room_id)?,
-        research_artifact: None,
-        seat_memories: room.seat_memories,
-        seat_memory_inbox: room.seat_memory_inbox,
-        seat_profile: room.seat_profile,
         created_at: room.created_at,
         updated_at: room.updated_at,
     })
@@ -54,13 +48,9 @@ pub fn get_room(id: String) -> Result<RoomDetail, String> {
 #[tauri::command]
 pub fn create_room(
     name: String,
-    description: Option<String>,
     cwd: Option<String>,
-    kind: Option<String>,
 ) -> Result<RoomDetail, String> {
-    let kind = parse_room_kind(kind.as_deref())?;
-    let room =
-        storage::rooms::create_room_with_kind(name, description.unwrap_or_default(), cwd, kind)?;
+    let room = storage::rooms::create_room(name, cwd)?;
     room_detail(&room.id)
 }
 
@@ -68,7 +58,6 @@ pub fn create_room(
 pub struct RoomRunIndexEntry {
     pub room_id: String,
     pub room_name: String,
-    pub room_kind: String,
     pub run_ids: Vec<String>,
 }
 
@@ -84,7 +73,6 @@ pub fn list_room_run_index() -> Result<Vec<RoomRunIndexEntry>, String> {
         entries.push(RoomRunIndexEntry {
             room_id: room.id,
             room_name: room.name,
-            room_kind: format!("{:?}", room.kind).to_lowercase(),
             run_ids: room.participants.iter().map(|p| p.run_id.clone()).collect(),
         });
     }
@@ -167,20 +155,6 @@ fn extract_assistant_text(events: &[crate::models::RunEvent]) -> Option<String> 
         None
     } else {
         Some(texts.join("\n"))
-    }
-}
-
-fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
-    match kind
-        .unwrap_or("roundtable")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "" | "roundtable" => Ok(RoomKind::Roundtable),
-        "driver" => Ok(RoomKind::Driver),
-        "research" => Ok(RoomKind::Research),
-        other => Err(format!("Unsupported room kind: {other}")),
     }
 }
 
@@ -484,17 +458,13 @@ pub async fn send_room_message(
         app,
         process_map: process_map.inner().clone(),
     });
-    match room.kind {
-        RoomKind::Roundtable | RoomKind::Driver | RoomKind::Research => {
-            crate::room::orchestrator::run_roundtable_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime,
-            )
-            .await?;
-        }
-    }
+    crate::room::orchestrator::run_roundtable_turn_with_runtime(
+        &room_id,
+        &message,
+        sessions.inner(),
+        pipe_runtime,
+    )
+    .await?;
     room_detail(&room_id)
 }
 
@@ -589,7 +559,7 @@ mod tests {
     #[test]
     fn get_room_detail_reads_referenced_run_without_copying() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -625,7 +595,7 @@ mod tests {
     #[test]
     fn room_detail_includes_participant_capabilities() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-codex",
                 "hello",
@@ -658,7 +628,7 @@ mod tests {
     #[test]
     fn attach_room_run_accepts_codex_pipe_exec_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-codex",
                 "hello",
@@ -684,7 +654,7 @@ mod tests {
     #[test]
     fn attach_room_run_accepts_claude_pipe_exec_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             let mut run = crate::storage::runs::create_run(
                 "run-claude-pipe",
                 "hello",
@@ -713,7 +683,7 @@ mod tests {
     #[test]
     fn attach_room_run_accepts_claude_session_actor_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             let mut run = crate::storage::runs::create_run(
                 "run-claude-session",
                 "hello",
@@ -745,7 +715,7 @@ mod tests {
     #[test]
     fn create_claude_participant_creates_referenced_run() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
 
             let run_id = super::create_claude_participant_run(
                 &room.id,
@@ -770,7 +740,7 @@ mod tests {
     #[test]
     fn create_room_participant_run_defaults_codex_to_pipe_exec() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
 
             let run_id = super::create_room_participant_run(
                 &room.id,
@@ -790,25 +760,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_room_kind_for_create_room() {
-        assert_eq!(
-            super::parse_room_kind(None).unwrap(),
-            crate::room::models::RoomKind::Roundtable
-        );
-        assert_eq!(
-            super::parse_room_kind(Some("driver")).unwrap(),
-            crate::room::models::RoomKind::Driver
-        );
-        assert_eq!(
-            super::parse_room_kind(Some("research")).unwrap(),
-            crate::room::models::RoomKind::Research
-        );
-    }
-
-    #[test]
     fn participant_cleanup_soft_deletes_created_run() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::rooms::create_room("Room".into(), None).unwrap();
             let run_id = super::create_claude_participant_run(
                 &room.id,
                 "Investigate".to_string(),

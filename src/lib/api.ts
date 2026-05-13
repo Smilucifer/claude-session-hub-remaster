@@ -46,12 +46,10 @@ import type {
   RunSearchFilters,
   RunSearchResponse,
   RoomDetail,
-  RoomKind,
   RoomSummary,
   RoomTurnSnapshot,
   BalanceHelperSettings,
   ValidatePlatformCredentialsResponse,
-  MemoryKind,
 } from "./types";
 
 // Runs
@@ -159,16 +157,12 @@ export async function getRoom(id: string): Promise<RoomDetail> {
 
 export async function createRoom(
   name: string,
-  description?: string,
   cwd?: string,
-  kind?: RoomKind,
 ): Promise<RoomDetail> {
-  dbg("api", "createRoom", { name, cwd, kind });
+  dbg("api", "createRoom", { name, cwd });
   return invoke<RoomDetail>("create_room", {
     name,
-    description: description ?? null,
     cwd: cwd ?? null,
-    kind: kind ?? null,
   });
 }
 
@@ -253,34 +247,6 @@ export async function deleteRoom(id: string): Promise<void> {
 export async function cancelRoomTurn(roomId: string): Promise<boolean> {
   dbg("api", "cancelRoomTurn", roomId);
   return invoke<boolean>("cancel_room_turn", { roomId });
-}
-
-export async function addSeatMemoryEntry(
-  roomId: string,
-  participantId: string,
-  kind: MemoryKind,
-  key: string,
-  content: string,
-): Promise<RoomDetail> {
-  dbg("api", "addSeatMemoryEntry", { roomId, participantId, kind, key });
-  return invoke<RoomDetail>("add_seat_memory_entry", { roomId, participantId, kind, key, content });
-}
-
-export async function deleteSeatMemoryEntry(
-  roomId: string,
-  participantId: string,
-  entryId: string,
-): Promise<RoomDetail> {
-  dbg("api", "deleteSeatMemoryEntry", { roomId, participantId, entryId });
-  return invoke<RoomDetail>("delete_seat_memory_entry", { roomId, participantId, entryId });
-}
-
-export async function clearSeatMemory(
-  roomId: string,
-  participantId: string,
-): Promise<RoomDetail> {
-  dbg("api", "clearSeatMemory", { roomId, participantId });
-  return invoke<RoomDetail>("clear_seat_memory", { roomId, participantId });
 }
 
 // Prompt search & favorites

@@ -75,9 +75,7 @@ export interface RoomParticipant {
   joined_at: string;
 }
 
-export type RoomKind = "roundtable" | "driver" | "research";
-
-export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "review" | "research" | "singletarget";
+export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget";
 
 export type AgentKind = "claude" | "codex" | "unknown";
 export type ResumeCapability = "session_id" | "latest" | "none";
@@ -95,49 +93,6 @@ export interface AgentCapabilities {
   permission_protocol: boolean;
 }
 
-export type ArenaMemoryKind = "fact" | "decision" | "lesson";
-
-export interface ArenaMemoryCandidate {
-  id: string;
-  kind: ArenaMemoryKind;
-  text: string;
-  source_participant_id: string;
-  source_run_id: string;
-  source_turn_id: string;
-  created_at: string;
-}
-
-export type MemoryKind = "insight" | "lesson" | "preference" | "fact";
-
-export interface SeatMemoryEntry {
-  id: string;
-  kind: MemoryKind;
-  key: string;
-  content: string;
-  recall: number;
-  last_accessed: string;
-  created_at: string;
-  persisted: boolean;
-  source_turn_id?: string;
-}
-
-export interface PendingMemoryCandidate {
-  id: string;
-  kind: MemoryKind;
-  key: string;
-  content: string;
-  source_participant_id: string;
-  source_turn_id: string;
-  created_at: string;
-  reminder_count: number;
-  expires_at: string;
-}
-
-export interface SeatProfile {
-  entries: SeatMemoryEntry[];
-  updated_at: string;
-}
-
 export interface RoomResponseRef {
   participant_id: string;
   run_id: string;
@@ -146,25 +101,6 @@ export interface RoomResponseRef {
   preview?: string;
   status: string;
   error?: string;
-}
-
-export interface ResearchResult {
-  participant_id: string;
-  run_id: string;
-  label: string;
-  status: string;
-  preview?: string;
-  error?: string;
-}
-
-export interface ResearchArtifact {
-  schema_version: number;
-  room_id: string;
-  topic: string;
-  turn_id: string;
-  generated_at: string;
-  results: ResearchResult[];
-  memory_candidates: ArenaMemoryCandidate[];
 }
 
 export interface RoomTurn {
@@ -193,9 +129,7 @@ export interface RoomTurnSnapshot {
 
 export interface RoomSummary {
   id: string;
-  kind: RoomKind;
   name: string;
-  description: string;
   cwd?: string;
   participant_count: number;
   memo_preview?: string;
@@ -210,17 +144,11 @@ export interface RoomParticipantDetail {
 
 export interface RoomDetail {
   id: string;
-  kind: RoomKind;
   name: string;
-  description: string;
   cwd?: string;
   memo: string;
   participants: RoomParticipantDetail[];
   turns: RoomTurn[];
-  research_artifact?: ResearchArtifact | null;
-  seat_memories?: Record<string, SeatMemoryEntry[]>;
-  seat_memory_inbox?: Record<string, PendingMemoryCandidate[]>;
-  seat_profile?: SeatProfile | null;
   created_at: string;
   updated_at: string;
 }

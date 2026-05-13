@@ -1,33 +1,21 @@
-import type { RoomKind, RoomTurnMode } from "$lib/types";
+import type { RoomTurnMode } from "$lib/types";
 import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
 
-export type RoomPlaceholderKey =
-  | "room_roundtablePlaceholder"
-  | "room_driverPlaceholder"
-  | "room_researchPlaceholder";
-
-export function roomRequiresThreeParticipants(kind: RoomKind): boolean {
-  return kind === "roundtable";
-}
+export type RoomPlaceholderKey = "room_roundtablePlaceholder";
 
 export function canSendRoomMessage(
-  kind: RoomKind,
   participantCount: number,
   message: string,
 ): boolean {
   if (!message.trim()) return false;
-  if (roomRequiresThreeParticipants(kind)) return participantCount >= 3;
   return participantCount > 0;
 }
 
-export function roomMessagePlaceholderKey(kind: RoomKind): RoomPlaceholderKey {
-  if (kind === "driver") return "room_driverPlaceholder";
-  if (kind === "research") return "room_researchPlaceholder";
+export function roomMessagePlaceholderKey(): RoomPlaceholderKey {
   return "room_roundtablePlaceholder";
 }
 
-export function roomParticipantBadge(kind: RoomKind, participantCount: number): string {
-  if (roomRequiresThreeParticipants(kind)) return `${participantCount}/3`;
+export function roomParticipantBadge(participantCount: number): string {
   return String(participantCount);
 }
 
@@ -50,8 +38,6 @@ const TURN_MODE_LABEL_KEYS: Record<RoomTurnMode, string> = {
   debate: "room_turnDebate",
   summary: "room_turnSummary",
   private: "room_turnPrivate",
-  review: "room_turnReview",
-  research: "room_turnResearch",
   singletarget: "room_turnSingleTarget",
 };
 

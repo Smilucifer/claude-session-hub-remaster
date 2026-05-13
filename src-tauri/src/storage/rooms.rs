@@ -1,5 +1,5 @@
 use crate::models::now_iso;
-use crate::room::models::{Room, RoomKind, RoomParticipant, RoomSummary, RoomTurn};
+use crate::room::models::{Room, RoomParticipant, RoomSummary, RoomTurn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,16 +68,7 @@ fn save_room(room: &Room) -> Result<(), String> {
     })
 }
 
-pub fn create_room(name: String, description: String, cwd: Option<String>) -> Result<Room, String> {
-    create_room_with_kind(name, description, cwd, RoomKind::Roundtable)
-}
-
-pub fn create_room_with_kind(
-    name: String,
-    description: String,
-    cwd: Option<String>,
-    kind: RoomKind,
-) -> Result<Room, String> {
+pub fn create_room(name: String, cwd: Option<String>) -> Result<Room, String> {
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
         return Err("Room name is required".to_string());
@@ -86,17 +77,10 @@ pub fn create_room_with_kind(
     let now = now_iso();
     let room = Room {
         id: uuid::Uuid::new_v4().to_string(),
-        kind,
         name: trimmed_name.to_string(),
-        description: description.trim().to_string(),
         cwd: cwd.filter(|s| !s.trim().is_empty()),
         memo: String::new(),
         participants: vec![],
-        seat_memories: std::collections::HashMap::new(),
-        seat_memory_inbox: std::collections::HashMap::new(),
-        seat_profile: None,
-        last_checkpoint_turn: 0,
-        last_checkpoint_at: None,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -133,9 +117,7 @@ pub fn list_rooms() -> Vec<RoomSummary> {
                 let memo_preview = memo_preview(&room.memo);
                 RoomSummary {
                     id: room.id,
-                    kind: room.kind,
                     name: room.name,
-                    description: room.description,
                     cwd: room.cwd,
                     participant_count: room.participants.len(),
                     memo_preview,
@@ -212,25 +194,12 @@ pub fn attach_run(
     Ok(room)
 }
 
-fn normalize_participant_role(room: &Room, role: Option<String>) -> String {
+fn normalize_participant_role(_room: &Room, role: Option<String>) -> String {
     let requested = role
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty());
 
-    match room.kind {
-        RoomKind::Driver => {
-            if requested.as_deref() == Some("driver") || room.participants.is_empty() {
-                "driver".to_string()
-            } else {
-                "copilot".to_string()
-            }
-        }
-        RoomKind::Research => match requested.as_deref() {
-            Some("participant") | None => "researcher".to_string(),
-            Some(role) => role.to_string(),
-        },
-        RoomKind::Roundtable => requested.unwrap_or_else(|| "participant".to_string()),
-    }
+    requested.unwrap_or_else(|| "participant".to_string())
 }
 
 pub fn update_memo(room_id: &str, memo: String) -> Result<Room, String> {
@@ -398,14 +367,12 @@ mod tests {
         with_temp_data_dir(|| {
             let room = create_room(
                 "Design Review".to_string(),
-                "Compare implementation options".to_string(),
                 Some("D:/work/app".to_string()),
             )
             .unwrap();
 
             let reopened = get_room(&room.id).unwrap();
             assert_eq!(reopened.name, "Design Review");
-            assert_eq!(reopened.description, "Compare implementation options");
             assert_eq!(reopened.cwd.as_deref(), Some("D:/work/app"));
 
             let rooms = list_rooms();
@@ -418,7 +385,7 @@ mod tests {
     #[test]
     fn room_attaches_existing_run_by_reference() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             let run = crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -456,7 +423,7 @@ mod tests {
     #[test]
     fn duplicate_attach_updates_existing_participant_metadata() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             let run = crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -490,7 +457,7 @@ mod tests {
     #[test]
     fn delete_room_does_not_delete_referenced_run() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -517,7 +484,7 @@ mod tests {
     #[test]
     fn room_memo_updates_summary_preview() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             update_memo(&room.id, "Remember the API boundary.".to_string()).unwrap();
 
             let reopened = get_room(&room.id).unwrap();
@@ -530,11 +497,10 @@ mod tests {
     }
 
     #[test]
-    fn room_defaults_to_roundtable_kind_and_lists_timeline() {
+    fn room_lists_timeline() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             let original_updated_at = room.updated_at.clone();
-            assert_eq!(room.kind, crate::room::models::RoomKind::Roundtable);
             std::thread::sleep(std::time::Duration::from_millis(2));
 
             let turn = crate::room::models::RoomTurn {
@@ -567,7 +533,7 @@ mod tests {
     #[test]
     fn private_turns_are_stored_separately_from_public_timeline() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), "".to_string(), None).unwrap();
+            let room = create_room("Room".to_string(), None).unwrap();
             let private_turn = crate::room::models::RoomTurn {
                 id: "private-1".to_string(),
                 idx: 1,
@@ -583,186 +549,6 @@ mod tests {
 
             assert!(list_public_turns(&room.id).unwrap().is_empty());
             assert_eq!(list_private_turns(&room.id).unwrap(), vec![private_turn]);
-        });
-    }
-
-    #[test]
-    fn legacy_room_json_without_kind_reopens_as_roundtable() {
-        with_temp_data_dir(|| {
-            let id = "legacy-room";
-            let dir = room_dir(id);
-            super::super::ensure_dir(&dir).unwrap();
-            fs::write(
-                room_file(id),
-                r#"{
-  "id": "legacy-room",
-  "name": "Legacy",
-  "description": "",
-  "cwd": null,
-  "memo": "",
-  "participants": [],
-  "created_at": "2026-04-30T00:00:00Z",
-  "updated_at": "2026-04-30T00:00:00Z"
-}"#,
-            )
-            .unwrap();
-
-            let room = get_room(id).unwrap();
-
-            assert_eq!(room.kind, crate::room::models::RoomKind::Roundtable);
-        });
-    }
-
-    #[test]
-    fn driver_room_enforces_single_driver_role() {
-        with_temp_data_dir(|| {
-            let room = create_room_with_kind(
-                "Driver Room".to_string(),
-                "".to_string(),
-                None,
-                RoomKind::Driver,
-            )
-            .unwrap();
-            crate::storage::runs::create_run(
-                "run-driver",
-                "drive",
-                "D:/work/app",
-                "claude",
-                RunStatus::Idle,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-            crate::storage::runs::create_run(
-                "run-reviewer",
-                "review",
-                "D:/work/app",
-                "claude",
-                RunStatus::Idle,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-
-            attach_run(
-                &room.id,
-                "run-driver",
-                Some("Driver".to_string()),
-                Some("driver".to_string()),
-            )
-            .unwrap();
-            let updated = attach_run(
-                &room.id,
-                "run-reviewer",
-                Some("Reviewer".to_string()),
-                Some("driver".to_string()),
-            )
-            .unwrap();
-
-            assert_eq!(
-                updated
-                    .participants
-                    .iter()
-                    .filter(|participant| participant.role == "driver")
-                    .count(),
-                1
-            );
-            assert_eq!(
-                updated
-                    .participants
-                    .iter()
-                    .find(|participant| participant.run_id == "run-driver")
-                    .unwrap()
-                    .role,
-                "copilot"
-            );
-            assert_eq!(
-                updated
-                    .participants
-                    .iter()
-                    .find(|participant| participant.run_id == "run-reviewer")
-                    .unwrap()
-                    .role,
-                "driver"
-            );
-        });
-    }
-
-    #[test]
-    fn research_room_defaults_participants_to_researcher_role() {
-        with_temp_data_dir(|| {
-            let room = create_room_with_kind(
-                "Research Room".to_string(),
-                "Investigate options".to_string(),
-                None,
-                RoomKind::Research,
-            )
-            .unwrap();
-            crate::storage::runs::create_run(
-                "run-researcher",
-                "research",
-                "D:/work/app",
-                "claude",
-                RunStatus::Idle,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-
-            let updated =
-                attach_run(&room.id, "run-researcher", Some("Alice".to_string()), None).unwrap();
-
-            assert_eq!(updated.kind, RoomKind::Research);
-            assert_eq!(updated.participants[0].role, "researcher");
-        });
-    }
-
-    #[test]
-    fn research_room_maps_generic_participant_role_to_researcher() {
-        with_temp_data_dir(|| {
-            let room = create_room_with_kind(
-                "Research Room".to_string(),
-                "Investigate options".to_string(),
-                None,
-                RoomKind::Research,
-            )
-            .unwrap();
-            crate::storage::runs::create_run(
-                "run-researcher",
-                "research",
-                "D:/work/app",
-                "claude",
-                RunStatus::Idle,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-
-            let updated = attach_run(
-                &room.id,
-                "run-researcher",
-                Some("Alice".to_string()),
-                Some("participant".to_string()),
-            )
-            .unwrap();
-
-            assert_eq!(updated.participants[0].role, "researcher");
         });
     }
 
