@@ -495,6 +495,28 @@ async fn execute_group_chat_target(
     }
 }
 
+/// Inject character memories into the system prompt for a group chat participant.
+/// Skipped when character_id is empty or `__orphan__`.
+async fn inject_memories(
+    character_id: &str,
+    user_message: &str,
+    system_prompt: &mut String,
+) {
+    if character_id.is_empty() || character_id == "__orphan__" {
+        return;
+    }
+    let (memories, _tier) = search_memories_for_injection(
+        character_id, user_message, 5, 0.5, 1,
+    ).await;
+    if !memories.is_empty() {
+        let memory_prompt = format_memory_injection(&memories, 2000, 300);
+        if !memory_prompt.is_empty() {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&memory_prompt);
+        }
+    }
+}
+
 async fn execute_actor_turn(
     participant: &GroupChatParticipant,
     run: &RunMeta,
@@ -514,26 +536,7 @@ async fn execute_actor_turn(
         };
 
     // Inject character memory after the role prompt
-    if !participant.character_id.is_empty() && participant.character_id != "__orphan__" {
-        let (memories, _tier) = search_memories_for_injection(
-            &participant.character_id,
-            user_message,
-            5,
-            0.6,
-            1,
-        )
-        .await;
-        if !memories.is_empty() {
-            let memory_prompt = format_memory_injection(&memories, 2000, 300);
-            if !memory_prompt.is_empty() {
-                if !system_prompt.is_empty() {
-                    system_prompt = format!("{}\n\n{}", system_prompt, memory_prompt);
-                } else {
-                    system_prompt = memory_prompt;
-                }
-            }
-        }
-    }
+    inject_memories(&participant.character_id, user_message, &mut system_prompt).await;
 
     let full_prompt = if !system_prompt.is_empty() {
         format!("{}\n\n---\n\n{}", system_prompt, target_prompt)
@@ -622,27 +625,8 @@ async fn execute_pipe_turn(
     )
     .unwrap_or_default();
 
-    if !participant.character_id.is_empty() && participant.character_id != "__orphan__" {
-        let (memories, _tier) = search_memories_for_injection(
-            &participant.character_id,
-            user_message,
-            5,
-            0.6,
-            1,
-        )
-        .await;
-        if !memories.is_empty() {
-            let memory_prompt = format_memory_injection(&memories, 2000, 300);
-            if !memory_prompt.is_empty() {
-                if !pipe_system_prompt.is_empty() {
-                    pipe_system_prompt =
-                        format!("{}\n\n{}", pipe_system_prompt, memory_prompt);
-                } else {
-                    pipe_system_prompt = memory_prompt;
-                }
-            }
-        }
-    }
+    // Inject character memory after the role prompt
+    inject_memories(&participant.character_id, user_message, &mut pipe_system_prompt).await;
 
     if !pipe_system_prompt.is_empty() {
         adapter_settings.append_system_prompt = Some(pipe_system_prompt);

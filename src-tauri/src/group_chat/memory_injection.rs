@@ -74,6 +74,7 @@ pub async fn search_memories_for_injection(
     ).await {
         Ok(r) => r,
         Err(_) => {
+            set_embedding_healthy(false);
             return degraded_keyword_search(&entries, query, top_k);
         }
     };
@@ -101,7 +102,7 @@ pub async fn search_memories_for_injection(
         if !seen.contains(eid) {
             if let Some(node) = entries.iter().find(|n| &n.id == eid) {
                 let keyword_boost = keyword_match_score(&node.content, query);
-                scored.push((node.clone(), 0.3 + keyword_boost * 0.3));
+                scored.push((node.clone(), 0.45 + keyword_boost * 0.3));
                 seen.insert(eid.clone());
             }
         }
