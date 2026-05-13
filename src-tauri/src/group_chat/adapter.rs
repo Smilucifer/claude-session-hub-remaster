@@ -7,9 +7,9 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-/// Default inactivity timeout for room turns (10 minutes).
+/// Default inactivity timeout for group chat turns (10 minutes).
 const DEFAULT_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(600);
-/// Default hard deadline for room turns (30 minutes).
+/// Default hard deadline for group chat turns (30 minutes).
 const DEFAULT_HARD_DEADLINE: Duration = Duration::from_secs(1800);
 
 pub type AdapterResult<T> = Result<T, AgentAdapterError>;
@@ -73,7 +73,7 @@ pub enum PromptInjection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptScope {
-    Room,
+    GroupChat,
     Participant,
     Turn,
 }
@@ -138,7 +138,7 @@ impl AgentCapabilities {
         self.stream_session
     }
 
-    pub fn can_use_room_actor(&self) -> bool {
+    pub fn can_use_group_chat_actor(&self) -> bool {
         self.stream_session
     }
 
@@ -147,8 +147,8 @@ impl AgentCapabilities {
     }
 }
 
-pub fn can_use_room_actor_run(run: &RunMeta) -> bool {
-    AgentCapabilities::for_agent(&run.agent).can_use_room_actor()
+pub fn can_use_group_chat_actor_run(run: &RunMeta) -> bool {
+    AgentCapabilities::for_agent(&run.agent).can_use_group_chat_actor()
         && matches!(run.resolved_execution_path(), ExecutionPath::SessionActor)
 }
 
@@ -286,7 +286,7 @@ impl AgentAdapter for RunBackedAgentAdapter {
     fn stream_message<'a>(&'a mut self, _msg: &'a str) -> AdapterFuture<'a, ()> {
         Box::pin(async move {
             let cmd_tx = self.cmd_tx.clone().ok_or_else(|| {
-                AgentAdapterError::new("Room participant is not attached to an active session")
+                AgentAdapterError::new("GroupChat participant is not attached to an active session")
             })?;
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             cmd_tx
@@ -296,17 +296,17 @@ impl AgentAdapter for RunBackedAgentAdapter {
                     reply: reply_tx,
                 })
                 .await
-                .map_err(|_| AgentAdapterError::new("Room participant actor is not available"))?;
+                .map_err(|_| AgentAdapterError::new("GroupChat participant actor is not available"))?;
             reply_rx
                 .await
-                .map_err(|_| AgentAdapterError::new("Room participant actor dropped reply"))?
+                .map_err(|_| AgentAdapterError::new("GroupChat participant actor dropped reply"))?
                 .map_err(AgentAdapterError::new)
         })
     }
 
     fn inject_prompt(&mut self, _scope: PromptScope, _body: &str) -> AdapterResult<()> {
         Err(AgentAdapterError::new(
-            "Room prompt injection is not wired in Phase 2",
+            "GroupChat prompt injection is not wired in Phase 2",
         ))
     }
 

@@ -1,20 +1,20 @@
 use crate::models::TaskRun;
-use crate::room::adapter::AgentCapabilities;
+use crate::group_chat::adapter::AgentCapabilities;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Room {
+pub struct GroupChat {
     pub id: String,
     pub name: String,
     pub cwd: Option<String>,
     pub memo: String,
-    pub participants: Vec<RoomParticipant>,
+    pub participants: Vec<GroupChatParticipant>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RoomParticipant {
+pub struct GroupChatParticipant {
     pub id: String,
     pub run_id: String,
     pub agent: String,
@@ -25,7 +25,7 @@ pub struct RoomParticipant {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum RoomTurnMode {
+pub enum GroupChatTurnMode {
     Fanout,
     Debate,
     Summary,
@@ -34,7 +34,7 @@ pub enum RoomTurnMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RoomResponseRef {
+pub struct GroupChatResponseRef {
     pub participant_id: String,
     pub run_id: String,
     pub event_seq_start: u64,
@@ -45,19 +45,19 @@ pub struct RoomResponseRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RoomTurn {
+pub struct GroupChatTurn {
     pub id: String,
     pub idx: u64,
-    pub mode: RoomTurnMode,
+    pub mode: GroupChatTurnMode,
     pub user_input: String,
     pub target_participant_ids: Vec<String>,
-    pub responses: Vec<RoomResponseRef>,
+    pub responses: Vec<GroupChatResponseRef>,
     pub started_at: String,
     pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RoomSummary {
+pub struct GroupChatSummary {
     pub id: String,
     pub name: String,
     pub cwd: Option<String>,
@@ -67,20 +67,20 @@ pub struct RoomSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoomParticipantDetail {
-    pub participant: RoomParticipant,
+pub struct GroupChatParticipantDetail {
+    pub participant: GroupChatParticipant,
     pub run: Option<TaskRun>,
     pub capabilities: AgentCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoomDetail {
+pub struct GroupChatDetail {
     pub id: String,
     pub name: String,
     pub cwd: Option<String>,
     pub memo: String,
-    pub participants: Vec<RoomParticipantDetail>,
-    pub turns: Vec<RoomTurn>,
+    pub participants: Vec<GroupChatParticipantDetail>,
+    pub turns: Vec<GroupChatTurn>,
     pub created_at: String,
     pub updated_at: String,
 }

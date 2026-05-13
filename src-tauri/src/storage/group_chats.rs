@@ -1,5 +1,5 @@
 use crate::models::now_iso;
-use crate::room::models::{Room, RoomParticipant, RoomSummary, RoomTurn};
+use crate::group_chat::models::{GroupChat, GroupChatParticipant, GroupChatSummary, GroupChatTurn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,49 +9,49 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-static ROOM_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+static GROUP_CHAT_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-fn room_lock(id: &str) -> Arc<Mutex<()>> {
-    let mut locks = ROOM_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+fn group_chat_lock(id: &str) -> Arc<Mutex<()>> {
+    let mut locks = GROUP_CHAT_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
     locks
         .entry(id.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
 }
 
-fn rooms_dir() -> PathBuf {
-    super::data_dir().join("rooms")
+fn group_chats_dir() -> PathBuf {
+    super::data_dir().join("group-chats")
 }
 
-fn room_dir(id: &str) -> PathBuf {
-    rooms_dir().join(id)
+fn group_chat_dir(id: &str) -> PathBuf {
+    group_chats_dir().join(id)
 }
 
-fn room_file(id: &str) -> PathBuf {
-    room_dir(id).join("room.json")
+fn group_chat_file(id: &str) -> PathBuf {
+    group_chat_dir(id).join("group_chat.json")
 }
 
 fn public_timeline_file(id: &str) -> PathBuf {
-    room_dir(id).join("timeline.jsonl")
+    group_chat_dir(id).join("timeline.jsonl")
 }
 
 fn private_file(id: &str) -> PathBuf {
-    room_dir(id).join("private.json")
+    group_chat_dir(id).join("private.json")
 }
 
-fn validate_room_id(id: &str) -> Result<(), String> {
+fn validate_group_chat_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id == "." || id == ".." {
-        return Err(format!("Invalid room id: {}", id));
+        return Err(format!("Invalid group chat id: {}", id));
     }
     Ok(())
 }
 
-fn save_room(room: &Room) -> Result<(), String> {
-    validate_room_id(&room.id)?;
-    let dir = room_dir(&room.id);
+fn save_group_chat(room: &GroupChat) -> Result<(), String> {
+    validate_group_chat_id(&room.id)?;
+    let dir = group_chat_dir(&room.id);
     super::ensure_dir(&dir).map_err(|e| e.to_string())?;
-    let path = room_file(&room.id);
+    let path = group_chat_file(&room.id);
     let tmp = dir.join(format!(
         "room.json.{}.{}.tmp",
         std::process::id(),
@@ -64,18 +64,18 @@ fn save_room(room: &Room) -> Result<(), String> {
     fs::write(&tmp, json).map_err(|e| format!("write tmp: {e}"))?;
     fs::rename(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
-        format!("rename room file: {e}")
+        format!("rename group chat file: {e}")
     })
 }
 
-pub fn create_room(name: String, cwd: Option<String>) -> Result<Room, String> {
+pub fn create_group_chat(name: String, cwd: Option<String>) -> Result<GroupChat, String> {
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
-        return Err("Room name is required".to_string());
+        return Err("GroupChat name is required".to_string());
     }
 
     let now = now_iso();
-    let room = Room {
+    let room = GroupChat {
         id: uuid::Uuid::new_v4().to_string(),
         name: trimmed_name.to_string(),
         cwd: cwd.filter(|s| !s.trim().is_empty()),
@@ -84,24 +84,24 @@ pub fn create_room(name: String, cwd: Option<String>) -> Result<Room, String> {
         created_at: now.clone(),
         updated_at: now,
     };
-    save_room(&room)?;
+    save_group_chat(&room)?;
     Ok(room)
 }
 
-pub fn get_room(id: &str) -> Option<Room> {
-    if validate_room_id(id).is_err() {
+pub fn get_group_chat(id: &str) -> Option<GroupChat> {
+    if validate_group_chat_id(id).is_err() {
         return None;
     }
-    let path = room_file(id);
+    let path = group_chat_file(id);
     let content = fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
 
-pub fn list_rooms() -> Vec<RoomSummary> {
-    let entries = match fs::read_dir(rooms_dir()) {
+pub fn list_group_chats() -> Vec<GroupChatSummary> {
+    let entries = match fs::read_dir(group_chats_dir()) {
         Ok(entries) => entries,
         Err(e) => {
-            log::debug!("[rooms] cannot read rooms dir: {}", e);
+            log::debug!("[rooms] cannot read group chats dir: {}", e);
             return vec![];
         }
     };
@@ -113,9 +113,9 @@ pub fn list_rooms() -> Vec<RoomSummary> {
                 return None;
             }
             let id = entry.file_name().to_string_lossy().to_string();
-            get_room(&id).map(|room| {
+            get_group_chat(&id).map(|room| {
                 let memo_preview = memo_preview(&room.memo);
-                RoomSummary {
+                GroupChatSummary {
                     id: room.id,
                     name: room.name,
                     cwd: room.cwd,
@@ -130,17 +130,17 @@ pub fn list_rooms() -> Vec<RoomSummary> {
     rooms
 }
 
-pub fn attach_run(
+pub fn attach_group_chat_run(
     room_id: &str,
     run_id: &str,
     label: Option<String>,
     role: Option<String>,
-) -> Result<Room, String> {
-    validate_room_id(room_id)?;
+) -> Result<GroupChat, String> {
+    validate_group_chat_id(room_id)?;
     let run = super::runs::get_run(run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
-    let room_lock = room_lock(room_id);
-    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+    let group_chat_lock = group_chat_lock(room_id);
+    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut room = get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
 
     let label = label
         .map(|s| s.trim().to_string())
@@ -175,12 +175,12 @@ pub fn attach_run(
         }
         if changed {
             room.updated_at = now_iso();
-            save_room(&room)?;
+            save_group_chat(&room)?;
         }
         return Ok(room);
     }
 
-    let participant = RoomParticipant {
+    let participant = GroupChatParticipant {
         id: uuid::Uuid::new_v4().to_string(),
         run_id: run_id.to_string(),
         agent: run.agent,
@@ -190,11 +190,11 @@ pub fn attach_run(
     };
     room.participants.push(participant);
     room.updated_at = now_iso();
-    save_room(&room)?;
+    save_group_chat(&room)?;
     Ok(room)
 }
 
-fn normalize_participant_role(_room: &Room, role: Option<String>) -> String {
+fn normalize_participant_role(_room: &GroupChat, role: Option<String>) -> String {
     let requested = role
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty());
@@ -202,72 +202,72 @@ fn normalize_participant_role(_room: &Room, role: Option<String>) -> String {
     requested.unwrap_or_else(|| "participant".to_string())
 }
 
-pub fn update_memo(room_id: &str, memo: String) -> Result<Room, String> {
-    validate_room_id(room_id)?;
-    let room_lock = room_lock(room_id);
-    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+pub fn update_group_chat_memo(room_id: &str, memo: String) -> Result<GroupChat, String> {
+    validate_group_chat_id(room_id)?;
+    let group_chat_lock = group_chat_lock(room_id);
+    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut room = get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
     room.memo = memo;
     room.updated_at = now_iso();
-    save_room(&room)?;
+    save_group_chat(&room)?;
     Ok(room)
 }
 
-pub fn append_public_turn(room_id: &str, turn: &RoomTurn) -> Result<(), String> {
+pub fn append_group_chat_public_turn(room_id: &str, turn: &GroupChatTurn) -> Result<(), String> {
     append_turn_jsonl(room_id, public_timeline_file(room_id), turn)
 }
 
-pub fn list_public_turns(room_id: &str) -> Result<Vec<RoomTurn>, String> {
+pub fn list_group_chat_public_turns(room_id: &str) -> Result<Vec<GroupChatTurn>, String> {
     list_turns_jsonl(room_id, public_timeline_file(room_id))
 }
 
-pub fn append_private_turn(room_id: &str, turn: &RoomTurn) -> Result<(), String> {
-    validate_room_id(room_id)?;
-    let room_lock = room_lock(room_id);
-    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
+pub fn append_group_chat_private_turn(room_id: &str, turn: &GroupChatTurn) -> Result<(), String> {
+    validate_group_chat_id(room_id)?;
+    let group_chat_lock = group_chat_lock(room_id);
+    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut file = read_private_file(room_id)?;
     file.turns.push(turn.clone());
     write_private_file(room_id, &file)?;
-    touch_room_updated_at(room_id)
+    touch_group_chat_updated_at(room_id)
 }
 
-pub fn list_private_turns(room_id: &str) -> Result<Vec<RoomTurn>, String> {
+pub fn list_group_chat_private_turns(room_id: &str) -> Result<Vec<GroupChatTurn>, String> {
     Ok(read_private_file(room_id)?.turns)
 }
 
-fn append_turn_jsonl(room_id: &str, path: PathBuf, turn: &RoomTurn) -> Result<(), String> {
-    validate_room_id(room_id)?;
-    let room_lock = room_lock(room_id);
-    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = room_dir(room_id);
+fn append_turn_jsonl(room_id: &str, path: PathBuf, turn: &GroupChatTurn) -> Result<(), String> {
+    validate_group_chat_id(room_id)?;
+    let group_chat_lock = group_chat_lock(room_id);
+    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = group_chat_dir(room_id);
     super::ensure_dir(&dir).map_err(|e| e.to_string())?;
     let line = serde_json::to_string(turn).map_err(|e| e.to_string())?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|e| format!("open room timeline: {e}"))?;
-    writeln!(file, "{}", line).map_err(|e| format!("write room timeline: {e}"))?;
-    touch_room_updated_at(room_id)
+        .map_err(|e| format!("open group chat timeline: {e}"))?;
+    writeln!(file, "{}", line).map_err(|e| format!("write group chat timeline: {e}"))?;
+    touch_group_chat_updated_at(room_id)
 }
 
-fn touch_room_updated_at(room_id: &str) -> Result<(), String> {
-    let mut room = get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+fn touch_group_chat_updated_at(room_id: &str) -> Result<(), String> {
+    let mut room = get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
     room.updated_at = now_iso();
-    save_room(&room)
+    save_group_chat(&room)
 }
 
-fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<RoomTurn>, String> {
-    validate_room_id(room_id)?;
+fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<GroupChatTurn>, String> {
+    validate_group_chat_id(room_id)?;
     if !path.exists() {
         return Ok(vec![]);
     }
-    let content = fs::read_to_string(path).map_err(|e| format!("read room timeline: {e}"))?;
+    let content = fs::read_to_string(path).map_err(|e| format!("read group chat timeline: {e}"))?;
     // Dedup by turn_id — incremental snapshots from orchestrator share the
     // same id; the last line for each id carries the completed turn state.
-    let mut dedup: std::collections::HashMap<String, RoomTurn> = std::collections::HashMap::new();
+    let mut dedup: std::collections::HashMap<String, GroupChatTurn> = std::collections::HashMap::new();
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
-        if let Ok(turn) = serde_json::from_str::<RoomTurn>(line) {
+        if let Ok(turn) = serde_json::from_str::<GroupChatTurn>(line) {
             dedup.insert(turn.id.clone(), turn);
         }
     }
@@ -277,11 +277,11 @@ fn list_turns_jsonl(room_id: &str, path: PathBuf) -> Result<Vec<RoomTurn>, Strin
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PrivateTurnsFile {
     schema_version: u32,
-    turns: Vec<RoomTurn>,
+    turns: Vec<GroupChatTurn>,
 }
 
 fn read_private_file(room_id: &str) -> Result<PrivateTurnsFile, String> {
-    validate_room_id(room_id)?;
+    validate_group_chat_id(room_id)?;
     let path = private_file(room_id);
     if !path.exists() {
         return Ok(PrivateTurnsFile {
@@ -294,8 +294,8 @@ fn read_private_file(room_id: &str) -> Result<PrivateTurnsFile, String> {
 }
 
 fn write_private_file(room_id: &str, file: &PrivateTurnsFile) -> Result<(), String> {
-    validate_room_id(room_id)?;
-    let dir = room_dir(room_id);
+    validate_group_chat_id(room_id)?;
+    let dir = group_chat_dir(room_id);
     super::ensure_dir(&dir).map_err(|e| e.to_string())?;
     let path = private_file(room_id);
     let tmp = dir.join(format!(
@@ -314,15 +314,15 @@ fn write_private_file(room_id: &str, file: &PrivateTurnsFile) -> Result<(), Stri
     })
 }
 
-pub fn delete_room(room_id: &str) -> Result<(), String> {
-    validate_room_id(room_id)?;
-    let room_lock = room_lock(room_id);
-    let _guard = room_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = room_dir(room_id);
+pub fn delete_group_chat(room_id: &str) -> Result<(), String> {
+    validate_group_chat_id(room_id)?;
+    let group_chat_lock = group_chat_lock(room_id);
+    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = group_chat_dir(room_id);
     if !dir.exists() {
-        return Err(format!("Room {} not found", room_id));
+        return Err(format!("GroupChat {} not found", room_id));
     }
-    fs::remove_dir_all(&dir).map_err(|e| format!("delete room: {e}"))
+    fs::remove_dir_all(&dir).map_err(|e| format!("delete group chat: {e}"))
 }
 
 fn memo_preview(memo: &str) -> Option<String> {
@@ -363,19 +363,19 @@ mod tests {
     }
 
     #[test]
-    fn room_can_be_created_listed_and_reopened() {
+    fn group_chat_can_be_created_listed_and_reopened() {
         with_temp_data_dir(|| {
-            let room = create_room(
+            let room = create_group_chat(
                 "Design Review".to_string(),
                 Some("D:/work/app".to_string()),
             )
             .unwrap();
 
-            let reopened = get_room(&room.id).unwrap();
+            let reopened = get_group_chat(&room.id).unwrap();
             assert_eq!(reopened.name, "Design Review");
             assert_eq!(reopened.cwd.as_deref(), Some("D:/work/app"));
 
-            let rooms = list_rooms();
+            let rooms = list_group_chats();
             assert_eq!(rooms.len(), 1);
             assert_eq!(rooms[0].id, room.id);
             assert_eq!(rooms[0].participant_count, 0);
@@ -383,9 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn room_attaches_existing_run_by_reference() {
+    fn group_chat_attaches_existing_run_by_reference() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
             let run = crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -401,7 +401,7 @@ mod tests {
             )
             .unwrap();
 
-            let updated = attach_run(
+            let updated = attach_group_chat_run(
                 &room.id,
                 &run.id,
                 Some("Reviewer".to_string()),
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn duplicate_attach_updates_existing_participant_metadata() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
             let run = crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -439,8 +439,8 @@ mod tests {
             )
             .unwrap();
 
-            attach_run(&room.id, &run.id, Some("Old".to_string()), None).unwrap();
-            let updated = attach_run(
+            attach_group_chat_run(&room.id, &run.id, Some("Old".to_string()), None).unwrap();
+            let updated = attach_group_chat_run(
                 &room.id,
                 &run.id,
                 Some("Reviewer".to_string()),
@@ -455,9 +455,9 @@ mod tests {
     }
 
     #[test]
-    fn delete_room_does_not_delete_referenced_run() {
+    fn delete_group_chat_does_not_delete_referenced_run() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -472,44 +472,44 @@ mod tests {
                 None,
             )
             .unwrap();
-            attach_run(&room.id, "run-1", None, None).unwrap();
+            attach_group_chat_run(&room.id, "run-1", None, None).unwrap();
 
-            delete_room(&room.id).unwrap();
+            delete_group_chat(&room.id).unwrap();
 
-            assert!(get_room(&room.id).is_none());
+            assert!(get_group_chat(&room.id).is_none());
             assert!(crate::storage::runs::get_run("run-1").is_some());
         });
     }
 
     #[test]
-    fn room_memo_updates_summary_preview() {
+    fn group_chat_memo_updates_summary_preview() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
-            update_memo(&room.id, "Remember the API boundary.".to_string()).unwrap();
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
+            update_group_chat_memo(&room.id, "Remember the API boundary.".to_string()).unwrap();
 
-            let reopened = get_room(&room.id).unwrap();
+            let reopened = get_group_chat(&room.id).unwrap();
             assert_eq!(reopened.memo, "Remember the API boundary.");
             assert_eq!(
-                list_rooms()[0].memo_preview.as_deref(),
+                list_group_chats()[0].memo_preview.as_deref(),
                 Some("Remember the API boundary.")
             );
         });
     }
 
     #[test]
-    fn room_lists_timeline() {
+    fn group_chat_lists_timeline() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
             let original_updated_at = room.updated_at.clone();
             std::thread::sleep(std::time::Duration::from_millis(2));
 
-            let turn = crate::room::models::RoomTurn {
+            let turn = crate::group_chat::models::GroupChatTurn {
                 id: "turn-1".to_string(),
                 idx: 1,
-                mode: crate::room::models::RoomTurnMode::Fanout,
+                mode: crate::group_chat::models::GroupChatTurnMode::Fanout,
                 user_input: "Compare options".to_string(),
                 target_participant_ids: vec!["p1".to_string()],
-                responses: vec![crate::room::models::RoomResponseRef {
+                responses: vec![crate::group_chat::models::GroupChatResponseRef {
                     participant_id: "p1".to_string(),
                     run_id: "run-1".to_string(),
                     event_seq_start: 2,
@@ -522,22 +522,22 @@ mod tests {
                 completed_at: Some("2026-04-30T00:00:01Z".to_string()),
             };
 
-            append_public_turn(&room.id, &turn).unwrap();
-            let turns = list_public_turns(&room.id).unwrap();
+            append_group_chat_public_turn(&room.id, &turn).unwrap();
+            let turns = list_group_chat_public_turns(&room.id).unwrap();
 
             assert_eq!(turns, vec![turn]);
-            assert_ne!(get_room(&room.id).unwrap().updated_at, original_updated_at);
+            assert_ne!(get_group_chat(&room.id).unwrap().updated_at, original_updated_at);
         });
     }
 
     #[test]
     fn private_turns_are_stored_separately_from_public_timeline() {
         with_temp_data_dir(|| {
-            let room = create_room("Room".to_string(), None).unwrap();
-            let private_turn = crate::room::models::RoomTurn {
+            let room = create_group_chat("GroupChat".to_string(), None).unwrap();
+            let private_turn = crate::group_chat::models::GroupChatTurn {
                 id: "private-1".to_string(),
                 idx: 1,
-                mode: crate::room::models::RoomTurnMode::Private,
+                mode: crate::group_chat::models::GroupChatTurnMode::Private,
                 user_input: "@Reviewer check this privately".to_string(),
                 target_participant_ids: vec!["p1".to_string()],
                 responses: vec![],
@@ -545,10 +545,10 @@ mod tests {
                 completed_at: Some("2026-04-30T00:00:01Z".to_string()),
             };
 
-            append_private_turn(&room.id, &private_turn).unwrap();
+            append_group_chat_private_turn(&room.id, &private_turn).unwrap();
 
-            assert!(list_public_turns(&room.id).unwrap().is_empty());
-            assert_eq!(list_private_turns(&room.id).unwrap(), vec![private_turn]);
+            assert!(list_group_chat_public_turns(&room.id).unwrap().is_empty());
+            assert_eq!(list_group_chat_private_turns(&room.id).unwrap(), vec![private_turn]);
         });
     }
 

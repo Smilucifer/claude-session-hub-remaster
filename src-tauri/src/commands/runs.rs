@@ -1,6 +1,6 @@
 use crate::agent::adapter::ActorSessionMap;
 use crate::models::{ExecutionPath, PromptFavorite, PromptSearchResult, RunStatus, TaskRun};
-use crate::room::adapter::AgentCapabilities;
+use crate::group_chat::adapter::AgentCapabilities;
 use crate::storage;
 use std::collections::{HashMap, HashSet};
 
