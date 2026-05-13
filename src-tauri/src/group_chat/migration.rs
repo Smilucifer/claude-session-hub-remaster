@@ -36,8 +36,10 @@ pub fn migrate_participant_character_ids() -> Result<usize, String> {
         }
 
         if changed {
-            group_chats::save_group_chat(&meta)?;
-            migrated += 1;
+            match group_chats::save_group_chat(&meta) {
+                Ok(()) => migrated += 1,
+                Err(e) => log::warn!("migration: failed to save group chat {}: {}", meta.id, e),
+            }
         }
     }
 

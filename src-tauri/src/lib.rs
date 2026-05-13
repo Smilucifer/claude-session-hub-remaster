@@ -93,15 +93,6 @@ pub fn run() {
     // One-time migration: import native hooks into Claw GO managed settings
     hooks::setup::migrate_native_hooks();
 
-    // Run character_id migration on startup (label→ID linkage for group chat participants)
-    std::thread::spawn(|| {
-        match crate::group_chat::migration::migrate_participant_character_ids() {
-            Ok(n) if n > 0 => log::info!("Migrated {} group chats to character_id linkage", n),
-            Err(e) => log::warn!("Character ID migration failed: {}", e),
-            _ => {}
-        }
-    });
-
     // Global cancellation token — shared with all session actors for graceful shutdown
     let cancel_token = CancellationToken::new();
     let cancel_for_exit = cancel_token.clone();
@@ -131,7 +122,7 @@ pub fn run() {
     let ws_effective_bind = EffectiveWebBind(Arc::new(tokio::sync::RwLock::new(String::new())));
     let ws_warning = WebServerWarning(Arc::new(tokio::sync::RwLock::new(None)));
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
@@ -424,8 +415,17 @@ pub fn run() {
                 }
                 _ => {}
             }
-        })
-        .build(tauri::generate_context!())
+        });
+
+    // Run character_id migration synchronously before Tauri binds IPC handlers.
+    // Must happen before .build() to avoid racing with concurrent IPC handlers.
+    match crate::group_chat::migration::migrate_participant_character_ids() {
+        Ok(n) if n > 0 => log::info!("Migrated {} group chats to character_id linkage", n),
+        Err(e) => log::warn!("Character ID migration failed: {}", e),
+        _ => {}
+    }
+
+    let app = builder.build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
