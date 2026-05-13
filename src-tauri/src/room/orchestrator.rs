@@ -792,38 +792,6 @@ async fn active_targets(
         .collect()
 }
 
-async fn active_copilot_targets(
-    participants: &[RoomParticipant],
-    sessions: &ActorSessionMap,
-) -> Vec<RoundtableTarget> {
-    let map = sessions.lock().await;
-    participants
-        .iter()
-        .filter(|participant| participant.role == "copilot")
-        .filter_map(|participant| {
-            let run = storage::runs::get_run(&participant.run_id)?;
-            let capabilities = AgentCapabilities::for_agent(&run.agent);
-            if capabilities.stream_session && can_use_room_actor_run(&run) {
-                return map.get(&participant.run_id).map(|handle| RoundtableTarget {
-                    participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Actor {
-                        cmd_tx: handle.cmd_tx.clone(),
-                    },
-                });
-            }
-            if capabilities.pipe_exec
-                && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec)
-            {
-                return Some(RoundtableTarget {
-                    participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Pipe,
-                });
-            }
-            None
-        })
-        .collect()
-}
-
 async fn active_target_for_participant(
     participant: RoomParticipant,
     sessions: &ActorSessionMap,

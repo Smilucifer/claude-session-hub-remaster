@@ -452,7 +452,7 @@ pub async fn send_room_message(
     room_id: String,
     message: String,
 ) -> Result<RoomDetail, String> {
-    let room =
+    let _room =
         storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
     let pipe_runtime = Some(crate::room::orchestrator::RoomPipeRuntime {
         app,
