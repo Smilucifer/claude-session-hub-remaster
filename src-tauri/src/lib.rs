@@ -327,7 +327,7 @@ pub fn run() {
             commands::vectorstore::vector_upsert,
             commands::vectorstore::vector_search,
             commands::vectorstore::vector_delete,
-            commands::vectorstore::rebuild_vector_index,
+            commands::vectorstore::reset_vector_store,
         ])
         .setup(move |app| {
             // Set up broadcast emitter (requires AppHandle, so must be in setup)

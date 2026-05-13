@@ -62,7 +62,11 @@ pub async fn vector_upsert(
     };
 
     // Delete existing entry for this page_id
-    let _ = table.delete(&format!("page_id = '{}'", page_id)).await;
+    let escaped = page_id.replace('\'', "''");
+    let filter = format!("page_id = '{}'", escaped);
+    if let Err(e) = table.delete(&filter).await {
+        log::warn!("vector_upsert: failed to delete old entry for {}: {}", page_id, e);
+    }
 
     // Build RecordBatch with one row
     let page_ids = StringArray::from(vec![page_id.as_str()]);
@@ -168,19 +172,26 @@ pub async fn vector_delete(
         .await
         .map_err(|e| e.to_string())?;
 
-    let _ = table.delete(&format!("page_id = '{}'", page_id)).await;
+    let escaped = page_id.replace('\'', "''");
+    let filter = format!("page_id = '{}'", escaped);
+    if let Err(e) = table.delete(&filter).await {
+        log::warn!("vector_delete: failed to delete entry for {}: {}", page_id, e);
+    }
     Ok(())
 }
 
 #[command]
-pub async fn rebuild_vector_index(
+pub async fn reset_vector_store(
     character_id: String,
 ) -> Result<usize, String> {
-    let entries = characters::read_all_memory_log_entries(&character_id)?;
-
     let db_path = lancedb_path(&character_id);
     let _ = std::fs::remove_dir_all(&db_path);
 
-    let count = entries.len();
+    // Count non-empty lines in the memory log file (cheaper than deserializing)
+    let log_path = characters::memory_log_path(&character_id);
+    let count = std::fs::read_to_string(&log_path)
+        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0);
+
     Ok(count)
 }

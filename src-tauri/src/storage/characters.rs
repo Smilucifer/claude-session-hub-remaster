@@ -53,7 +53,7 @@ fn write_atomic_json<T: Serialize>(path: &Path, data: &T) -> Result<(), String> 
 
 // --- Memory Log (authoritative source) ---
 
-fn memory_log_path(character_id: &str) -> PathBuf {
+pub(crate) fn memory_log_path(character_id: &str) -> PathBuf {
     char_dir(character_id).join("memory-log.jsonl")
 }
 
