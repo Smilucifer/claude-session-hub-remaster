@@ -857,6 +857,7 @@ pub async fn dispatch_command(
                 attachments,
                 platform_id,
                 permission_mode_override,
+                false, // auto_approve_mcp: web server sessions don't auto-approve
             )
             .await?;
             Ok(json!(true))

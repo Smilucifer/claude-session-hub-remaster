@@ -302,6 +302,7 @@ async fn create_group_chat_participant_impl(
             None,
             platform_id,
             permission_mode_override,
+            true, // auto_approve_mcp: group chat participants auto-approve MCP tools
         )
         .await
         {

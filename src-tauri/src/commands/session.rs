@@ -546,6 +546,7 @@ pub(crate) async fn start_session_impl(
     attachments: Option<Vec<AttachmentData>>,
     platform_id: Option<String>,
     permission_mode_override: Option<String>,
+    auto_approve_mcp: bool,
 ) -> Result<(), String> {
     let _guard = spawn_locks.acquire(&run_id).await;
     let session_mode = mode.unwrap_or_default();
@@ -861,6 +862,7 @@ pub(crate) async fn start_session_impl(
         initial_turn_index,
         initial_auto_ctx_id,
         msvc_injected,
+        auto_approve_mcp,
     );
     let cmd_tx = actor_handle.cmd_tx.clone();
     sessions.lock().await.insert(run_id.clone(), actor_handle);
@@ -949,6 +951,7 @@ pub async fn start_session(
         attachments,
         platform_id,
         permission_mode_override,
+        false, // auto_approve_mcp: regular chat sessions don't auto-approve
     )
     .await
 }
@@ -1452,6 +1455,7 @@ pub(crate) async fn approve_session_tool_impl(
         total + 1,
         normal + 1,
         msvc_injected,
+        false, // auto_approve_mcp: approval flow doesn't auto-approve
     );
     sessions.lock().await.insert(run_id.clone(), actor_handle);
 
