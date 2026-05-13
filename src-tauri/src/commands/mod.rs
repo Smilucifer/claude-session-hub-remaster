@@ -18,7 +18,6 @@ pub mod history;
 pub mod mcp;
 pub mod memos;
 pub mod onboarding;
-pub mod plans;
 pub mod plugins;
 pub mod preview;
 pub mod group_chat;

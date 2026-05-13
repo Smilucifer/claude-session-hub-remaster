@@ -76,6 +76,90 @@ pub async fn run_group_chat_turn(
     run_group_chat_turn_with_runtime(room_id, message, sessions, None, None).await
 }
 
+/// Inner execution: spawn participant tasks, collect responses, save incremental turns.
+/// Extracted so the caller can write a terminal failed turn on ANY error path.
+#[allow(clippy::too_many_arguments)]
+async fn execute_turn_inner(
+    room_id: &str,
+    turn_id: String,
+    idx: u64,
+    mode: &GroupChatTurnMode,
+    user_input: &str,
+    participant_ids: &[String],
+    targets: &[GroupChatTarget],
+    pipe_runtime: &Option<GroupChatPipeRuntime>,
+    turn_num: u64,
+    prompt: &str,
+    public_turns: &[GroupChatTurn],
+    participants: &[GroupChatParticipant],
+    started_at: &str,
+    is_private: bool,
+) -> Result<GroupChatTurn, String> {
+    let mut join_set = tokio::task::JoinSet::new();
+    for target in targets {
+        let target = target.clone();
+        let participant = target.participant.clone();
+        let run = storage::runs::get_run(&participant.run_id)
+            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
+        let target_prompt = match mode {
+            GroupChatTurnMode::Fanout => build_fanout_prompt(turn_num, prompt, None),
+            GroupChatTurnMode::Debate => {
+                build_debate_prompt(&participant, prompt, public_turns, participants)
+            }
+            _ => prompt.to_string(),
+        };
+        let pipe_runtime = pipe_runtime.clone();
+
+        join_set.spawn(async move {
+            let run_lock = run_orchestration_lock(&participant.run_id);
+            let _run_guard = run_lock.lock().await;
+            execute_group_chat_target(target, &participant, &run, &target_prompt, pipe_runtime)
+                .await
+        });
+    }
+
+    let mut responses: Vec<GroupChatResponseRef> = Vec::with_capacity(targets.len());
+    while let Some(result) = join_set.join_next().await {
+        let response = result.map_err(|e| format!("GroupChat participant task failed: {e}"))?;
+        responses.push(response);
+
+        let incremental_turn = GroupChatTurn {
+            id: turn_id.clone(),
+            idx,
+            mode: mode.clone(),
+            user_input: user_input.to_string(),
+            target_participant_ids: participant_ids.to_vec(),
+            responses: responses.clone(),
+            started_at: started_at.to_string(),
+            completed_at: None,
+        };
+        if is_private {
+            storage::group_chats::append_group_chat_private_turn(room_id, &incremental_turn)?;
+        } else {
+            storage::group_chats::append_group_chat_public_turn(room_id, &incremental_turn)?;
+        }
+    }
+
+    let turn = GroupChatTurn {
+        id: turn_id,
+        idx,
+        mode: mode.clone(),
+        user_input: user_input.to_string(),
+        target_participant_ids: participant_ids.to_vec(),
+        responses,
+        started_at: started_at.to_string(),
+        completed_at: Some(now_iso()),
+    };
+
+    if is_private {
+        storage::group_chats::append_group_chat_private_turn(room_id, &turn)?;
+    } else {
+        storage::group_chats::append_group_chat_public_turn(room_id, &turn)?;
+    }
+
+    Ok(turn)
+}
+
 pub async fn run_group_chat_turn_with_runtime(
     room_id: &str,
     message: &str,
@@ -190,207 +274,172 @@ pub async fn run_group_chat_turn_with_runtime(
         storage::group_chats::append_group_chat_public_turn(room_id, &initial_turn)?;
     }
 
-    let mut join_set = tokio::task::JoinSet::new();
-    for target in &targets {
-        let target = target.clone();
-        let participant = target.participant.clone();
-        let run = storage::runs::get_run(&participant.run_id)
-            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = match mode {
-            GroupChatTurnMode::Fanout => {
-                build_fanout_prompt(turn_num, &prompt, None)
-            }
-            GroupChatTurnMode::Debate => {
-                build_debate_prompt(
-                    &participant,
-                    &prompt,
-                    &public_turns,
-                    &room.participants,
-                )
-            }
-            _ => prompt.clone(),
-        };
-        let pipe_runtime = pipe_runtime.clone();
-
-        join_set.spawn(async move {
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            execute_group_chat_target(target, &participant, &run, &target_prompt, pipe_runtime)
-                .await
-        });
-    }
-
-    let mut responses: Vec<GroupChatResponseRef> = Vec::with_capacity(targets.len());
-    while let Some(result) = join_set.join_next().await {
-        let response = result.map_err(|e| format!("GroupChat participant task failed: {e}"))?;
-        responses.push(response);
-
-        // Save incremental turn so frontend sees responses as they arrive.
-        // This appends one JSONL line per completed participant (same turn_id).
-        // Trade-off: N participant turns = N+1 lines (N snapshots + 1 final).
-        // The dedup in list_turns_jsonl keeps the latest per turn_id, so
-        // the read path is correct at the cost of file size growth over time.
-        let incremental_turn = GroupChatTurn {
-            id: turn_id.clone(),
-            idx,
-            mode: mode.clone(),
-            user_input: user_input.clone(),
-            target_participant_ids: participant_ids.clone(),
-            responses: responses.clone(),
-            started_at: started_at.clone(),
-            completed_at: None, // not yet finished
-        };
-        if is_private {
-            storage::group_chats::append_group_chat_private_turn(room_id, &incremental_turn)?;
-        } else {
-            storage::group_chats::append_group_chat_public_turn(room_id, &incremental_turn)?;
-        }
-    }
-
-    let turn = GroupChatTurn {
-        id: turn_id,
+    // Execute in a helper so ALL errors route through the failed-turn cleanup below.
+    let exec_result = execute_turn_inner(
+        room_id,
+        turn_id.clone(),
         idx,
-        mode,
-        user_input,
-        target_participant_ids: participant_ids,
-        responses,
-        started_at,
-        completed_at: Some(now_iso()),
-    };
+        &mode,
+        &user_input,
+        &participant_ids,
+        &targets,
+        &pipe_runtime,
+        turn_num,
+        &prompt,
+        &public_turns,
+        &room.participants,
+        &started_at,
+        is_private,
+    )
+    .await;
 
-    if is_private {
-        storage::group_chats::append_group_chat_private_turn(room_id, &turn)?;
-    } else {
-        storage::group_chats::append_group_chat_public_turn(room_id, &turn)?;
-    }
+    match exec_result {
+        Ok(turn) => {
+            // ── Session handoff trigger ──
+            let public_turns_after = if is_private {
+                storage::group_chats::list_group_chat_public_turns(room_id)?
+            } else {
+                let mut turns = storage::group_chats::list_group_chat_public_turns(room_id)?;
+                if turns.last().map(|t| t.id.as_str()) != Some(&turn.id) {
+                    turns.push(turn.clone());
+                }
+                turns
+            };
+            for resp in &turn.responses {
+                let _ = record_participant_turn(room_id, &resp.participant_id);
+                if let Some(participant) = room.participants.iter().find(|p| p.id == resp.participant_id) {
+                    match check_handoff(&room, participant, &public_turns_after) {
+                        HandoffDecision::Handoff { bootstrap_context } => {
+                            log::info!(
+                                "[group-chat] handoff triggered for participant {} (session_seq={}): context length={}",
+                                participant.label,
+                                crate::group_chat::context::load_participant_meta(room_id, &participant.id).session_seq,
+                                bootstrap_context.len(),
+                            );
+                            let _ = crate::group_chat::context::reset_session_after_handoff(
+                                room_id,
+                                &participant.id,
+                            );
+                        }
+                        HandoffDecision::Continue => {}
+                    }
+                }
+            }
 
-    // ── Task 38: session handoff trigger ──
-    // Record turn count and check handoff threshold for each responding participant.
-    let public_turns_after = if is_private {
-        storage::group_chats::list_group_chat_public_turns(room_id)?
-    } else {
-        // turn was just appended; re-read to include it
-        let mut turns = storage::group_chats::list_group_chat_public_turns(room_id)?;
-        if turns.last().map(|t| t.id.as_str()) != Some(&turn.id) {
-            turns.push(turn.clone());
-        }
-        turns
-    };
-    for resp in &turn.responses {
-        let _ = record_participant_turn(room_id, &resp.participant_id);
-        if let Some(participant) = room.participants.iter().find(|p| p.id == resp.participant_id) {
-            match check_handoff(&room, participant, &public_turns_after) {
-                HandoffDecision::Handoff { bootstrap_context } => {
+            // ── Auto-chain: after SingleTarget, scan response for @mentions ──
+            if room.auto_chain && matches!(turn.mode, GroupChatTurnMode::SingleTarget) {
+                let mut chained_ids: HashSet<String> =
+                    turn.target_participant_ids.iter().cloned().collect();
+                let mut current_turn = turn.clone();
+                let mut hop = 0usize;
+
+                while hop < MAX_AUTO_CHAIN_HOPS {
+                    if let Some(ref ct) = cancel_token {
+                        if ct.is_cancelled() {
+                            log::info!("[group-chat] auto-chain cancelled at hop {hop}");
+                            break;
+                        }
+                    }
+
+                    let Some(mention) = extract_first_mention(
+                        &current_turn,
+                        &room.participants,
+                        &chained_ids,
+                    ) else {
+                        break;
+                    };
+
+                    let participant = match find_participant_unique(&room.participants, &mention) {
+                        Ok(p) => p.clone(),
+                        Err(e) => {
+                            log::debug!("[group-chat] auto-chain: {e}");
+                            break;
+                        }
+                    };
+
+                    let target = match active_target_for_participant(participant.clone(), sessions).await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            log::debug!("[group-chat] auto-chain: no active target for {}: {e}", participant.label);
+                            break;
+                        }
+                    };
+
+                    hop += 1;
+                    chained_ids.insert(participant.id.clone());
+
+                    let auto_prompt = build_singletarget_prompt(
+                        public_turns_after.len() as u64 + hop as u64,
+                        &participant.label,
+                        current_turn
+                            .responses
+                            .first()
+                            .and_then(|r| r.preview.as_deref())
+                            .unwrap_or("(empty)"),
+                    );
+
+                    let auto_started = now_iso();
+                    let auto_turn_id = uuid::Uuid::new_v4().to_string();
+                    let auto_idx = public_turns_after.len() as u64 + hop as u64;
+
+                    let run_lock = run_orchestration_lock(&participant.run_id);
+                    let _run_guard = run_lock.lock().await;
+                    let run = match storage::runs::get_run(&participant.run_id) {
+                        Some(r) => r,
+                        None => break,
+                    };
+
+                    let response =
+                        execute_group_chat_target(target, &participant, &run, &auto_prompt, pipe_runtime.clone()).await;
+
+                    let auto_turn = GroupChatTurn {
+                        id: auto_turn_id,
+                        idx: auto_idx,
+                        mode: GroupChatTurnMode::SingleTarget,
+                        user_input: format!("[auto-chain hop {hop}]"),
+                        target_participant_ids: vec![participant.id.clone()],
+                        responses: vec![response],
+                        started_at: auto_started,
+                        completed_at: Some(now_iso()),
+                    };
+                    if let Err(e) = storage::group_chats::append_group_chat_public_turn(room_id, &auto_turn) {
+                        log::warn!("[group-chat] auto-chain: failed to persist turn: {e}");
+                        break;
+                    }
+
                     log::info!(
-                        "[group-chat] handoff triggered for participant {} (session_seq={}): context length={}",
+                        "[group-chat] auto-chain hop {hop}: @{} → {}",
+                        mention,
                         participant.label,
-                        crate::group_chat::context::load_participant_meta(room_id, &participant.id).session_seq,
-                        bootstrap_context.len(),
                     );
-                    // TODO: spawn fresh session with bootstrap_context as first message.
-                    // For now, reset session state so the next turn starts fresh.
-                    let _ = crate::group_chat::context::reset_session_after_handoff(
-                        room_id,
-                        &participant.id,
-                    );
+
+                    current_turn = auto_turn;
                 }
-                HandoffDecision::Continue => {}
             }
+
+            Ok(turn)
         }
-    }
-
-    // ── Auto-chain: after SingleTarget, scan response for @mentions ──
-    if room.auto_chain && matches!(turn.mode, GroupChatTurnMode::SingleTarget) {
-        let mut chained_ids: HashSet<String> =
-            turn.target_participant_ids.iter().cloned().collect();
-        let mut current_turn = turn.clone();
-        let mut hop = 0usize;
-
-        while hop < MAX_AUTO_CHAIN_HOPS {
-            if let Some(ref ct) = cancel_token {
-                if ct.is_cancelled() {
-                    log::info!("[group-chat] auto-chain cancelled at hop {hop}");
-                    break;
-                }
-            }
-
-            let Some(mention) = extract_first_mention(
-                &current_turn,
-                &room.participants,
-                &chained_ids,
-            ) else {
-                break;
-            };
-
-            let participant = match find_participant_unique(&room.participants, &mention) {
-                Ok(p) => p.clone(),
-                Err(e) => {
-                    log::debug!("[group-chat] auto-chain: {e}");
-                    break;
-                }
-            };
-
-            let target = match active_target_for_participant(participant.clone(), sessions).await {
-                Ok(t) => t,
-                Err(e) => {
-                    log::debug!("[group-chat] auto-chain: no active target for {}: {e}", participant.label);
-                    break;
-                }
-            };
-
-            hop += 1;
-            chained_ids.insert(participant.id.clone());
-
-            let auto_prompt = build_singletarget_prompt(
-                public_turns_after.len() as u64 + hop as u64,
-                &participant.label,
-                current_turn
-                    .responses
-                    .first()
-                    .and_then(|r| r.preview.as_deref())
-                    .unwrap_or("(empty)"),
-            );
-
-            let auto_started = now_iso();
-            let auto_turn_id = uuid::Uuid::new_v4().to_string();
-            let auto_idx = public_turns_after.len() as u64 + hop as u64;
-
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            let run = match storage::runs::get_run(&participant.run_id) {
-                Some(r) => r,
-                None => break,
-            };
-
-            let response =
-                execute_group_chat_target(target, &participant, &run, &auto_prompt, pipe_runtime.clone()).await;
-
-            let auto_turn = GroupChatTurn {
-                id: auto_turn_id,
-                idx: auto_idx,
-                mode: GroupChatTurnMode::SingleTarget,
-                user_input: format!("[auto-chain hop {hop}]"),
-                target_participant_ids: vec![participant.id.clone()],
-                responses: vec![response],
-                started_at: auto_started,
+        Err(e) => {
+            // Write a terminal failed turn so the frontend doesn't show
+            // an orphaned empty turn with bouncing dots forever.
+            let failed_turn = GroupChatTurn {
+                id: turn_id,
+                idx,
+                mode,
+                user_input,
+                target_participant_ids: participant_ids,
+                responses: vec![],
+                started_at,
                 completed_at: Some(now_iso()),
             };
-            if let Err(e) = storage::group_chats::append_group_chat_public_turn(room_id, &auto_turn) {
-                log::warn!("[group-chat] auto-chain: failed to persist turn: {e}");
-                break;
-            }
-
-            log::info!(
-                "[group-chat] auto-chain hop {hop}: @{} → {}",
-                mention,
-                participant.label,
-            );
-
-            current_turn = auto_turn;
+            let _ = if is_private {
+                storage::group_chats::append_group_chat_private_turn(room_id, &failed_turn)
+            } else {
+                storage::group_chats::append_group_chat_public_turn(room_id, &failed_turn)
+            };
+            Err(e)
         }
     }
-
-    Ok(turn)
 }
 
 async fn execute_group_chat_target(

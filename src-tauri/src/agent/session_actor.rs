@@ -238,6 +238,10 @@ struct SessionActor {
     /// Whether MSVC environment was actually injected for this chat session.
     /// Derived from SpawnEnvPlan.status at spawn time. None = unknown/not applicable.
     msvc_injected: Option<bool>,
+
+    /// Auto-approve MCP tool calls (Group Chat participants).
+    /// When true, permission prompts for tools starting with "mcp__" are auto-approved.
+    auto_approve_mcp: bool,
 }
 
 // ── Spawn entry point ──
@@ -264,6 +268,7 @@ pub fn spawn_actor(
     initial_turn_index: u32,
     initial_auto_ctx_id: u32,
     msvc_injected: Option<bool>,
+    auto_approve_mcp: bool,
 ) -> SessionActorHandle {
     let tag = Arc::new(());
     let (cmd_tx, cmd_rx) = mpsc::channel::<ActorCommand>(64);
@@ -310,6 +315,7 @@ pub fn spawn_actor(
         ralph_needs_dispatch: false,
         pending_interactive_request: None,
         msvc_injected,
+        auto_approve_mcp,
     };
 
     let join_handle = tokio::spawn(async move {
@@ -1890,9 +1896,28 @@ impl SessionActor {
                 .unwrap_or_default();
 
             log::debug!(
-                "[actor] permission prompt: run_id={}, req_id={}, tool={}, reason={}, parent={:?}, suggestions={}",
-                self.run_id, request_id, tool_name, decision_reason, parent_tool_use_id, suggestions.len()
+                "[actor] permission prompt: run_id={}, req_id={}, tool={}, reason={}, parent={:?}, suggestions={}, auto_approve_mcp={}",
+                self.run_id, request_id, tool_name, decision_reason, parent_tool_use_id, suggestions.len(), self.auto_approve_mcp
             );
+
+            // Auto-approve MCP tools when auto_approve_mcp flag is set (Group Chat participants)
+            if self.auto_approve_mcp && tool_name.starts_with("mcp__") {
+                log::info!(
+                    "[actor] auto-approving MCP tool: run_id={}, tool={}, req_id={}",
+                    self.run_id, tool_name, request_id
+                );
+                let response = serde_json::json!({
+                    "behavior": "allow",
+                    "updatedInput": tool_input,
+                });
+                if let Err(e) = self.write_control_response(&request_id, response).await {
+                    log::warn!(
+                        "[actor] auto-approve MCP write failed: run_id={}, tool={}, err={}",
+                        self.run_id, tool_name, e
+                    );
+                }
+                return;
+            }
 
             let tool_label = tool_name.clone();
             self.persist_and_emit(&BusEvent::PermissionPrompt {

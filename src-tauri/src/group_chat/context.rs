@@ -210,28 +210,7 @@ fn build_bootstrap_context(
         participant.label, participant.role
     ));
 
-    // 3. Plan status
-    if let Some(plan_id) = &group_chat.active_plan_id {
-        if let Some(plan) = storage::group_chats::get_plan_for_group_chat(&group_chat.id) {
-            let task_summary = format!(
-                "{} tasks ({} todo, {} in-progress, {} done, {} blocked)",
-                plan.tasks.len(),
-                plan.tasks.iter().filter(|t| t.status == crate::group_chat::models::TaskStatus::Todo).count(),
-                plan.tasks.iter().filter(|t| t.status == crate::group_chat::models::TaskStatus::InProgress).count(),
-                plan.tasks.iter().filter(|t| t.status == crate::group_chat::models::TaskStatus::Done).count(),
-                plan.tasks.iter().filter(|t| t.status == crate::group_chat::models::TaskStatus::Blocked).count(),
-            );
-            sections.push(format!(
-                "Active plan \"{}\" [{}]: {}.",
-                plan.title,
-                format!("{:?}", plan.status).to_lowercase(),
-                task_summary,
-            ));
-            let _ = plan_id; // suppress unused warning
-        }
-    }
-
-    // 4. Last N public turns
+    // 3. Last N public turns
     let recent_turns: Vec<&GroupChatTurn> = public_turns
         .iter()
         .rev()

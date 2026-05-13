@@ -426,17 +426,6 @@
     return undefined;
   }
 
-  function turnModeLabel(mode: string): string {
-    switch (mode) {
-      case "fanout": return t("groupChat_turnFanout");
-      case "debate": return t("groupChat_turnDebate");
-      case "summary": return t("groupChat_turnSummary");
-      case "private": return t("groupChat_turnPrivate");
-      case "singletarget": return t("groupChat_turnSingleTarget");
-      default: return mode;
-    }
-  }
-
   function roleLabel(role: string): string {
     switch (role) {
       case "planner": return t("groupChat_rolePlanner");

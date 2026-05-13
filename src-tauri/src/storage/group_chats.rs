@@ -1,7 +1,6 @@
 use crate::models::now_iso;
 use crate::group_chat::models::{
-    GroupChat, GroupChatParticipant, GroupChatSummary, GroupChatTurn, PlanArtifact, PlanStatus,
-    PlanTask,
+    GroupChat, GroupChatParticipant, GroupChatSummary, GroupChatTurn,
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -84,7 +83,6 @@ pub fn create_group_chat(name: String, cwd: Option<String>) -> Result<GroupChat,
         cwd: cwd.filter(|s| !s.trim().is_empty()),
         memo: String::new(),
         participants: vec![],
-        active_plan_id: None,
         created_at: now.clone(),
         updated_at: now,
         auto_chain: false,
@@ -347,167 +345,6 @@ fn memo_preview(memo: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
-}
-
-// ── Plan storage ──
-
-fn plan_file(group_chat_id: &str) -> PathBuf {
-    group_chat_dir(group_chat_id).join("plan.json")
-}
-
-fn save_plan(plan: &PlanArtifact) -> Result<(), String> {
-    validate_group_chat_id(&plan.group_chat_id)?;
-    let dir = group_chat_dir(&plan.group_chat_id);
-    super::ensure_dir(&dir).map_err(|e| e.to_string())?;
-    let path = plan_file(&plan.group_chat_id);
-    let tmp = dir.join(format!(
-        "plan.json.{}.{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    let json = serde_json::to_string_pretty(plan).map_err(|e| e.to_string())?;
-    fs::write(&tmp, json).map_err(|e| format!("write plan tmp: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("rename plan file: {e}")
-    })
-}
-
-fn read_plan(group_chat_id: &str) -> Option<PlanArtifact> {
-    let path = plan_file(group_chat_id);
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-fn find_plan_group_chat(plan_id: &str) -> Option<GroupChat> {
-    let dir = group_chats_dir();
-    let entries = fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let id = entry.file_name().to_string_lossy().to_string();
-        if let Some(room) = get_group_chat(&id) {
-            if room.active_plan_id.as_deref() == Some(plan_id) {
-                return Some(room);
-            }
-        }
-    }
-    None
-}
-
-fn touch_group_chat_updated_at_for_plan(room: &mut GroupChat) -> Result<(), String> {
-    room.updated_at = now_iso();
-    save_group_chat(room)
-}
-
-pub fn create_plan(
-    group_chat_id: &str,
-    title: String,
-    tasks: Vec<PlanTask>,
-) -> Result<PlanArtifact, String> {
-    validate_group_chat_id(group_chat_id)?;
-    let group_chat_lock = group_chat_lock(group_chat_id);
-    let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut room = get_group_chat(group_chat_id)
-        .ok_or_else(|| format!("GroupChat {} not found", group_chat_id))?;
-
-    let now = now_iso();
-    let plan_id = uuid::Uuid::new_v4().to_string();
-    let plan = PlanArtifact {
-        id: plan_id.clone(),
-        group_chat_id: group_chat_id.to_string(),
-        title,
-        tasks,
-        status: PlanStatus::Draft,
-        user_notes: None,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-
-    save_plan(&plan)?;
-    room.active_plan_id = Some(plan_id);
-    room.updated_at = now_iso();
-    save_group_chat(&room)?;
-
-    Ok(plan)
-}
-
-pub fn get_plan_for_group_chat(group_chat_id: &str) -> Option<PlanArtifact> {
-    read_plan(group_chat_id)
-}
-
-pub fn get_plan(plan_id: &str) -> Option<PlanArtifact> {
-    let room = find_plan_group_chat(plan_id)?;
-    let plan = read_plan(&room.id)?;
-    if plan.id == plan_id {
-        Some(plan)
-    } else {
-        None
-    }
-}
-
-pub fn update_plan(
-    plan_id: &str,
-    title: Option<String>,
-    tasks: Option<Vec<PlanTask>>,
-    user_notes: Option<String>,
-    clear_user_notes: bool,
-) -> Result<PlanArtifact, String> {
-    let room = find_plan_group_chat(plan_id)
-        .ok_or_else(|| format!("Plan {} not found", plan_id))?;
-    let lock = group_chat_lock(&room.id);
-    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut room = get_group_chat(&room.id).ok_or_else(|| format!("GroupChat {} not found", room.id))?;
-    let mut plan = read_plan(&room.id)
-        .ok_or_else(|| format!("Plan file not found for group chat {}", room.id))?;
-
-    if plan.id != plan_id {
-        return Err(format!("Plan {} not found", plan_id));
-    }
-
-    if let Some(title) = title {
-        plan.title = title;
-    }
-    if let Some(tasks) = tasks {
-        plan.tasks = tasks;
-    }
-    if clear_user_notes {
-        plan.user_notes = None;
-    } else if user_notes.is_some() {
-        plan.user_notes = user_notes;
-    }
-    plan.updated_at = now_iso();
-
-    save_plan(&plan)?;
-    touch_group_chat_updated_at_for_plan(&mut room)?;
-
-    Ok(plan)
-}
-
-pub fn set_plan_status(plan_id: &str, status: PlanStatus) -> Result<PlanArtifact, String> {
-    let room = find_plan_group_chat(plan_id)
-        .ok_or_else(|| format!("Plan {} not found", plan_id))?;
-    let lock = group_chat_lock(&room.id);
-    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut room = get_group_chat(&room.id).ok_or_else(|| format!("GroupChat {} not found", room.id))?;
-    let mut plan = read_plan(&room.id)
-        .ok_or_else(|| format!("Plan file not found for group chat {}", room.id))?;
-
-    if plan.id != plan_id {
-        return Err(format!("Plan {} not found", plan_id));
-    }
-
-    plan.status = status;
-    plan.updated_at = now_iso();
-
-    save_plan(&plan)?;
-    touch_group_chat_updated_at_for_plan(&mut room)?;
-
-    Ok(plan)
 }
 
 #[cfg(test)]
