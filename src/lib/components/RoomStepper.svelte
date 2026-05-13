@@ -2,7 +2,18 @@
   import type { RoomTurn, RoomTurnSnapshot } from "$lib/types";
   import { getRoomTurnSnapshot } from "$lib/api";
   import { t } from "$lib/i18n/index.svelte";
-  import { roomTurnModeKey } from "$lib/utils/room-ui";
+
+  const TURN_MODE_LABEL_KEYS: Record<string, string> = {
+    fanout: "room_turnFanout",
+    debate: "room_turnDebate",
+    summary: "room_turnSummary",
+    private: "room_turnPrivate",
+    singletarget: "room_turnSingleTarget",
+  };
+
+  function roomTurnModeKey(mode: string): string {
+    return TURN_MODE_LABEL_KEYS[mode] ?? mode;
+  }
 
   let {
     roomId,

@@ -144,7 +144,7 @@ describe("RoomStore", () => {
       .mockResolvedValueOnce(withDeepSeek);
     vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Roundtable")]);
 
-    await store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+    await store.createRoundtableWithParticipants("Roundtable", "D:/work", [
       {
         agent: "claude",
         prompt: "You are Claude.",
@@ -169,7 +169,7 @@ describe("RoomStore", () => {
       },
     ]);
 
-    expect(api.createRoom).toHaveBeenCalledWith("Roundtable", "", "D:/work", "roundtable");
+    expect(api.createRoom).toHaveBeenCalledWith("Roundtable", "D:/work");
     expect(api.createRoomParticipant).toHaveBeenCalledTimes(3);
     expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
       1,
@@ -219,7 +219,7 @@ describe("RoomStore", () => {
 
   it("rejects roundtable creation unless exactly three seats are provided", async () => {
     await expect(
-      store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+      store.createRoundtableWithParticipants("Roundtable", "D:/work", [
         { agent: "claude", prompt: "One", label: "One" },
         { agent: "codex", prompt: "Two", label: "Two" },
       ]),
@@ -384,7 +384,7 @@ describe("RoomStore", () => {
       {
         id: "turn-1",
         idx: 1,
-        mode: "research",
+        mode: "fanout",
         user_input: "Compare options",
         target_participant_ids: ["p1"],
         responses: [],

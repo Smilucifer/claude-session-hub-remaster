@@ -12,7 +12,6 @@
     listMemoryFiles,
     softDeleteRuns,
     stopSession,
-    listRoomRunIndex,
   } from "$lib/api";
   import ProjectFolderItem from "$lib/components/ProjectFolderItem.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
@@ -40,7 +39,6 @@
     expandForProjectChange,
     normalizeCwd,
     type ConversationGroup,
-    type RoomRunMapping,
   } from "$lib/utils/sidebar-groups";
   import {
     buildResumeLastActiveCommand,
@@ -132,7 +130,6 @@
   let pinnedCwds = $state<string[]>([]);
   let removedCwds = $state<string[]>([]);
   let pinnedConversationKeys = $state<Set<string>>(new Set());
-  let roomRunMap = $state<Map<string, RoomRunMapping>>(new Map());
   let seenMessageCounts = $state<SeenMessageCounts>({});
   let seenMessageCountsLoaded = $state(false);
 
@@ -444,7 +441,6 @@
     { path: "/explorer", label: () => t("nav_explorer"), icon: "folder" },
     { path: "/plugins", label: () => t("nav_extend"), icon: "zap" },
     { path: "/memory", label: () => t("nav_memory"), icon: "book" },
-    { path: "/rooms", label: () => t("nav_rooms"), icon: "rooms" },
     { path: "/usage", label: () => t("nav_usage"), icon: "chart" },
     { path: "/history", label: () => t("nav_history"), icon: "clock" },
     { path: "/settings", label: () => t("nav_settings"), icon: "settings" },
@@ -459,24 +455,6 @@
     try {
       runs = await listRuns();
       runsLoadSucceededOnce = true;
-    } catch {
-      // Silently fail
-    }
-  }
-
-  async function loadRoomRunMap() {
-    try {
-      const index = await listRoomRunIndex();
-      const map = new Map<string, RoomRunMapping>();
-      for (const entry of index) {
-        for (const runId of entry.run_ids) {
-          map.set(runId, {
-            roomId: entry.room_id,
-            roomName: entry.room_name || "Unnamed Room",
-          });
-        }
-      }
-      roomRunMap = map;
     } catch {
       // Silently fail
     }
@@ -612,7 +590,6 @@
     loadSettings();
     loadSidebarFavorites();
     loadAgentSettingsCache();
-    loadRoomRunMap();
 
     // Fetch app version for bottom-left display
     import("@tauri-apps/api/app")
@@ -1061,7 +1038,7 @@
 
   // Build project folder tree for chats tab
   let projectFolders = $derived.by(() =>
-    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds, pinnedConversationKeys, roomRunMap),
+    buildProjectFolders(runs, favoriteRunIds, pinnedCwds, removedCwds, pinnedConversationKeys),
   );
 
   // Selectable folders: real project folders (exclude Uncategorized)
@@ -1482,23 +1459,6 @@
                   ><path d="M15.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" /><path
                     d="M15 3v5h5"
                   /><path d="M8 13h8" /><path d="M8 17h5" /></svg
-                >
-              {:else if item.icon === "rooms"}
-                <svg
-                  class="h-[18px] w-[18px]"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle
-                    cx="9"
-                    cy="7"
-                    r="4"
-                  /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path
-                    d="M16 3.13a4 4 0 0 1 0 7.75"
-                  /></svg
                 >
               {:else if item.icon === "chart"}
                 <svg
@@ -2325,32 +2285,23 @@
                 {#each projectFolders as folder (folder.folderKey)}
                   <ProjectFolderItem
                     {folder}
-                    label={folder.folderKey === "cwd:__rooms__"
-                      ? t("sidebar_rooms")
-                      : folder.isUncategorized
-                        ? t("sidebar_uncategorized")
-                        : cwdDisplayLabel(folder.cwd)}
+                    label={folder.isUncategorized
+                      ? t("sidebar_uncategorized")
+                      : cwdDisplayLabel(folder.cwd)}
                     expanded={expandedProjects.has(folder.folderKey)}
                     {selectedRunId}
                     onToggle={() => toggleProject(folder.folderKey)}
-                    onSelectConversation={(runId) => {
-                      const mapping = roomRunMap.get(runId);
-                      if (mapping) {
-                        goto(`/rooms?room=${mapping.roomId}`);
-                      } else {
-                        goto(`/chat?run=${runId}`);
-                      }
-                    }}
+                    onSelectConversation={(runId) => goto(`/chat?run=${runId}`)}
                     onResume={(runId, mode) => goto(`/chat?run=${runId}&resume=${mode}`)}
                     onDelete={requestDeleteConversation}
                     onForceRemove={forceRemoveConversation}
                     onTogglePin={togglePinnedConversation}
                     {pinnedConversationKeys}
                     {seenMessageCounts}
-                    onRemove={folder.isUncategorized || folder.cwd === "__rooms__"
+                    onRemove={folder.isUncategorized
                       ? undefined
                       : () => requestRemoveProject(folder.cwd)}
-                    onNewChat={folder.isUncategorized || folder.cwd === "__rooms__"
+                    onNewChat={folder.isUncategorized
                       ? undefined
                       : () => newChatInFolder(folder.cwd)}
                   />
