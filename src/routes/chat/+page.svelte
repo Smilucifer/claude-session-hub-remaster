@@ -56,6 +56,7 @@
   import ElicitationDialog from "$lib/components/ElicitationDialog.svelte";
   import AuthSourceBadge from "$lib/components/AuthSourceBadge.svelte";
 
+  import GroupChatLayout from "$lib/components/GroupChatLayout.svelte";
   import ToolActivity from "$lib/components/ToolActivity.svelte";
   import ShortcutHelpPanel from "$lib/components/ShortcutHelpPanel.svelte";
   import type { PromptInputSnapshot } from "$lib/types";
@@ -1135,6 +1136,10 @@
   let folderParam = $derived($page.url.searchParams.get("folder"));
   let agentParam = $derived($page.url.searchParams.get("agent") ?? "");
 
+  // ── Group chat detection ──
+  let groupChatRunIndex = $state<api.GroupChatRunIndexEntry[]>([]);
+  let currentGroupChat = $derived(groupChatRunIndex.find((e) => e.run_ids.includes(runId)) ?? null);
+
   // Consume ?agent=codex from command palette shortcuts for a new chat.
   $effect(() => {
     const agent = normalizeChatAgent(agentParam);
@@ -1424,6 +1429,14 @@
 
       loadRunProgressive(id, xtermRef);
     });
+  });
+
+  // Fetch group chat run index on mount to detect if current run is a group chat
+  $effect(() => {
+    if (!middlewareReady) return;
+    api.listGroupChatRunIndex().then((index) => {
+      groupChatRunIndex = index;
+    }).catch(() => {});
   });
 
   // Handle scrollTo for already-loaded runs (e.g., clicking a second search result
@@ -3856,6 +3869,9 @@
   </div>
 {/snippet}
 
+{#if currentGroupChat}
+  <GroupChatLayout groupChat={currentGroupChat} />
+{:else}
 <div class="flex h-full overflow-hidden bg-background relative">
   <!-- Page-level drag overlay (drag-hover or processing spinner) -->
   {#if pageDragActive || dragProcessing}
@@ -4979,3 +4995,4 @@
     </div>
   {/if}
 </div>
+{/if}
