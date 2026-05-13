@@ -29,4 +29,5 @@ pub mod settings;
 pub mod stats;
 pub mod teams;
 pub mod updates;
+pub mod vectorstore;
 pub mod web_server;

@@ -315,6 +315,10 @@ pub fn run() {
             commands::web_server::get_local_ip,
             commands::preview::open_preview_window,
             commands::preview::close_preview_window,
+            commands::vectorstore::vector_upsert,
+            commands::vectorstore::vector_search,
+            commands::vectorstore::vector_delete,
+            commands::vectorstore::rebuild_vector_index,
         ])
         .setup(move |app| {
             // Set up broadcast emitter (requires AppHandle, so must be in setup)

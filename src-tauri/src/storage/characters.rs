@@ -17,7 +17,7 @@ fn validate_character_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn char_dir(character_id: &str) -> PathBuf {
+pub(crate) fn char_dir(character_id: &str) -> PathBuf {
     super::data_dir().join("characters").join(character_id)
 }
 
