@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { RoomDetail, RoomSummary } from "$lib/types";
+import type { GroupChatDetail, GroupChatSummary } from "$lib/types";
 
 vi.mock("$lib/api", () => ({
-  listRooms: vi.fn(),
-  getRoom: vi.fn(),
-  createRoom: vi.fn(),
-  attachRoomRun: vi.fn(),
-  createRoomClaudeParticipant: vi.fn(),
-  createRoomParticipant: vi.fn(),
-  updateRoomMemo: vi.fn(),
-  sendRoomMessage: vi.fn(),
-  deleteRoom: vi.fn(),
+  listGroupChats: vi.fn(),
+  getGroupChat: vi.fn(),
+  createGroupChat: vi.fn(),
+  attachGroupChatRun: vi.fn(),
+  createGroupChatClaudeParticipant: vi.fn(),
+  createGroupChatParticipant: vi.fn(),
+  updateGroupChatMemo: vi.fn(),
+  sendGroupChatMessage: vi.fn(),
+  deleteGroupChat: vi.fn(),
 }));
 
 vi.mock("$lib/utils/debug", () => ({
@@ -18,16 +18,14 @@ vi.mock("$lib/utils/debug", () => ({
   dbgWarn: vi.fn(),
 }));
 
-import { RoomStore } from "./room-store.svelte";
+import { GroupChatStore } from "./group-chat-store.svelte";
 import * as api from "$lib/api";
 import { capabilitiesForAgent } from "$lib/utils/agent-capabilities";
 
-function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtable"): RoomSummary {
+function summary(id: string, name: string): GroupChatSummary {
   return {
     id,
-    kind,
     name,
-    description: "",
     cwd: undefined,
     participant_count: 0,
     memo_preview: undefined,
@@ -35,75 +33,58 @@ function summary(id: string, name: string, kind: RoomSummary["kind"] = "roundtab
   };
 }
 
-function detail(id: string, name: string, kind: RoomDetail["kind"] = "roundtable"): RoomDetail {
+function detail(id: string, name: string): GroupChatDetail {
   return {
     id,
-    kind,
     name,
-    description: "",
     cwd: undefined,
     memo: "",
     participants: [],
     turns: [],
-    research_artifact: null,
-    seat_memories: {},
-    seat_memory_inbox: {},
-    seat_profile: null,
     created_at: "2026-04-30T00:00:00Z",
     updated_at: "2026-04-30T00:00:00Z",
   };
 }
 
-describe("RoomStore", () => {
-  let store: RoomStore;
+describe("GroupChatStore", () => {
+  let store: GroupChatStore;
 
   beforeEach(() => {
-    store = new RoomStore();
+    store = new GroupChatStore();
     vi.resetAllMocks();
   });
 
   it("loads room summaries", async () => {
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Room")]);
 
     await store.loadRooms();
 
-    expect(api.listRooms).toHaveBeenCalledOnce();
+    expect(api.listGroupChats).toHaveBeenCalledOnce();
     expect(store.rooms).toEqual([summary("r1", "Room")]);
     expect(store.loading).toBe(false);
     expect(store.error).toBeNull();
   });
 
   it("selects a room detail", async () => {
-    vi.mocked(api.getRoom).mockResolvedValue(detail("r1", "Room"));
+    vi.mocked(api.getGroupChat).mockResolvedValue(detail("r1", "Room"));
 
     await store.selectRoom("r1");
 
-    expect(api.getRoom).toHaveBeenCalledWith("r1");
+    expect(api.getGroupChat).toHaveBeenCalledWith("r1");
     expect(store.selectedRoomId).toBe("r1");
     expect(store.room?.id).toBe("r1");
   });
 
   it("creates a room and selects it", async () => {
-    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "New Room"));
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "New Room")]);
+    vi.mocked(api.createGroupChat).mockResolvedValue(detail("r1", "New Room"));
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "New Room")]);
 
-    await store.createRoom("New Room", "", "D:/work");
+    await store.createRoom("New Room", "D:/work");
 
-    expect(api.createRoom).toHaveBeenCalledWith("New Room", "", "D:/work", undefined);
+    expect(api.createGroupChat).toHaveBeenCalledWith("New Room", "D:/work");
     expect(store.selectedRoomId).toBe("r1");
     expect(store.room?.name).toBe("New Room");
     expect(store.rooms).toEqual([summary("r1", "New Room")]);
-  });
-
-  it("creates a driver room and selects it", async () => {
-    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Driver Room", "driver"));
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Driver Room", "driver")]);
-
-    await store.createRoom("Driver Room", "", "D:/work", "driver");
-
-    expect(api.createRoom).toHaveBeenCalledWith("Driver Room", "", "D:/work", "driver");
-    expect(store.selectedRoomId).toBe("r1");
-    expect(store.room?.kind).toBe("driver");
   });
 
   it("creates a fixed three-seat roundtable and starts all participants", async () => {
@@ -119,6 +100,7 @@ describe("RoomStore", () => {
           label: "Claude",
           role: "participant",
           joined_at: "2026-04-30T00:00:00Z",
+          character_id: "",
         },
         run: undefined,
         capabilities: capabilitiesForAgent("claude"),
@@ -135,6 +117,7 @@ describe("RoomStore", () => {
           label: "Codex",
           role: "participant",
           joined_at: "2026-04-30T00:00:00Z",
+          character_id: "",
         },
         run: undefined,
         capabilities: capabilitiesForAgent("codex"),
@@ -151,19 +134,20 @@ describe("RoomStore", () => {
           label: "DeepSeek",
           role: "participant",
           joined_at: "2026-04-30T00:00:00Z",
+          character_id: "",
         },
         run: undefined,
         capabilities: capabilitiesForAgent("claude"),
       },
     ];
-    vi.mocked(api.createRoom).mockResolvedValue(created);
-    vi.mocked(api.createRoomParticipant)
+    vi.mocked(api.createGroupChat).mockResolvedValue(created);
+    vi.mocked(api.createGroupChatParticipant)
       .mockResolvedValueOnce(withClaude)
       .mockResolvedValueOnce(withCodex)
       .mockResolvedValueOnce(withDeepSeek);
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Roundtable")]);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Roundtable")]);
 
-    await store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+    await store.createRoundtableWithParticipants("Roundtable", "D:/work", [
       {
         agent: "claude",
         prompt: "You are Claude.",
@@ -188,9 +172,9 @@ describe("RoomStore", () => {
       },
     ]);
 
-    expect(api.createRoom).toHaveBeenCalledWith("Roundtable", "", "D:/work", "roundtable");
-    expect(api.createRoomParticipant).toHaveBeenCalledTimes(3);
-    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+    expect(api.createGroupChat).toHaveBeenCalledWith("Roundtable", "D:/work");
+    expect(api.createGroupChatParticipant).toHaveBeenCalledTimes(3);
+    expect(api.createGroupChatParticipant).toHaveBeenNthCalledWith(
       1,
       "r1",
       "claude",
@@ -202,7 +186,7 @@ describe("RoomStore", () => {
       "Claude",
       "participant",
     );
-    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenNthCalledWith(
       2,
       "r1",
       "codex",
@@ -214,7 +198,7 @@ describe("RoomStore", () => {
       "Codex",
       "participant",
     );
-    expect(api.createRoomParticipant).toHaveBeenNthCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenNthCalledWith(
       3,
       "r1",
       "claude",
@@ -238,26 +222,15 @@ describe("RoomStore", () => {
 
   it("rejects roundtable creation unless exactly three seats are provided", async () => {
     await expect(
-      store.createRoundtableWithParticipants("Roundtable", "", "D:/work", [
+      store.createRoundtableWithParticipants("Roundtable", "D:/work", [
         { agent: "claude", prompt: "One", label: "One" },
         { agent: "codex", prompt: "Two", label: "Two" },
       ]),
     ).rejects.toThrow("Roundtable requires exactly three participants");
 
-    expect(api.createRoom).not.toHaveBeenCalled();
-    expect(api.createRoomParticipant).not.toHaveBeenCalled();
+    expect(api.createGroupChat).not.toHaveBeenCalled();
+    expect(api.createGroupChatParticipant).not.toHaveBeenCalled();
     expect(store.saving).toBe(false);
-  });
-
-  it("creates a research room and selects it", async () => {
-    vi.mocked(api.createRoom).mockResolvedValue(detail("r1", "Research Room", "research"));
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Research Room", "research")]);
-
-    await store.createRoom("Research Room", "", "D:/work", "research");
-
-    expect(api.createRoom).toHaveBeenCalledWith("Research Room", "", "D:/work", "research");
-    expect(store.selectedRoomId).toBe("r1");
-    expect(store.room?.kind).toBe("research");
   });
 
   it("updates selected room after attaching a run", async () => {
@@ -271,29 +244,30 @@ describe("RoomStore", () => {
           label: "Reviewer",
           role: "reviewer",
           joined_at: "2026-04-30T00:00:00Z",
+          character_id: "",
         },
         run: undefined,
         capabilities: capabilitiesForAgent("claude"),
       },
     ];
-    vi.mocked(api.attachRoomRun).mockResolvedValue(updated);
+    vi.mocked(api.attachGroupChatRun).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     await store.attachRun("run-1", "Reviewer", "reviewer");
 
-    expect(api.attachRoomRun).toHaveBeenCalledWith("r1", "run-1", "Reviewer", "reviewer");
+    expect(api.attachGroupChatRun).toHaveBeenCalledWith("r1", "run-1", "Reviewer", "reviewer");
     expect(store.room?.participants).toHaveLength(1);
   });
 
   it("updates memo on the selected room", async () => {
     const updated = detail("r1", "Room");
     updated.memo = "remember";
-    vi.mocked(api.updateRoomMemo).mockResolvedValue(updated);
+    vi.mocked(api.updateGroupChatMemo).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     await store.updateMemo("remember");
 
-    expect(api.updateRoomMemo).toHaveBeenCalledWith("r1", "remember");
+    expect(api.updateGroupChatMemo).toHaveBeenCalledWith("r1", "remember");
     expect(store.room?.memo).toBe("remember");
   });
 
@@ -308,18 +282,19 @@ describe("RoomStore", () => {
           label: "Codex",
           role: "participant",
           joined_at: "2026-04-30T00:00:00Z",
+          character_id: "",
         },
         run: undefined,
         capabilities: capabilitiesForAgent("codex"),
       },
     ];
-    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+    vi.mocked(api.createGroupChatParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Room")]);
 
     store.selectedRoomId = "r1";
     await store.createParticipant("codex", "Review this", "D:/work", "gpt-5.5");
 
-    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenCalledWith(
       "r1",
       "codex",
       "Review this",
@@ -335,13 +310,13 @@ describe("RoomStore", () => {
 
   it("does not inject catalog display defaults as models for official CLI participants", async () => {
     const updated = detail("r1", "Room");
-    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+    vi.mocked(api.createGroupChatParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Room")]);
 
     store.selectedRoomId = "r1";
     await store.createParticipant("claude", "Review this", "D:/work");
 
-    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenCalledWith(
       "r1",
       "claude",
       "Review this",
@@ -356,13 +331,13 @@ describe("RoomStore", () => {
 
   it("uses provider default model only for Claude-compatible API participants", async () => {
     const updated = detail("r1", "Room");
-    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+    vi.mocked(api.createGroupChatParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Room")]);
 
     store.selectedRoomId = "r1";
     await store.createParticipant("glm", "Review this", "D:/work");
 
-    expect(api.createRoomParticipant).toHaveBeenCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenCalledWith(
       "r1",
       "claude",
       "Review this",
@@ -377,12 +352,12 @@ describe("RoomStore", () => {
 
   it("uses parameterized provider defaults for QWEN and KIMI participants", async () => {
     const updated = detail("r1", "Room");
-    vi.mocked(api.createRoomParticipant).mockResolvedValue(updated);
-    vi.mocked(api.listRooms).mockResolvedValue([summary("r1", "Room")]);
+    vi.mocked(api.createGroupChatParticipant).mockResolvedValue(updated);
+    vi.mocked(api.listGroupChats).mockResolvedValue([summary("r1", "Room")]);
 
     store.selectedRoomId = "r1";
     await store.createParticipant("qwen", "Review this", "D:/work");
-    expect(api.createRoomParticipant).toHaveBeenLastCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenLastCalledWith(
       "r1",
       "claude",
       "Review this",
@@ -395,7 +370,7 @@ describe("RoomStore", () => {
     );
 
     await store.createParticipant("kimi", "Review this", "D:/work");
-    expect(api.createRoomParticipant).toHaveBeenLastCalledWith(
+    expect(api.createGroupChatParticipant).toHaveBeenLastCalledWith(
       "r1",
       "claude",
       "Review this",
@@ -414,7 +389,7 @@ describe("RoomStore", () => {
       {
         id: "turn-1",
         idx: 1,
-        mode: "research",
+        mode: "fanout",
         user_input: "Compare options",
         target_participant_ids: ["p1"],
         responses: [],
@@ -422,33 +397,33 @@ describe("RoomStore", () => {
         completed_at: "2026-04-30T00:00:01Z",
       },
     ];
-    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+    vi.mocked(api.sendGroupChatMessage).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     await store.sendMessage("Compare options");
 
-    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "Compare options");
+    expect(api.sendGroupChatMessage).toHaveBeenCalledWith("r1", "Compare options");
     expect(store.room?.turns).toHaveLength(1);
   });
 
   it("sends a one-click debate command with optional focus", async () => {
     const updated = detail("r1", "Room");
-    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+    vi.mocked(api.sendGroupChatMessage).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     await store.sendDebate("focus on risks");
 
-    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "@debate focus on risks");
+    expect(api.sendGroupChatMessage).toHaveBeenCalledWith("r1", "@debate focus on risks");
   });
 
   it("sends a one-click summary command for the selected participant", async () => {
     const updated = detail("r1", "Room");
-    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+    vi.mocked(api.sendGroupChatMessage).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     await store.sendSummary("Claude");
 
-    expect(api.sendRoomMessage).toHaveBeenCalledWith("r1", "@summary @Claude");
+    expect(api.sendGroupChatMessage).toHaveBeenCalledWith("r1", "@summary @Claude");
   });
 
   it("ignores stale roundtable send responses after switching rooms", async () => {
@@ -465,7 +440,7 @@ describe("RoomStore", () => {
         completed_at: "2026-04-30T00:00:01Z",
       },
     ];
-    vi.mocked(api.sendRoomMessage).mockResolvedValue(updated);
+    vi.mocked(api.sendGroupChatMessage).mockResolvedValue(updated);
 
     store.selectedRoomId = "r1";
     const send = store.sendMessage("Compare options");
@@ -480,14 +455,14 @@ describe("RoomStore", () => {
   });
 
   it("clears selection after deleting the selected room", async () => {
-    vi.mocked(api.deleteRoom).mockResolvedValue(undefined);
+    vi.mocked(api.deleteGroupChat).mockResolvedValue(undefined);
     store.selectedRoomId = "r1";
     store.room = detail("r1", "Room");
     store.rooms = [summary("r1", "Room")];
 
     await store.deleteRoom("r1");
 
-    expect(api.deleteRoom).toHaveBeenCalledWith("r1");
+    expect(api.deleteGroupChat).toHaveBeenCalledWith("r1");
     expect(store.selectedRoomId).toBe("");
     expect(store.room).toBeNull();
     expect(store.rooms).toEqual([]);

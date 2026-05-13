@@ -1,56 +1,52 @@
 # Changelog / 更新日志
 
-## Phase 10.a (2026-05-13)
+## Phase 10 (2026-05-13)
 
-### Managed Config Injection — Hooks/Plugins CRUD + Settings Refactor
+### v2.0.0 — Group Chat 重构
 
-**Bug Fixes:**
-- MCP 持久化修复：`update_user_settings()` 新增 `mcp_servers` patch handler，修复托管 MCP 服务器添加后不持久化的问题
-- Plugins marketplace 安装状态：已安装插件显示 "Installed" 禁用按钮，不再始终显示 "Install"
-- Hooks 数据丢失修复：hooks 从 `~/.claude/settings.json` 迁移到 Claw GO managed settings，避免被 CLI 更新覆盖
+**Room → GroupChat 重命名:**
+- 后端 `room/` → `group_chat/`，`storage/rooms.rs` → `storage/group_chats.rs`，`commands/rooms.rs` → `commands/group_chat.rs`
+- 前端 `room-store` → `group-chat-store`，`RoomStepper` → `GroupChatStepper`
+- 所有 i18n keys `room_*` → `groupChat_*`
+- 旧 Room 页面删除，群聊入口整合至 `/chat` 路由 + 侧边栏
 
-**Settings 重构:**
-- `update_user_settings()` 从 190 行 `if let Some` 单体函数重构为 19 个 per-field `apply_*` 函数
-- 新增泛型 `apply_hashmap_field<V>` 和 `apply_deser_vec_field<T>` 消除重复代码
-- 语义等价重构，无行为变更
+**Character Library (角色库):**
+- `AiCharacter` 模型：label、role_type（planner/executor）、role_instruction、default_provider/model、icon
+- 存储于 `UserSettings.ai_characters`
+- Settings → Characters CRUD 页面（创建/编辑/删除）
+- 前端 4 个 Tauri 命令：list/create/update/delete_character
 
-**数据模型扩展:**
-- `UserSettings` 新增 `hooks: HashMap<String, Value>` 和 `enabled_plugins: HashMap<String, bool>` 字段
-- `#[serde(default)]` 保证旧 settings.json 向后兼容
+**Plan Mechanism (计划机制):**
+- `PlanArtifact` 模型：title、tasks（PlanTask[]）、status（draft/active/completed）、user_notes
+- 每个群聊可关联一个活跃计划，存储于 `group-chats/{id}/plan.json`
+- `PlanPanel` 组件：任务清单、状态循环、approve/complete 按钮、用户备注
+- 前端 5 个 Tauri 命令：get/create/update/approve/complete_plan
+- `update_plan` 支持 `clear_user_notes` 参数清除备注
 
-**Session JSON 注入:**
-- `ManagedConfig` 结构体捆绑 mcp_servers/hooks/enabled_plugins，避免参数膨胀
-- `provider_config_json_from_env()` 三层合并：MCP additive、hooks per-event overwrite、plugins overlay
-- superpowers 强制注入在 managed overlay 之后执行（`insert` 而非 `or_insert`，确保不可被覆盖）
-- `write_mcp_only_settings` 重命名为 `write_managed_settings`
+**Context Management MVP (上下文管理):**
+- `ParticipantMeta`：delivery_cursor、session_turn_count、session_seq
+- `filter_visible_messages`：按每条 turn 自身的 mode 过滤可见性（Private/SingleTarget 仅 sender+target 可见）
+- `check_handoff`：turn 计数阈值（25 turns）触发 session handoff
+- `build_bootstrap_context`：模板截断（~2000 tokens）构建新 session 引导上下文
+- `reset_session_after_handoff`：重置 session 状态
 
-**IPC 命令:**
-- 6 个新 Tauri 命令：`list_managed_hooks`、`add_managed_hook`、`remove_managed_hook`、`list_managed_plugins`、`set_managed_plugin`、`remove_managed_plugin`
-- 遵循现有 MCP 命令的 read-modify-write 模式
+**Role System Prompt (角色系统提示):**
+- `build_role_system_prompt`：根据 role_type（planner/executor）+ role_instruction 生成系统提示
+- `resolve_participant_system_prompt`：查找匹配的 AiCharacter，注入 `--append-system-prompt`
+- planner 角色：只读，可规划但不可执行
+- executor 角色：严格按计划执行
 
-**前端迁移:**
-- `HookManager.svelte` 从 `getCliConfig`/`updateCliConfig` 迁移到 managed hooks API
-- `api.ts` 新增 6 个前端 API wrapper
-- `handleSaveEditor` 空数组时调用 `deleteEventHooks` 而非静默跳过
-- `deleteEventHooks` 使用专用 `hooks_deleted` i18n key
+**Auto-chain Routing (自动链式路由):**
+- SingleTarget 回复中扫描 `@Label` 提及，自动链式调用（最多 3 跳）
+- 循环检测：`HashSet` 记录已链式参与者
+- `CancellationToken` 传播支持取消
 
-**审查修复 (4 providers: Claude, DeepSeek, MiMo Plan, Packy CX2CC):**
-- superpowers `or_insert` → `insert` — 确保强制覆盖不可被 managed config 绕过
-- 测试编译错误修复：`&HashMap::new()` → `&empty_managed()`
-- `write_mcp_only_settings` doc comment 更新
-- 新增 `hooks_deleted` i18n key（en + zh-CN）
-
-**Native Hooks Migration:**
-- `hooks/setup.rs` 新增 `migrate_native_hooks()`：首次启动时自动将 `~/.claude/settings.json` 中的 hooks 导入 Claw GO managed settings
-- `UserSettings` 新增 `native_hooks_migrated: bool` 标记，`#[serde(default)]` 保证向后兼容
-- 仅在 managed hooks 为空时导入，避免覆盖用户已配置的 managed hooks
-- 导入后从 native settings 移除 hooks key，避免重复注入
-- `lib.rs` 启动时在 `cleanup_hook_bridge()` 之后调用
-
-**Review Round 2 修复:**
-- `migrate_native_hooks` save() 错误处理：`let _ = save()` → `if let Err(e)` + `log::warn!`，save 失败时跳过 native 移除（自愈：下次启动重试）
-- `write_mcp_only_settings` 重命名为 `write_managed_settings`
-- startup 顺序注释补充 cleanup→migration 依赖说明
+**其他改进:**
+- `list_turns_jsonl` 返回结果按 `idx` 排序（修复 HashMap 迭代顺序不确定问题）
+- `participant_id` 路径遍历校验（拒绝包含 `../` 或 `/` 的 ID）
+- 群聊存储使用 per-ID mutex 锁保证并发安全
+- 侧边栏群聊分组：折叠列表 + "新群聊"按钮 + 创建对话框（名称 + CWD 选择器）
+- 首次使用引导：自动创建 Planner 角色
 
 ## Phase 9.z (2026-05-12)
 

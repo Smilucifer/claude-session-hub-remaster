@@ -66,18 +66,17 @@ export interface TaskRun {
   conversation_ref?: ConversationRef;
 }
 
-export interface RoomParticipant {
+export interface GroupChatParticipant {
   id: string;
   run_id: string;
   agent: string;
   label: string;
   role: string;
   joined_at: string;
+  character_id: string;
 }
 
-export type RoomKind = "roundtable" | "driver" | "research";
-
-export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "review" | "research" | "singletarget";
+export type GroupChatTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget";
 
 export type AgentKind = "claude" | "codex" | "unknown";
 export type ResumeCapability = "session_id" | "latest" | "none";
@@ -95,50 +94,7 @@ export interface AgentCapabilities {
   permission_protocol: boolean;
 }
 
-export type ArenaMemoryKind = "fact" | "decision" | "lesson";
-
-export interface ArenaMemoryCandidate {
-  id: string;
-  kind: ArenaMemoryKind;
-  text: string;
-  source_participant_id: string;
-  source_run_id: string;
-  source_turn_id: string;
-  created_at: string;
-}
-
-export type MemoryKind = "insight" | "lesson" | "preference" | "fact";
-
-export interface SeatMemoryEntry {
-  id: string;
-  kind: MemoryKind;
-  key: string;
-  content: string;
-  recall: number;
-  last_accessed: string;
-  created_at: string;
-  persisted: boolean;
-  source_turn_id?: string;
-}
-
-export interface PendingMemoryCandidate {
-  id: string;
-  kind: MemoryKind;
-  key: string;
-  content: string;
-  source_participant_id: string;
-  source_turn_id: string;
-  created_at: string;
-  reminder_count: number;
-  expires_at: string;
-}
-
-export interface SeatProfile {
-  entries: SeatMemoryEntry[];
-  updated_at: string;
-}
-
-export interface RoomResponseRef {
+export interface GroupChatResponseRef {
   participant_id: string;
   run_id: string;
   event_seq_start: number;
@@ -148,32 +104,13 @@ export interface RoomResponseRef {
   error?: string;
 }
 
-export interface ResearchResult {
-  participant_id: string;
-  run_id: string;
-  label: string;
-  status: string;
-  preview?: string;
-  error?: string;
-}
-
-export interface ResearchArtifact {
-  schema_version: number;
-  room_id: string;
-  topic: string;
-  turn_id: string;
-  generated_at: string;
-  results: ResearchResult[];
-  memory_candidates: ArenaMemoryCandidate[];
-}
-
-export interface RoomTurn {
+export interface GroupChatTurn {
   id: string;
   idx: number;
-  mode: RoomTurnMode;
+  mode: GroupChatTurnMode;
   user_input: string;
   target_participant_ids: string[];
-  responses: RoomResponseRef[];
+  responses: GroupChatResponseRef[];
   started_at: string;
   completed_at?: string;
 }
@@ -186,43 +123,65 @@ export interface ParticipantSnapshot {
   error?: string;
 }
 
-export interface RoomTurnSnapshot {
-  turn: RoomTurn;
+export interface GroupChatTurnSnapshot {
+  turn: GroupChatTurn;
   participant_contents: ParticipantSnapshot[];
 }
 
-export interface RoomSummary {
+export interface GroupChatSummary {
   id: string;
-  kind: RoomKind;
   name: string;
-  description: string;
   cwd?: string;
   participant_count: number;
   memo_preview?: string;
   updated_at: string;
 }
 
-export interface RoomParticipantDetail {
-  participant: RoomParticipant;
+export interface GroupChatParticipantDetail {
+  participant: GroupChatParticipant;
   run?: TaskRun;
   capabilities: AgentCapabilities;
 }
 
-export interface RoomDetail {
+export interface GroupChatDetail {
   id: string;
-  kind: RoomKind;
   name: string;
-  description: string;
   cwd?: string;
   memo: string;
-  participants: RoomParticipantDetail[];
-  turns: RoomTurn[];
-  research_artifact?: ResearchArtifact | null;
-  seat_memories?: Record<string, SeatMemoryEntry[]>;
-  seat_memory_inbox?: Record<string, PendingMemoryCandidate[]>;
-  seat_profile?: SeatProfile | null;
+  participants: GroupChatParticipantDetail[];
+  turns: GroupChatTurn[];
   created_at: string;
   updated_at: string;
+}
+
+// ── Plan types ──
+
+export type PlanStatus = "draft" | "active" | "completed";
+export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
+
+export interface PlanTask {
+  id: string;
+  description: string;
+  assignee_id?: string;
+  status: TaskStatus;
+}
+
+export interface PlanArtifact {
+  id: string;
+  group_chat_id: string;
+  title: string;
+  tasks: PlanTask[];
+  status: PlanStatus;
+  user_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanTaskInput {
+  id?: string;
+  description: string;
+  assignee_id?: string;
+  status?: string;
 }
 
 export interface ImportWatermark {
@@ -319,6 +278,7 @@ export interface UserSettings {
   github_proxy_port?: number;
   windows_msvc_env_mode?: WindowsMsvcEnvMode;
   mcp_servers?: Record<string, McpServerConfig>;
+  ai_characters?: AiCharacter[];
   updated_at: string;
 }
 
@@ -346,6 +306,18 @@ export interface BalanceHelperSettings {
 }
 
 export type WindowsMsvcEnvMode = "auto" | "always" | "off";
+
+export interface AiCharacter {
+  id: string;
+  label: string;
+  role_type: string;
+  role_instruction?: string;
+  default_provider: string;
+  default_model?: string;
+  icon?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type WindowsMsvcEnvStatusState =
   | "disabled"

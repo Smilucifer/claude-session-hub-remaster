@@ -4,7 +4,7 @@ pub mod hooks;
 pub mod models;
 pub mod pricing;
 pub mod process_ext;
-pub mod room;
+pub mod group_chat;
 pub mod storage;
 pub mod web_server;
 
@@ -162,21 +162,27 @@ pub fn run() {
             commands::runs::update_prompt_favorite_note,
             commands::runs::list_prompt_favorites,
             commands::runs::list_prompt_tags,
-            commands::rooms::list_rooms,
-            commands::rooms::get_room,
-            commands::rooms::create_room,
-            commands::rooms::attach_room_run,
-            commands::rooms::create_room_participant,
-            commands::rooms::create_room_claude_participant,
-            commands::rooms::update_room_memo,
-            commands::rooms::add_seat_memory_entry,
-            commands::rooms::delete_seat_memory_entry,
-            commands::rooms::clear_seat_memory,
-            commands::rooms::send_room_message,
-            commands::rooms::delete_room,
-            commands::rooms::list_room_run_index,
-            commands::rooms::get_room_turn_snapshot,
-            commands::rooms::cancel_room_turn,
+            commands::group_chat::list_group_chats,
+            commands::group_chat::get_group_chat,
+            commands::group_chat::create_group_chat,
+            commands::group_chat::attach_group_chat_run,
+            commands::group_chat::create_group_chat_participant,
+            commands::group_chat::create_group_chat_claude_participant,
+            commands::group_chat::update_group_chat_memo,
+            commands::group_chat::send_group_chat_message,
+            commands::group_chat::delete_group_chat,
+            commands::group_chat::list_group_chat_run_index,
+            commands::group_chat::get_group_chat_turn_snapshot,
+            commands::group_chat::cancel_group_chat_turn,
+            commands::plans::get_plan_for_group_chat,
+            commands::plans::create_plan,
+            commands::plans::update_plan,
+            commands::plans::approve_plan,
+            commands::plans::complete_plan,
+            commands::characters::list_characters,
+            commands::characters::create_character,
+            commands::characters::update_character,
+            commands::characters::delete_character,
             commands::memos::list_memos,
             commands::memos::add_memo,
             commands::memos::update_memo,

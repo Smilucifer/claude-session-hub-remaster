@@ -85,7 +85,7 @@ pub enum MsvcEnvSkipReason {
     NonWindows,
     RemoteSession,
     DisabledByUser,
-    RoomPolicy,
+    GroupChatPolicy,
     ProjectDoesNotNeedNativeToolchain,
 }
 
@@ -584,7 +584,7 @@ pub fn resolve_spawn_env_plan_with_policy(
     policy: MsvcPolicy,
 ) -> SpawnEnvPlan {
     if policy == MsvcPolicy::Disabled {
-        let plan = skipped_plan(MsvcEnvSkipReason::RoomPolicy, path_policy, base_path);
+        let plan = skipped_plan(MsvcEnvSkipReason::GroupChatPolicy, path_policy, base_path);
         record_msvc_status_snapshot(cwd, mode, &plan);
         return plan;
     }
@@ -786,7 +786,7 @@ fn skipped_status(
             Some("MSVC environment injection is disabled.".to_string()),
             Some("Set MSVC environment mode to auto or always to enable it for local Windows CLI sessions.".to_string()),
         ),
-        MsvcEnvSkipReason::RoomPolicy => (
+        MsvcEnvSkipReason::GroupChatPolicy => (
             WindowsMsvcEnvStatusState::NotNeeded,
             Some("MSVC environment injection is not available for room participants.".to_string()),
             None,
@@ -1721,7 +1721,7 @@ mod tests {
         assert!(!matches!(plan.status, MsvcEnvStatus::Injected(_)));
         assert!(matches!(
             plan.status,
-            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::RoomPolicy)
+            MsvcEnvStatus::Skipped(MsvcEnvSkipReason::GroupChatPolicy)
         ));
     }
 }

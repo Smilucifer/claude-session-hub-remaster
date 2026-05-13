@@ -355,18 +355,9 @@ pub struct UserSettings {
     /// Injected into every generated session JSON via `--settings`.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub mcp_servers: std::collections::HashMap<String, serde_json::Value>,
-    /// Managed hook configs (event name → array of hook groups).
-    /// Overwrites native hooks per-event in generated session JSON.
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub hooks: std::collections::HashMap<String, serde_json::Value>,
-    /// Managed plugin enable/disable states (plugin name → enabled).
-    /// Overwrites native enabledPlugins in generated session JSON.
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub enabled_plugins: std::collections::HashMap<String, bool>,
-    /// Whether native hooks from `~/.claude/settings.json` have been imported.
-    /// Set to `true` after first-launch migration completes.
-    #[serde(default)]
-    pub native_hooks_migrated: bool,
+    /// Reusable AI character templates for group chat participants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ai_characters: Vec<AiCharacter>,
     pub updated_at: String,
 }
 
@@ -549,9 +540,7 @@ impl Default for UserSettings {
             github_proxy_port: 7890,
             windows_msvc_env_mode: WindowsMsvcEnvMode::Auto,
             mcp_servers: std::collections::HashMap::new(),
-            hooks: std::collections::HashMap::new(),
-            enabled_plugins: std::collections::HashMap::new(),
-            native_hooks_migrated: false,
+            ai_characters: vec![],
             updated_at: now_iso(),
         }
     }
@@ -735,7 +724,7 @@ pub struct RunMeta {
     pub conversation_ref: Option<ConversationRef>,
     /// Last time a bus event was written for this run (ISO 8601).
     /// Updated (throttled to 1s) by EventWriter on each write_bus_event.
-    /// Used by the room adapter to detect inactivity.
+    /// Used by the group chat adapter to detect inactivity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_at: Option<String>,
 }
@@ -1865,6 +1854,24 @@ pub struct ConfiguredMcpServer {
     pub env_keys: Vec<String>,
     #[serde(default)]
     pub header_keys: Vec<String>,
+}
+
+// ── AI Character types ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCharacter {
+    pub id: String,
+    pub label: String,
+    pub role_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_instruction: Option<String>,
+    pub default_provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 // ── Keybinding types ──

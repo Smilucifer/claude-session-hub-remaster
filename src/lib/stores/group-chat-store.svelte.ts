@@ -1,5 +1,5 @@
 import * as api from "$lib/api";
-import type { RoomDetail, RoomKind, MemoryKind, RoomSummary, RoomTurnSnapshot } from "$lib/types";
+import type { AiCharacter, GroupChatDetail, GroupChatSummary, GroupChatTurnSnapshot } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 import {
   getPhase7Provider,
@@ -7,7 +7,7 @@ import {
   type Phase7ProviderId,
 } from "$lib/utils/provider-catalog";
 
-export interface RoundtableSeatDraft {
+export interface GroupChatSeatDraft {
   agent: Phase7ProviderId;
   prompt: string;
   model?: string;
@@ -25,15 +25,15 @@ function launchModelForProvider(
   return provider.mode === "claude_compatible_api" ? provider.defaultModel : undefined;
 }
 
-export class RoomStore {
-  rooms = $state<RoomSummary[]>([]);
+export class GroupChatStore {
+  rooms = $state<GroupChatSummary[]>([]);
   selectedRoomId = $state("");
-  room = $state<RoomDetail | null>(null);
+  room = $state<GroupChatDetail | null>(null);
   loading = $state(false);
   saving = $state(false);
   cancelling = $state(false);
   error = $state<string | null>(null);
-  activeSnapshot = $state<RoomTurnSnapshot | null>(null);
+  activeSnapshot = $state<GroupChatTurnSnapshot | null>(null);
 
   private _loadSeq = 0;
   private _detailSeq = 0;
@@ -44,7 +44,7 @@ export class RoomStore {
     this.loading = true;
     this.error = null;
     try {
-      const rooms = await api.listRooms();
+      const rooms = await api.listGroupChats();
       if (seq !== this._loadSeq) return;
       this.rooms = rooms;
       dbg("rooms", "loadRooms", { count: rooms.length });
@@ -69,7 +69,7 @@ export class RoomStore {
     this.loading = true;
     this.error = null;
     try {
-      const room = await api.getRoom(id);
+      const room = await api.getGroupChat(id);
       if (seq !== this._detailSeq || this.selectedRoomId !== id) return;
       this.room = room;
     } catch (e) {
@@ -82,11 +82,11 @@ export class RoomStore {
     }
   }
 
-  async createRoom(name: string, description = "", cwd?: string, kind?: RoomKind): Promise<void> {
+  async createRoom(name: string, cwd?: string): Promise<void> {
     this.saving = true;
     this.error = null;
     try {
-      const room = await api.createRoom(name, description, cwd, kind);
+      const room = await api.createGroupChat(name, cwd);
       this.selectedRoomId = room.id;
       this.room = room;
       await this.loadRooms();
@@ -101,9 +101,8 @@ export class RoomStore {
 
   async createRoundtableWithParticipants(
     name: string,
-    description: string,
     cwd: string,
-    seats: RoundtableSeatDraft[],
+    seats: GroupChatSeatDraft[],
   ): Promise<void> {
     if (seats.length !== 3) {
       throw new Error("Roundtable requires exactly three participants");
@@ -111,12 +110,12 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
-      const room = await api.createRoom(name, description, cwd, "roundtable");
+      const room = await api.createGroupChat(name, cwd);
       this.selectedRoomId = room.id;
       this.room = room;
       for (const seat of seats) {
         const provider = getPhase7Provider(seat.agent);
-        this.room = await api.createRoomParticipant(
+        this.room = await api.createGroupChatParticipant(
           room.id,
           provider.executionAgent,
           seat.prompt,
@@ -143,7 +142,7 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
-      this.room = await api.attachRoomRun(this.selectedRoomId, runId, label, role);
+      this.room = await api.attachGroupChatRun(this.selectedRoomId, runId, label, role);
       await this.loadRooms();
     } catch (e) {
       this.error = errorMessage(e);
@@ -167,7 +166,7 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
-      this.room = await api.createRoomClaudeParticipant(
+      this.room = await api.createGroupChatClaudeParticipant(
         this.selectedRoomId,
         prompt,
         cwd,
@@ -202,7 +201,7 @@ export class RoomStore {
     this.error = null;
     try {
       const provider = getPhase7Provider(agent);
-      this.room = await api.createRoomParticipant(
+      this.room = await api.createGroupChatParticipant(
         this.selectedRoomId,
         provider.executionAgent,
         prompt,
@@ -228,7 +227,7 @@ export class RoomStore {
     this.saving = true;
     this.error = null;
     try {
-      this.room = await api.updateRoomMemo(this.selectedRoomId, memo);
+      this.room = await api.updateGroupChatMemo(this.selectedRoomId, memo);
       await this.loadRooms();
     } catch (e) {
       this.error = errorMessage(e);
@@ -254,7 +253,7 @@ export class RoomStore {
     let pollCount = 0;
 
     const poll = (): Promise<void> =>
-      api.getRoom(roomId).then((current) => {
+      api.getGroupChat(roomId).then((current) => {
         if (pollSeq !== this._loadSeq) return;
         if (current && this.selectedRoomId === roomId) {
           this.room = current;
@@ -262,7 +261,7 @@ export class RoomStore {
       });
 
     try {
-      const sendPromise = api.sendRoomMessage(roomId, trimmed);
+      const sendPromise = api.sendGroupChatMessage(roomId, trimmed);
 
       // Poll for incremental updates while turn is in progress,
       // so each participant's response appears as soon as it completes.
@@ -298,8 +297,8 @@ export class RoomStore {
     this.cancelling = true;
     this.error = null;
     try {
-      await api.cancelRoomTurn(this.selectedRoomId);
-      const current = await api.getRoom(this.selectedRoomId);
+      await api.cancelGroupChatTurn(this.selectedRoomId);
+      const current = await api.getGroupChat(this.selectedRoomId);
       if (this.selectedRoomId === current.id) {
         this.room = current;
       }
@@ -327,11 +326,41 @@ export class RoomStore {
     await this.sendMessage(`@summary @${trimmed}`);
   }
 
+  /**
+   * Check if onboarding is needed: no AI characters exist yet.
+   * Returns the list of existing characters for the caller to use.
+   */
+  async checkOnboardingNeeded(): Promise<{ needed: boolean; characters: AiCharacter[] }> {
+    try {
+      const characters = await api.listCharacters();
+      return { needed: characters.length === 0, characters };
+    } catch (e) {
+      dbgWarn("group-chat", "checkOnboardingNeeded error", e);
+      // On error, assume onboarding not needed to avoid blocking the user
+      return { needed: false, characters: [] };
+    }
+  }
+
+  /**
+   * Create a Planner character with sensible defaults.
+   * Returns the newly created character.
+   */
+  async createPlannerCharacter(): Promise<AiCharacter> {
+    return api.createCharacter(
+      "Planner",
+      "planner",
+      "You are a strategic planner. Break down tasks, coordinate participants, and ensure quality outcomes.",
+      "claude",
+      null,
+      null,
+    );
+  }
+
   async deleteRoom(id: string): Promise<void> {
     this.saving = true;
     this.error = null;
     try {
-      await api.deleteRoom(id);
+      await api.deleteGroupChat(id);
       this.rooms = this.rooms.filter((room) => room.id !== id);
       if (this.selectedRoomId === id) {
         this.activeSnapshot = null;
@@ -347,47 +376,6 @@ export class RoomStore {
       throw e;
     } finally {
       this.saving = false;
-    }
-  }
-
-  async addSeatMemory(
-    participantId: string,
-    kind: MemoryKind,
-    key: string,
-    content: string,
-  ): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.addSeatMemoryEntry(this.selectedRoomId, participantId, kind, key, content);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "addSeatMemory error", e);
-    }
-  }
-
-  async deleteSeatMemory(participantId: string, entryId: string): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.deleteSeatMemoryEntry(this.selectedRoomId, participantId, entryId);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "deleteSeatMemory error", e);
-    }
-  }
-
-  async clearSeatMemory(participantId: string): Promise<void> {
-    if (!this.selectedRoomId) return;
-    this.error = null;
-    try {
-      const updated = await api.clearSeatMemory(this.selectedRoomId, participantId);
-      if (this.selectedRoomId === updated.id) this.room = updated;
-    } catch (e) {
-      this.error = errorMessage(e);
-      dbgWarn("rooms", "clearSeatMemory error", e);
     }
   }
 }

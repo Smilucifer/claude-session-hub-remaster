@@ -2,89 +2,77 @@ use crate::agent::adapter::ActorSessionMap;
 use crate::agent::spawn_locks::SpawnLocks;
 use crate::agent::stream::ProcessMap;
 use crate::models::{ExecutionPath, RunMeta, RunStatus};
-use crate::room::adapter::{can_use_room_actor_run, AgentCapabilities};
-use crate::room::models::{RoomDetail, RoomKind, RoomParticipantDetail, RoomSummary};
+use crate::group_chat::adapter::{can_use_group_chat_actor_run, AgentCapabilities};
+use crate::group_chat::models::{GroupChatDetail, GroupChatParticipantDetail, GroupChatSummary};
 use crate::storage;
 use crate::web_server::broadcaster::BroadcastEmitter;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
-fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
+fn group_chat_detail(room_id: &str) -> Result<GroupChatDetail, String> {
     let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+        storage::group_chats::get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
     let participants = room
         .participants
         .iter()
-        .map(|participant| RoomParticipantDetail {
+        .map(|participant| GroupChatParticipantDetail {
             participant: participant.clone(),
             run: crate::commands::runs::get_run(participant.run_id.clone()).ok(),
             capabilities: AgentCapabilities::for_agent(&participant.agent),
         })
         .collect();
 
-    Ok(RoomDetail {
+    Ok(GroupChatDetail {
         id: room.id,
-        kind: room.kind,
         name: room.name,
-        description: room.description,
         cwd: room.cwd,
         memo: room.memo,
         participants,
-        turns: storage::rooms::list_public_turns(room_id)?,
-        research_artifact: storage::rooms::read_research_artifact(room_id)?,
-        seat_memories: room.seat_memories,
-        seat_memory_inbox: room.seat_memory_inbox,
-        seat_profile: room.seat_profile,
+        turns: storage::group_chats::list_group_chat_public_turns(room_id)?,
         created_at: room.created_at,
         updated_at: room.updated_at,
     })
 }
 
 #[tauri::command]
-pub fn list_rooms() -> Result<Vec<RoomSummary>, String> {
-    Ok(storage::rooms::list_rooms())
+pub fn list_group_chats() -> Result<Vec<GroupChatSummary>, String> {
+    Ok(storage::group_chats::list_group_chats())
 }
 
 #[tauri::command]
-pub fn get_room(id: String) -> Result<RoomDetail, String> {
-    room_detail(&id)
+pub fn get_group_chat(id: String) -> Result<GroupChatDetail, String> {
+    group_chat_detail(&id)
 }
 
 #[tauri::command]
-pub fn create_room(
+pub fn create_group_chat(
     name: String,
-    description: Option<String>,
     cwd: Option<String>,
-    kind: Option<String>,
-) -> Result<RoomDetail, String> {
-    let kind = parse_room_kind(kind.as_deref())?;
-    let room =
-        storage::rooms::create_room_with_kind(name, description.unwrap_or_default(), cwd, kind)?;
-    room_detail(&room.id)
+) -> Result<GroupChatDetail, String> {
+    let room = storage::group_chats::create_group_chat(name, cwd)?;
+    group_chat_detail(&room.id)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RoomRunIndexEntry {
+pub struct GroupChatRunIndexEntry {
     pub room_id: String,
     pub room_name: String,
-    pub room_kind: String,
     pub run_ids: Vec<String>,
 }
 
 #[tauri::command]
-pub fn list_room_run_index() -> Result<Vec<RoomRunIndexEntry>, String> {
-    let summaries = storage::rooms::list_rooms();
+pub fn list_group_chat_run_index() -> Result<Vec<GroupChatRunIndexEntry>, String> {
+    let summaries = storage::group_chats::list_group_chats();
     let mut entries = Vec::new();
     for summary in summaries {
-        let room = match storage::rooms::get_room(&summary.id) {
+        let room = match storage::group_chats::get_group_chat(&summary.id) {
             Some(r) => r,
             None => continue,
         };
-        entries.push(RoomRunIndexEntry {
+        entries.push(GroupChatRunIndexEntry {
             room_id: room.id,
             room_name: room.name,
-            room_kind: format!("{:?}", room.kind).to_lowercase(),
             run_ids: room.participants.iter().map(|p| p.run_id.clone()).collect(),
         });
     }
@@ -101,19 +89,19 @@ pub struct ParticipantSnapshot {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RoomTurnSnapshot {
-    pub turn: crate::room::models::RoomTurn,
+pub struct GroupChatTurnSnapshot {
+    pub turn: crate::group_chat::models::GroupChatTurn,
     pub participant_contents: Vec<ParticipantSnapshot>,
 }
 
 #[tauri::command]
-pub fn get_room_turn_snapshot(
+pub fn get_group_chat_turn_snapshot(
     room_id: String,
     turn_id: String,
-) -> Result<RoomTurnSnapshot, String> {
+) -> Result<GroupChatTurnSnapshot, String> {
     let room =
-        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    let turns = storage::rooms::list_public_turns(&room_id)?;
+        storage::group_chats::get_group_chat(&room_id).ok_or_else(|| format!("GroupChat {room_id} not found"))?;
+    let turns = storage::group_chats::list_group_chat_public_turns(&room_id)?;
     let turn = turns
         .iter()
         .find(|t| t.id == turn_id)
@@ -150,7 +138,7 @@ pub fn get_room_turn_snapshot(
         });
     }
 
-    Ok(RoomTurnSnapshot {
+    Ok(GroupChatTurnSnapshot {
         turn: turn.clone(),
         participant_contents,
     })
@@ -170,45 +158,31 @@ fn extract_assistant_text(events: &[crate::models::RunEvent]) -> Option<String> 
     }
 }
 
-fn parse_room_kind(kind: Option<&str>) -> Result<RoomKind, String> {
-    match kind
-        .unwrap_or("roundtable")
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "" | "roundtable" => Ok(RoomKind::Roundtable),
-        "driver" => Ok(RoomKind::Driver),
-        "research" => Ok(RoomKind::Research),
-        other => Err(format!("Unsupported room kind: {other}")),
-    }
-}
-
 #[tauri::command]
-pub fn attach_room_run(
+pub fn attach_group_chat_run(
     room_id: String,
     run_id: String,
     label: Option<String>,
     role: Option<String>,
-) -> Result<RoomDetail, String> {
+) -> Result<GroupChatDetail, String> {
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
-    validate_room_participant_run(&run)?;
-    storage::rooms::attach_run(&room_id, &run_id, label, role)?;
-    room_detail(&room_id)
+    validate_group_chat_participant_run(&run)?;
+    storage::group_chats::attach_group_chat_run(&room_id, &run_id, label, role)?;
+    group_chat_detail(&room_id)
 }
 
-fn validate_room_participant_run(run: &RunMeta) -> Result<(), String> {
+fn validate_group_chat_participant_run(run: &RunMeta) -> Result<(), String> {
     let capabilities = AgentCapabilities::for_agent(&run.agent);
     let path = run.resolved_execution_path();
     let supported = match &path {
-        ExecutionPath::SessionActor => capabilities.stream_session && can_use_room_actor_run(run),
+        ExecutionPath::SessionActor => capabilities.stream_session && can_use_group_chat_actor_run(run),
         ExecutionPath::PipeExec => capabilities.pipe_exec,
     };
     if supported {
         Ok(())
     } else {
         Err(format!(
-            "Run {} uses agent '{}' with {:?}, which is not supported in Rooms",
+            "Run {} uses agent '{}' with {:?}, which is not supported in GroupChats",
             run.id, run.agent, path
         ))
     }
@@ -216,7 +190,7 @@ fn validate_room_participant_run(run: &RunMeta) -> Result<(), String> {
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn create_room_participant(
+pub async fn create_group_chat_participant(
     emitter: State<'_, Arc<BroadcastEmitter>>,
     sessions: State<'_, ActorSessionMap>,
     spawn_locks: State<'_, SpawnLocks>,
@@ -230,8 +204,8 @@ pub async fn create_room_participant(
     connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
-) -> Result<RoomDetail, String> {
-    create_room_participant_impl(
+) -> Result<GroupChatDetail, String> {
+    create_group_chat_participant_impl(
         emitter.inner(),
         sessions.inner(),
         spawn_locks.inner(),
@@ -251,7 +225,7 @@ pub async fn create_room_participant(
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn create_room_claude_participant(
+pub async fn create_group_chat_claude_participant(
     emitter: State<'_, Arc<BroadcastEmitter>>,
     sessions: State<'_, ActorSessionMap>,
     spawn_locks: State<'_, SpawnLocks>,
@@ -264,8 +238,8 @@ pub async fn create_room_claude_participant(
     connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
-) -> Result<RoomDetail, String> {
-    create_room_participant_impl(
+) -> Result<GroupChatDetail, String> {
+    create_group_chat_participant_impl(
         emitter.inner(),
         sessions.inner(),
         spawn_locks.inner(),
@@ -284,7 +258,7 @@ pub async fn create_room_claude_participant(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn create_room_participant_impl(
+async fn create_group_chat_participant_impl(
     emitter: &Arc<BroadcastEmitter>,
     sessions: &ActorSessionMap,
     spawn_locks: &SpawnLocks,
@@ -298,9 +272,9 @@ async fn create_room_participant_impl(
     connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
-) -> Result<RoomDetail, String> {
+) -> Result<GroupChatDetail, String> {
     let normalized_agent = normalize_agent(&agent)?;
-    let run_id = create_room_participant_run(
+    let run_id = create_group_chat_participant_run(
         &room_id,
         normalized_agent.clone(),
         prompt,
@@ -331,7 +305,7 @@ async fn create_room_participant_impl(
                 sessions,
                 spawn_locks,
                 &run_id,
-                &format!("Room participant startup failed: {e}"),
+                &format!("GroupChat participant startup failed: {e}"),
             )
             .await
             .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
@@ -339,7 +313,7 @@ async fn create_room_participant_impl(
         }
     }
 
-    if let Err(e) = storage::rooms::attach_run(
+    if let Err(e) = storage::group_chats::attach_group_chat_run(
         &room_id,
         &run_id,
         label.or_else(|| Some(default_participant_label(&normalized_agent))),
@@ -351,23 +325,23 @@ async fn create_room_participant_impl(
                 sessions,
                 spawn_locks,
                 &run_id,
-                &format!("Room participant attach failed: {e}"),
+                &format!("GroupChat participant attach failed: {e}"),
             )
             .await
             .map_err(|cleanup_error| format!("{e}; cleanup failed: {cleanup_error}"))?;
         } else {
             mark_participant_run_failed_and_deleted(
                 &run_id,
-                &format!("Room participant attach failed: {e}"),
+                &format!("GroupChat participant attach failed: {e}"),
             )?;
         }
         return Err(e);
     }
 
-    room_detail(&room_id)
+    group_chat_detail(&room_id)
 }
 
-fn create_room_participant_run(
+fn create_group_chat_participant_run(
     room_id: &str,
     agent: String,
     prompt: String,
@@ -377,9 +351,9 @@ fn create_room_participant_run(
     connection_profile_id: Option<String>,
 ) -> Result<String, String> {
     let _room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+        storage::group_chats::get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
     let run_id = uuid::Uuid::new_v4().to_string();
-    let execution_path = default_room_execution_path(&agent)?;
+    let execution_path = default_group_chat_execution_path(&agent)?;
     let mut meta = storage::runs::create_run_with_connection_profile(
         &run_id,
         &prompt,
@@ -407,7 +381,7 @@ fn create_claude_participant_run(
     model: Option<String>,
     platform_id: Option<String>,
 ) -> Result<String, String> {
-    create_room_participant_run(
+    create_group_chat_participant_run(
         room_id,
         "claude".to_string(),
         prompt,
@@ -423,19 +397,19 @@ fn normalize_agent(agent: &str) -> Result<String, String> {
     match normalized.as_str() {
         "claude" | "codex" => Ok(normalized),
         _ => Err(format!(
-            "Unsupported Room participant agent: {agent}. Supported: claude, codex"
+            "Unsupported GroupChat participant agent: {agent}. Supported: claude, codex"
         )),
     }
 }
 
-fn default_room_execution_path(agent: &str) -> Result<ExecutionPath, String> {
+fn default_group_chat_execution_path(agent: &str) -> Result<ExecutionPath, String> {
     let capabilities = AgentCapabilities::for_agent(agent);
     if capabilities.stream_session {
         Ok(ExecutionPath::SessionActor)
     } else if capabilities.pipe_exec {
         Ok(ExecutionPath::PipeExec)
     } else {
-        Err(format!("Agent '{agent}' is not supported in Rooms"))
+        Err(format!("Agent '{agent}' is not supported in GroupChats"))
     }
 }
 
@@ -465,115 +439,44 @@ fn mark_participant_run_failed_and_deleted(run_id: &str, reason: &str) -> Result
 }
 
 #[tauri::command]
-pub fn update_room_memo(room_id: String, memo: String) -> Result<RoomDetail, String> {
-    storage::rooms::update_memo(&room_id, memo)?;
-    room_detail(&room_id)
+pub fn update_group_chat_memo(room_id: String, memo: String) -> Result<GroupChatDetail, String> {
+    storage::group_chats::update_group_chat_memo(&room_id, memo)?;
+    group_chat_detail(&room_id)
 }
 
 #[tauri::command]
-pub fn add_seat_memory_entry(
-    room_id: String,
-    participant_id: String,
-    kind: crate::room::models::MemoryKind,
-    key: String,
-    content: String,
-) -> Result<RoomDetail, String> {
-    if key.len() > 200 {
-        return Err("Memory key too long (max 200 chars)".to_string());
-    }
-    if content.len() > 2000 {
-        return Err("Memory content too long (max 2000 chars)".to_string());
-    }
-    let now = crate::models::now_iso();
-    let entry = crate::room::models::SeatMemoryEntry {
-        id: format!("mem-{}-{}", &now[..10], &uuid_simple()[..8]),
-        kind,
-        key,
-        content,
-        recall: 0,
-        last_accessed: String::new(),
-        created_at: now,
-        persisted: false,
-        source_turn_id: None,
-    };
-    storage::rooms::add_seat_memory_entry(&room_id, &participant_id, entry)?;
-    room_detail(&room_id)
-}
-
-#[tauri::command]
-pub fn delete_seat_memory_entry(
-    room_id: String,
-    participant_id: String,
-    entry_id: String,
-) -> Result<RoomDetail, String> {
-    storage::rooms::delete_seat_memory_entry(&room_id, &participant_id, &entry_id)?;
-    room_detail(&room_id)
-}
-
-#[tauri::command]
-pub fn clear_seat_memory(room_id: String, participant_id: String) -> Result<RoomDetail, String> {
-    storage::rooms::clear_seat_memory(&room_id, &participant_id)?;
-    room_detail(&room_id)
-}
-
-fn uuid_simple() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-#[tauri::command]
-pub async fn send_room_message(
+pub async fn send_group_chat_message(
     app: AppHandle,
     sessions: State<'_, ActorSessionMap>,
     process_map: State<'_, ProcessMap>,
     room_id: String,
     message: String,
-) -> Result<RoomDetail, String> {
-    let room =
-        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
-    let pipe_runtime = Some(crate::room::orchestrator::RoomPipeRuntime {
+) -> Result<GroupChatDetail, String> {
+    let _room =
+        storage::group_chats::get_group_chat(&room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
+    let pipe_runtime = Some(crate::group_chat::orchestrator::GroupChatPipeRuntime {
         app,
         process_map: process_map.inner().clone(),
     });
-    match room.kind {
-        RoomKind::Roundtable => {
-            crate::room::orchestrator::run_roundtable_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime.clone(),
-            )
-            .await?;
-        }
-        RoomKind::Driver => {
-            crate::room::orchestrator::run_driver_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime.clone(),
-            )
-            .await?;
-        }
-        RoomKind::Research => {
-            crate::room::orchestrator::run_research_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime,
-            )
-            .await?;
-        }
-    }
-    room_detail(&room_id)
+    crate::group_chat::orchestrator::run_group_chat_turn_with_runtime(
+        &room_id,
+        &message,
+        sessions.inner(),
+        pipe_runtime,
+        None,
+    )
+    .await?;
+    group_chat_detail(&room_id)
 }
 
 #[tauri::command]
-pub async fn delete_room(
+pub async fn delete_group_chat(
     emitter: State<'_, Arc<BroadcastEmitter>>,
     sessions: State<'_, ActorSessionMap>,
     spawn_locks: State<'_, SpawnLocks>,
     id: String,
 ) -> Result<(), String> {
-    let room = storage::rooms::get_room(&id).ok_or_else(|| format!("Room {} not found", id))?;
+    let room = storage::group_chats::get_group_chat(&id).ok_or_else(|| format!("GroupChat {} not found", id))?;
 
     let run_ids: Vec<String> = room.participants.iter().map(|p| p.run_id.clone()).collect();
     for run_id in &run_ids {
@@ -590,23 +493,23 @@ pub async fn delete_room(
     // Batch soft-delete so runs disappear from sidebar
     if let Err(e) = storage::runs::soft_delete_runs(&run_ids) {
         log::warn!(
-            "[rooms] delete_room: soft_delete_runs failed (runs may still appear in sidebar): {e}"
+            "[group-chat] delete_group_chat: soft_delete_runs failed (runs may still appear in sidebar): {e}"
         );
     }
 
-    storage::rooms::delete_room(&id)
+    storage::group_chats::delete_group_chat(&id)
 }
 
 #[tauri::command]
-pub async fn cancel_room_turn(
+pub async fn cancel_group_chat_turn(
     emitter: State<'_, Arc<BroadcastEmitter>>,
     sessions: State<'_, ActorSessionMap>,
     spawn_locks: State<'_, SpawnLocks>,
     room_id: String,
 ) -> Result<bool, String> {
-    log::debug!("[rooms] cancel_room_turn: room_id={}", room_id);
+    log::debug!("[group-chat] cancel_group_chat_turn: room_id={}", room_id);
     let room =
-        storage::rooms::get_room(&room_id).ok_or_else(|| format!("Room {} not found", room_id))?;
+        storage::group_chats::get_group_chat(&room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
 
     for participant in &room.participants {
         // Only stop participants that are actually running
@@ -625,7 +528,7 @@ pub async fn cancel_room_turn(
         .await
         {
             log::warn!(
-                "[rooms] cancel_room_turn: failed to stop {}: {}",
+                "[group-chat] cancel_group_chat_turn: failed to stop {}: {}",
                 participant.run_id,
                 e
             );
@@ -655,9 +558,9 @@ mod tests {
     }
 
     #[test]
-    fn get_room_detail_reads_referenced_run_without_copying() {
+    fn get_group_chat_detail_reads_referenced_run_without_copying() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-1",
                 "hello",
@@ -672,9 +575,9 @@ mod tests {
                 None,
             )
             .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-1", None, None).unwrap();
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-1", None, None).unwrap();
 
-            let detail = super::room_detail(&room.id).unwrap();
+            let detail = super::group_chat_detail(&room.id).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
             assert!(detail.participants[0].capabilities.stream_session);
@@ -682,7 +585,7 @@ mod tests {
             assert_eq!(detail.participants[0].run.as_ref().unwrap().prompt, "hello");
 
             crate::storage::runs::rename_run("run-1", "Renamed").unwrap();
-            let detail = super::room_detail(&room.id).unwrap();
+            let detail = super::group_chat_detail(&room.id).unwrap();
             assert_eq!(
                 detail.participants[0].run.as_ref().unwrap().name.as_deref(),
                 Some("Renamed")
@@ -691,9 +594,9 @@ mod tests {
     }
 
     #[test]
-    fn room_detail_includes_participant_capabilities() {
+    fn group_chat_detail_includes_participant_capabilities() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-codex",
                 "hello",
@@ -708,15 +611,15 @@ mod tests {
                 None,
             )
             .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-codex", Some("Codex".into()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-codex", Some("Codex".into()), None)
                 .unwrap();
 
-            let detail = super::room_detail(&room.id).unwrap();
+            let detail = super::group_chat_detail(&room.id).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
             assert_eq!(
                 detail.participants[0].capabilities.kind,
-                crate::room::adapter::AgentKind::Codex
+                crate::group_chat::adapter::AgentKind::Codex
             );
             assert!(!detail.participants[0].capabilities.stream_session);
             assert!(detail.participants[0].capabilities.pipe_exec);
@@ -724,9 +627,9 @@ mod tests {
     }
 
     #[test]
-    fn attach_room_run_accepts_codex_pipe_exec_runs() {
+    fn attach_group_chat_run_accepts_codex_pipe_exec_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             crate::storage::runs::create_run(
                 "run-codex",
                 "hello",
@@ -742,7 +645,7 @@ mod tests {
             )
             .unwrap();
 
-            let detail = super::attach_room_run(room.id, "run-codex".into(), None, None).unwrap();
+            let detail = super::attach_group_chat_run(room.id, "run-codex".into(), None, None).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
             assert_eq!(detail.participants[0].participant.agent, "codex");
@@ -750,9 +653,9 @@ mod tests {
     }
 
     #[test]
-    fn attach_room_run_accepts_claude_pipe_exec_runs() {
+    fn attach_group_chat_run_accepts_claude_pipe_exec_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             let mut run = crate::storage::runs::create_run(
                 "run-claude-pipe",
                 "hello",
@@ -771,7 +674,7 @@ mod tests {
             crate::storage::runs::save_meta(&run).unwrap();
 
             let detail =
-                super::attach_room_run(room.id, "run-claude-pipe".into(), None, None).unwrap();
+                super::attach_group_chat_run(room.id, "run-claude-pipe".into(), None, None).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
             assert_eq!(detail.participants[0].participant.run_id, "run-claude-pipe");
@@ -779,9 +682,9 @@ mod tests {
     }
 
     #[test]
-    fn attach_room_run_accepts_claude_session_actor_runs() {
+    fn attach_group_chat_run_accepts_claude_session_actor_runs() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             let mut run = crate::storage::runs::create_run(
                 "run-claude-session",
                 "hello",
@@ -800,7 +703,7 @@ mod tests {
             crate::storage::runs::save_meta(&run).unwrap();
 
             let detail =
-                super::attach_room_run(room.id, "run-claude-session".into(), None, None).unwrap();
+                super::attach_group_chat_run(room.id, "run-claude-session".into(), None, None).unwrap();
 
             assert_eq!(detail.participants.len(), 1);
             assert_eq!(
@@ -813,7 +716,7 @@ mod tests {
     #[test]
     fn create_claude_participant_creates_referenced_run() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
 
             let run_id = super::create_claude_participant_run(
                 &room.id,
@@ -836,11 +739,11 @@ mod tests {
     }
 
     #[test]
-    fn create_room_participant_run_defaults_codex_to_pipe_exec() {
+    fn create_group_chat_participant_run_defaults_codex_to_pipe_exec() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
 
-            let run_id = super::create_room_participant_run(
+            let run_id = super::create_group_chat_participant_run(
                 &room.id,
                 "codex".to_string(),
                 "Investigate".to_string(),
@@ -858,25 +761,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_room_kind_for_create_room() {
-        assert_eq!(
-            super::parse_room_kind(None).unwrap(),
-            crate::room::models::RoomKind::Roundtable
-        );
-        assert_eq!(
-            super::parse_room_kind(Some("driver")).unwrap(),
-            crate::room::models::RoomKind::Driver
-        );
-        assert_eq!(
-            super::parse_room_kind(Some("research")).unwrap(),
-            crate::room::models::RoomKind::Research
-        );
-    }
-
-    #[test]
     fn participant_cleanup_soft_deletes_created_run() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             let run_id = super::create_claude_participant_run(
                 &room.id,
                 "Investigate".to_string(),
@@ -892,30 +779,4 @@ mod tests {
         });
     }
 
-    #[test]
-    fn room_detail_includes_latest_research_artifact() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "".into(),
-                None,
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            let artifact = crate::room::models::ResearchArtifact {
-                schema_version: 2,
-                room_id: room.id.clone(),
-                topic: "Compare search tools".into(),
-                turn_id: "turn-1".into(),
-                generated_at: "2026-05-02T00:00:00Z".into(),
-                results: vec![],
-                memory_candidates: vec![],
-            };
-            crate::storage::rooms::write_research_artifact(&room.id, &artifact).unwrap();
-
-            let detail = super::room_detail(&room.id).unwrap();
-
-            assert_eq!(detail.research_artifact, Some(artifact));
-        });
-    }
 }

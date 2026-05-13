@@ -1,4 +1,4 @@
 pub mod adapter;
-pub mod memory;
+pub mod context;
 pub mod models;
 pub mod orchestrator;

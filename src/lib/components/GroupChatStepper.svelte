@@ -1,8 +1,19 @@
 <script lang="ts">
-  import type { RoomTurn, RoomTurnSnapshot } from "$lib/types";
-  import { getRoomTurnSnapshot } from "$lib/api";
+  import type { GroupChatTurn, GroupChatTurnSnapshot } from "$lib/types";
+  import { getGroupChatTurnSnapshot } from "$lib/api";
   import { t } from "$lib/i18n/index.svelte";
-  import { roomTurnModeKey } from "$lib/utils/room-ui";
+
+  const TURN_MODE_LABEL_KEYS: Record<string, string> = {
+    fanout: "groupChat_turnFanout",
+    debate: "groupChat_turnDebate",
+    summary: "groupChat_turnSummary",
+    private: "groupChat_turnPrivate",
+    singletarget: "groupChat_turnSingleTarget",
+  };
+
+  function groupChatTurnModeKey(mode: string): string {
+    return TURN_MODE_LABEL_KEYS[mode] ?? mode;
+  }
 
   let {
     roomId,
@@ -10,13 +21,13 @@
     activeSnapshot = $bindable(null),
   }: {
     roomId: string;
-    turns: RoomTurn[];
-    activeSnapshot: RoomTurnSnapshot | null;
+    turns: GroupChatTurn[];
+    activeSnapshot: GroupChatTurnSnapshot | null;
   } = $props();
 
   let loading = $state(false);
 
-  function turnStatus(turn: RoomTurn): "complete" | "running" | "failed" | "pending" {
+  function turnStatus(turn: GroupChatTurn): "complete" | "running" | "failed" | "pending" {
     if (turn.responses.some((r) => r.status === "failed")) return "failed";
     if (turn.responses.some((r) => r.status === "running")) return "running";
     if (turn.completed_at) return "complete";
@@ -36,14 +47,14 @@
     }
   }
 
-  async function handleClick(turn: RoomTurn) {
+  async function handleClick(turn: GroupChatTurn) {
     if (activeSnapshot?.turn.id === turn.id) {
       activeSnapshot = null;
       return;
     }
     loading = true;
     try {
-      activeSnapshot = await getRoomTurnSnapshot(roomId, turn.id);
+      activeSnapshot = await getGroupChatTurnSnapshot(roomId, turn.id);
     } catch (e) {
       console.error("Failed to load snapshot:", e);
     } finally {
@@ -58,7 +69,7 @@
 
 <div class="flex flex-col gap-1 max-h-64 overflow-y-auto px-3 py-2">
   {#if turns.length === 0}
-    <p class="text-sm text-muted-foreground">{t("room_noTurns")}</p>
+    <p class="text-sm text-muted-foreground">{t("groupChat_noTurns")}</p>
   {:else}
     {#each turns as turn (turn.id)}
       {@const status = turnStatus(turn)}
@@ -73,7 +84,7 @@
         <span class="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 {statusColor(status)}"></span>
         <span class="flex flex-col gap-0.5 min-w-0">
           <span class="text-xs font-medium">
-            Turn {turn.idx} · {t(roomTurnModeKey(turn.mode) as any)}
+            Turn {turn.idx} · {t(groupChatTurnModeKey(turn.mode) as any)}
           </span>
           <span class="text-xs text-muted-foreground truncate">
             {turn.user_input.slice(0, 60)}{turn.user_input.length > 60 ? "…" : ""}
@@ -89,13 +100,13 @@
     class="shrink-0 border-t border-purple-300 bg-purple-50 dark:bg-purple-950/30 px-3 py-2 flex items-center justify-between"
   >
     <span class="text-sm font-medium text-purple-700 dark:text-purple-300">
-      {t("room_snapshotBanner", { turn: String(activeSnapshot.turn.idx) })}
+      {t("groupChat_snapshotBanner", { turn: String(activeSnapshot.turn.idx) })}
     </span>
     <button
       class="text-xs text-purple-600 dark:text-purple-400 hover:underline"
       onclick={exitSnapshot}
     >
-      {t("room_snapshotExit")}
+      {t("groupChat_snapshotExit")}
     </button>
   </div>
 {/if}

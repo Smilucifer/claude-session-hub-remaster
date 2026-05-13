@@ -6,59 +6,61 @@ use crate::agent::windows_msvc_env::{
     merge_extra_env_into_spawn_env_plan, resolve_spawn_env_plan_with_policy, MsvcPolicy,
     SpawnPathPolicy,
 };
-use crate::room::adapter::{
-    adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
+use crate::group_chat::adapter::{
+    adapter_for_run, can_use_group_chat_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
-use crate::room::models::{
-    ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult, RoomKind,
-    RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode,
+use crate::group_chat::context::{check_handoff, record_participant_turn, HandoffDecision};
+use crate::group_chat::models::{
+    GroupChatParticipant, GroupChatResponseRef, GroupChatTurn, GroupChatTurnMode,
 };
 use crate::{
     models::{now_iso, ExecutionPath, RunEventType, RunMeta, RunStatus},
     storage,
 };
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio_util::sync::CancellationToken;
 
-static ROOM_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+static GROUP_CHAT_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static RUN_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 const MAX_DEBATE_OPINION_CHARS: usize = 5_000;
 const MAX_DEBATE_OPINION_KEEP: usize = 2_000;
 const MAX_SUMMARY_PER_VIEW_CHARS: usize = 3_000;
+const MAX_AUTO_CHAIN_HOPS: usize = 3;
 
 #[derive(Clone)]
-struct RoundtableTarget {
-    participant: RoomParticipant,
-    runtime: RoundtableTargetRuntime,
+struct GroupChatTarget {
+    participant: GroupChatParticipant,
+    runtime: GroupChatTargetRuntime,
 }
 
 #[derive(Clone)]
-enum RoundtableTargetRuntime {
+enum GroupChatTargetRuntime {
     Actor { cmd_tx: mpsc::Sender<ActorCommand> },
     Pipe,
 }
 
-impl RoundtableTarget {
+impl GroupChatTarget {
     #[cfg(test)]
     fn is_pipe(&self) -> bool {
-        matches!(self.runtime, RoundtableTargetRuntime::Pipe)
+        matches!(self.runtime, GroupChatTargetRuntime::Pipe)
     }
 }
 
 #[derive(Clone)]
-pub struct RoomPipeRuntime {
+pub struct GroupChatPipeRuntime {
     pub app: AppHandle,
     pub process_map: ProcessMap,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RoundtableCommand {
+pub enum GroupChatCommand {
     Fanout { input: String },
     Debate { input: String },
     Summary { target: String },
@@ -66,77 +68,73 @@ pub enum RoundtableCommand {
     SingleTarget { target: String, message: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DriverCommand {
-    Review { targets: Vec<String>, input: String },
-}
-
-pub async fn run_roundtable_turn(
+pub async fn run_group_chat_turn(
     room_id: &str,
     message: &str,
     sessions: &ActorSessionMap,
-) -> Result<RoomTurn, String> {
-    run_roundtable_turn_with_runtime(room_id, message, sessions, None).await
+) -> Result<GroupChatTurn, String> {
+    run_group_chat_turn_with_runtime(room_id, message, sessions, None, None).await
 }
 
-pub async fn run_roundtable_turn_with_runtime(
+pub async fn run_group_chat_turn_with_runtime(
     room_id: &str,
     message: &str,
     sessions: &ActorSessionMap,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> Result<RoomTurn, String> {
-    let room_lock = room_orchestration_lock(room_id);
+    pipe_runtime: Option<GroupChatPipeRuntime>,
+    cancel_token: Option<CancellationToken>,
+) -> Result<GroupChatTurn, String> {
+    let room_lock = group_chat_orchestration_lock(room_id);
     let _room_guard = room_lock.lock().await;
 
     let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    let command = parse_roundtable_command(message);
-    let public_turns = storage::rooms::list_public_turns(room_id)?;
+        storage::group_chats::get_group_chat(room_id).ok_or_else(|| format!("GroupChat {room_id} not found"))?;
+    let command = parse_group_chat_command(message);
+    let public_turns = storage::group_chats::list_group_chat_public_turns(room_id)?;
 
     let (mode, user_input, prompt, targets, is_private) = match command {
-        RoundtableCommand::Fanout { input } => {
+        GroupChatCommand::Fanout { input } => {
             let targets = active_targets(&room.participants, sessions).await;
-            (RoomTurnMode::Fanout, input.clone(), input, targets, false)
+            (GroupChatTurnMode::Fanout, input.clone(), input, targets, false)
         }
-        RoundtableCommand::Debate { input } => {
+        GroupChatCommand::Debate { input } => {
             let targets = active_targets(&room.participants, sessions).await;
             (
-                RoomTurnMode::Debate,
+                GroupChatTurnMode::Debate,
                 message.trim().to_string(),
                 input,
                 targets,
                 false,
             )
         }
-        RoundtableCommand::Summary { target } => {
+        GroupChatCommand::Summary { target } => {
             let participant = find_participant(&room.participants, &target)
-                .ok_or_else(|| format!("Room participant @{target} not found"))?
+                .ok_or_else(|| format!("GroupChat participant @{target} not found"))?
                 .clone();
             let target = active_target_for_participant(participant, sessions).await?;
             let prompt = build_summary_prompt(&public_turns, &room.participants);
             (
-                RoomTurnMode::Summary,
+                GroupChatTurnMode::Summary,
                 message.trim().to_string(),
                 prompt,
                 vec![target],
                 false,
             )
         }
-        RoundtableCommand::Private {
+        GroupChatCommand::Private {
             target,
             message: private_message,
         } => {
             let participant = find_participant_unique(&room.participants, &target)?.clone();
             let target = active_target_for_participant(participant, sessions).await?;
             (
-                RoomTurnMode::Private,
+                GroupChatTurnMode::Private,
                 message.trim().to_string(),
                 private_message,
                 vec![target],
                 true,
             )
         }
-        RoundtableCommand::SingleTarget {
+        GroupChatCommand::SingleTarget {
             target,
             message: target_message,
         } => {
@@ -148,7 +146,7 @@ pub async fn run_roundtable_turn_with_runtime(
                 &target_message,
             );
             (
-                RoomTurnMode::SingleTarget,
+                GroupChatTurnMode::SingleTarget,
                 message.trim().to_string(),
                 prompt,
                 vec![target_ref],
@@ -158,12 +156,12 @@ pub async fn run_roundtable_turn_with_runtime(
     };
 
     if targets.is_empty() {
-        return Err("No active room participants are available".to_string());
+        return Err("No active group chat participants are available".to_string());
     }
 
     let started_at = now_iso();
     let idx = if is_private {
-        storage::rooms::list_private_turns(room_id)?.len() as u64 + 1
+        storage::group_chats::list_group_chat_private_turns(room_id)?.len() as u64 + 1
     } else {
         public_turns.len() as u64 + 1
     };
@@ -182,24 +180,15 @@ pub async fn run_roundtable_turn_with_runtime(
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
         let target_prompt = match mode {
-            RoomTurnMode::Fanout => {
-                let mem = room.seat_memories.get(&participant.id);
-                let section = crate::room::memory::build_memory_prompt_section(
-                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
-                );
-                build_fanout_prompt(turn_num, &prompt, None, section.as_deref())
+            GroupChatTurnMode::Fanout => {
+                build_fanout_prompt(turn_num, &prompt, None)
             }
-            RoomTurnMode::Debate => {
-                let mem = room.seat_memories.get(&participant.id);
-                let section = crate::room::memory::build_memory_prompt_section(
-                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
-                );
+            GroupChatTurnMode::Debate => {
                 build_debate_prompt(
                     &participant,
                     &prompt,
                     &public_turns,
                     &room.participants,
-                    section.as_deref(),
                 )
             }
             _ => prompt.clone(),
@@ -209,14 +198,14 @@ pub async fn run_roundtable_turn_with_runtime(
         join_set.spawn(async move {
             let run_lock = run_orchestration_lock(&participant.run_id);
             let _run_guard = run_lock.lock().await;
-            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
+            execute_group_chat_target(target, &participant, &run, &target_prompt, pipe_runtime)
                 .await
         });
     }
 
-    let mut responses: Vec<RoomResponseRef> = Vec::with_capacity(targets.len());
+    let mut responses: Vec<GroupChatResponseRef> = Vec::with_capacity(targets.len());
     while let Some(result) = join_set.join_next().await {
-        let response = result.map_err(|e| format!("Room participant task failed: {e}"))?;
+        let response = result.map_err(|e| format!("GroupChat participant task failed: {e}"))?;
         responses.push(response);
 
         // Save incremental turn so frontend sees responses as they arrive.
@@ -224,7 +213,7 @@ pub async fn run_roundtable_turn_with_runtime(
         // Trade-off: N participant turns = N+1 lines (N snapshots + 1 final).
         // The dedup in list_turns_jsonl keeps the latest per turn_id, so
         // the read path is correct at the cost of file size growth over time.
-        let incremental_turn = RoomTurn {
+        let incremental_turn = GroupChatTurn {
             id: turn_id.clone(),
             idx,
             mode: mode.clone(),
@@ -235,13 +224,13 @@ pub async fn run_roundtable_turn_with_runtime(
             completed_at: None, // not yet finished
         };
         if is_private {
-            storage::rooms::append_private_turn(room_id, &incremental_turn)?;
+            storage::group_chats::append_group_chat_private_turn(room_id, &incremental_turn)?;
         } else {
-            storage::rooms::append_public_turn(room_id, &incremental_turn)?;
+            storage::group_chats::append_group_chat_public_turn(room_id, &incremental_turn)?;
         }
     }
 
-    let turn = RoomTurn {
+    let turn = GroupChatTurn {
         id: turn_id,
         idx,
         mode,
@@ -253,26 +242,152 @@ pub async fn run_roundtable_turn_with_runtime(
     };
 
     if is_private {
-        storage::rooms::append_private_turn(room_id, &turn)?;
+        storage::group_chats::append_group_chat_private_turn(room_id, &turn)?;
     } else {
-        storage::rooms::append_public_turn(room_id, &turn)?;
+        storage::group_chats::append_group_chat_public_turn(room_id, &turn)?;
+    }
+
+    // ── Task 38: session handoff trigger ──
+    // Record turn count and check handoff threshold for each responding participant.
+    let public_turns_after = if is_private {
+        storage::group_chats::list_group_chat_public_turns(room_id)?
+    } else {
+        // turn was just appended; re-read to include it
+        let mut turns = storage::group_chats::list_group_chat_public_turns(room_id)?;
+        if turns.last().map(|t| t.id.as_str()) != Some(&turn.id) {
+            turns.push(turn.clone());
+        }
+        turns
+    };
+    for resp in &turn.responses {
+        let _ = record_participant_turn(room_id, &resp.participant_id);
+        if let Some(participant) = room.participants.iter().find(|p| p.id == resp.participant_id) {
+            match check_handoff(&room, participant, &public_turns_after) {
+                HandoffDecision::Handoff { bootstrap_context } => {
+                    log::info!(
+                        "[group-chat] handoff triggered for participant {} (session_seq={}): context length={}",
+                        participant.label,
+                        crate::group_chat::context::load_participant_meta(room_id, &participant.id).session_seq,
+                        bootstrap_context.len(),
+                    );
+                    // TODO: spawn fresh session with bootstrap_context as first message.
+                    // For now, reset session state so the next turn starts fresh.
+                    let _ = crate::group_chat::context::reset_session_after_handoff(
+                        room_id,
+                        &participant.id,
+                    );
+                }
+                HandoffDecision::Continue => {}
+            }
+        }
+    }
+
+    // ── Auto-chain: after SingleTarget, scan response for @mentions ──
+    if room.auto_chain && matches!(turn.mode, GroupChatTurnMode::SingleTarget) {
+        let mut chained_ids: HashSet<String> =
+            turn.target_participant_ids.iter().cloned().collect();
+        let mut current_turn = turn.clone();
+        let mut hop = 0usize;
+
+        while hop < MAX_AUTO_CHAIN_HOPS {
+            if let Some(ref ct) = cancel_token {
+                if ct.is_cancelled() {
+                    log::info!("[group-chat] auto-chain cancelled at hop {hop}");
+                    break;
+                }
+            }
+
+            let Some(mention) = extract_first_mention(
+                &current_turn,
+                &room.participants,
+                &chained_ids,
+            ) else {
+                break;
+            };
+
+            let participant = match find_participant_unique(&room.participants, &mention) {
+                Ok(p) => p.clone(),
+                Err(e) => {
+                    log::debug!("[group-chat] auto-chain: {e}");
+                    break;
+                }
+            };
+
+            let target = match active_target_for_participant(participant.clone(), sessions).await {
+                Ok(t) => t,
+                Err(e) => {
+                    log::debug!("[group-chat] auto-chain: no active target for {}: {e}", participant.label);
+                    break;
+                }
+            };
+
+            hop += 1;
+            chained_ids.insert(participant.id.clone());
+
+            let auto_prompt = build_singletarget_prompt(
+                public_turns_after.len() as u64 + hop as u64,
+                &participant.label,
+                current_turn
+                    .responses
+                    .first()
+                    .and_then(|r| r.preview.as_deref())
+                    .unwrap_or("(empty)"),
+            );
+
+            let auto_started = now_iso();
+            let auto_turn_id = uuid::Uuid::new_v4().to_string();
+            let auto_idx = public_turns_after.len() as u64 + hop as u64;
+
+            let run_lock = run_orchestration_lock(&participant.run_id);
+            let _run_guard = run_lock.lock().await;
+            let run = match storage::runs::get_run(&participant.run_id) {
+                Some(r) => r,
+                None => break,
+            };
+
+            let response =
+                execute_group_chat_target(target, &participant, &run, &auto_prompt, pipe_runtime.clone()).await;
+
+            let auto_turn = GroupChatTurn {
+                id: auto_turn_id,
+                idx: auto_idx,
+                mode: GroupChatTurnMode::SingleTarget,
+                user_input: format!("[auto-chain hop {hop}]"),
+                target_participant_ids: vec![participant.id.clone()],
+                responses: vec![response],
+                started_at: auto_started,
+                completed_at: Some(now_iso()),
+            };
+            if let Err(e) = storage::group_chats::append_group_chat_public_turn(room_id, &auto_turn) {
+                log::warn!("[group-chat] auto-chain: failed to persist turn: {e}");
+                break;
+            }
+
+            log::info!(
+                "[group-chat] auto-chain hop {hop}: @{} → {}",
+                mention,
+                participant.label,
+            );
+
+            current_turn = auto_turn;
+        }
     }
 
     Ok(turn)
 }
 
-async fn execute_roundtable_target(
-    target: RoundtableTarget,
-    participant: &RoomParticipant,
+async fn execute_group_chat_target(
+    target: GroupChatTarget,
+    participant: &GroupChatParticipant,
     run: &RunMeta,
     target_prompt: &str,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> RoomResponseRef {
+    pipe_runtime: Option<GroupChatPipeRuntime>,
+) -> GroupChatResponseRef {
     match target.runtime {
-        RoundtableTargetRuntime::Actor { cmd_tx } => {
+        GroupChatTargetRuntime::Actor { cmd_tx } => {
             execute_actor_turn(participant, run, target_prompt, cmd_tx).await
         }
-        RoundtableTargetRuntime::Pipe => match pipe_runtime {
+        GroupChatTargetRuntime::Pipe => match pipe_runtime {
             Some(runtime) => {
                 execute_pipe_turn(
                     participant,
@@ -286,18 +401,18 @@ async fn execute_roundtable_target(
             None => failed_response(
                 participant,
                 storage::events::next_seq(&participant.run_id),
-                "Native CLI Room participant runtime is unavailable",
+                "Native CLI GroupChat participant runtime is unavailable",
             ),
         },
     }
 }
 
 async fn execute_actor_turn(
-    participant: &RoomParticipant,
+    participant: &GroupChatParticipant,
     run: &RunMeta,
     target_prompt: &str,
     cmd_tx: mpsc::Sender<ActorCommand>,
-) -> RoomResponseRef {
+) -> GroupChatResponseRef {
     let event_seq_start = storage::events::next_seq(&participant.run_id);
     let mut adapter = adapter_for_run(run).with_command_sender(cmd_tx);
     // Transition to Running so wait_turn_complete does not mistake a
@@ -310,7 +425,7 @@ async fn execute_actor_turn(
             Ok(outcome) => {
                 let event_seq_end =
                     storage::events::next_seq(&participant.run_id).saturating_sub(1);
-                RoomResponseRef {
+                GroupChatResponseRef {
                     participant_id: participant.id.clone(),
                     run_id: participant.run_id.clone(),
                     event_seq_start,
@@ -336,12 +451,12 @@ async fn execute_actor_turn(
 }
 
 async fn execute_pipe_turn(
-    participant: &RoomParticipant,
+    participant: &GroupChatParticipant,
     run: &RunMeta,
     target_prompt: &str,
     app: AppHandle,
     process_map: ProcessMap,
-) -> RoomResponseRef {
+) -> GroupChatResponseRef {
     let event_seq_start = storage::events::next_seq(&participant.run_id);
     let full_prompt = compose_pipe_turn_prompt(&run.prompt, target_prompt);
     if let Err(e) = storage::events::append_event(
@@ -369,8 +484,15 @@ async fn execute_pipe_turn(
         &user_settings,
         run.model.clone(),
     );
-    // Roundtable sessions run in plan/read-only mode.
+    // GroupChat sessions run in plan/read-only mode.
     adapter_settings.permission_mode = Some("plan".to_string());
+
+    // Inject role-based system prompt from the participant's linked character.
+    if let Some(role_prompt) =
+        resolve_participant_system_prompt(participant, &user_settings.ai_characters)
+    {
+        adapter_settings.append_system_prompt = Some(role_prompt);
+    }
 
     let profile = match storage::settings::find_connection_profile(
         &user_settings,
@@ -447,7 +569,7 @@ async fn execute_pipe_turn(
 
     let event_seq_end = storage::events::next_seq(&participant.run_id).saturating_sub(1);
     let completed_run = storage::runs::get_run(&participant.run_id);
-    RoomResponseRef {
+    GroupChatResponseRef {
         participant_id: participant.id.clone(),
         run_id: participant.run_id.clone(),
         event_seq_start,
@@ -458,6 +580,36 @@ async fn execute_pipe_turn(
             .map(|run| run_status_label(run.status.clone()).to_string())
             .unwrap_or_else(|| "complete".to_string()),
         error: completed_run.and_then(|run| run.error_message),
+    }
+}
+
+/// Build a system prompt for a participant based on their role type and optional custom instruction.
+fn build_role_system_prompt(role_type: &str, role_instruction: &Option<String>) -> String {
+    let base = match role_type {
+        "planner" => {
+            "你可以读取文件和搜索代码来辅助规划。你不可以执行修改文件系统或运行命令的工具。"
+        }
+        "executor" => "你严格按照计划执行任务。你不可以偏离计划内容。",
+        _ => "",
+    };
+    let custom = role_instruction.as_deref().unwrap_or("");
+    format!("{}\n{}", base, custom).trim().to_string()
+}
+
+/// Look up the AiCharacter whose label matches the participant's label,
+/// then build a role system prompt from its role_type and role_instruction.
+fn resolve_participant_system_prompt(
+    participant: &GroupChatParticipant,
+    ai_characters: &[crate::models::AiCharacter],
+) -> Option<String> {
+    let character = ai_characters
+        .iter()
+        .find(|c| c.label.eq_ignore_ascii_case(&participant.label))?;
+    let prompt = build_role_system_prompt(&character.role_type, &character.role_instruction);
+    if prompt.is_empty() {
+        None
+    } else {
+        Some(prompt)
     }
 }
 
@@ -474,11 +626,11 @@ fn compose_pipe_turn_prompt(base_prompt: &str, target_prompt: &str) -> String {
 }
 
 fn failed_response(
-    participant: &RoomParticipant,
+    participant: &GroupChatParticipant,
     event_seq_start: u64,
     error: impl Into<String>,
-) -> RoomResponseRef {
-    RoomResponseRef {
+) -> GroupChatResponseRef {
+    GroupChatResponseRef {
         participant_id: participant.id.clone(),
         run_id: participant.run_id.clone(),
         event_seq_start,
@@ -489,212 +641,8 @@ fn failed_response(
     }
 }
 
-pub async fn run_driver_turn(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-) -> Result<RoomTurn, String> {
-    run_driver_turn_with_runtime(room_id, message, sessions, None).await
-}
-
-pub async fn run_driver_turn_with_runtime(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> Result<RoomTurn, String> {
-    let room_lock = room_orchestration_lock(room_id);
-    let _room_guard = room_lock.lock().await;
-
-    let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    if room.kind != RoomKind::Driver {
-        return Err(format!("Room {room_id} is not a Driver room"));
-    }
-
-    let DriverCommand::Review {
-        targets: requested_targets,
-        input,
-    } = parse_driver_command(message)?;
-    if input.trim().is_empty() {
-        return Err("Review request is required".to_string());
-    }
-
-    let public_turns = storage::rooms::list_public_turns(room_id)?;
-    let targets = if requested_targets.is_empty() {
-        active_copilot_targets(&room.participants, sessions).await
-    } else {
-        let mut resolved = Vec::with_capacity(requested_targets.len());
-        for target in requested_targets {
-            let participant = find_participant(&room.participants, &target)
-                .ok_or_else(|| format!("Room participant @{target} not found"))?
-                .clone();
-            if participant.role != "copilot" {
-                return Err(format!(
-                    "Room participant {} is not a copilot reviewer",
-                    participant.label
-                ));
-            }
-            resolved.push(active_target_for_participant(participant, sessions).await?);
-        }
-        resolved
-    };
-
-    if targets.is_empty() {
-        return Err("No active copilot participants are available".to_string());
-    }
-
-    let arena_dir = storage::data_dir()
-        .join("rooms")
-        .join(room_id)
-        .join(".arena");
-    let cwd = room.cwd.as_deref().unwrap_or("(no room cwd)");
-    let prompt = build_driver_review_prompt(
-        &input,
-        &public_turns,
-        &room.participants,
-        &room.memo,
-        cwd,
-        &arena_dir.to_string_lossy(),
-    );
-    storage::rooms::write_driver_arena_files(&room, &public_turns, &input, &prompt)?;
-    storage::rooms::write_driver_mcp_bundle(&room, &public_turns, &input, &prompt)?;
-
-    let started_at = now_iso();
-    let mut response_tasks = Vec::with_capacity(targets.len());
-
-    for target in &targets {
-        let target = target.clone();
-        let participant = target.participant.clone();
-        let run = storage::runs::get_run(&participant.run_id)
-            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = prompt.clone();
-        let pipe_runtime = pipe_runtime.clone();
-
-        response_tasks.push(tokio::spawn(async move {
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
-                .await
-        }));
-    }
-
-    let mut responses = Vec::with_capacity(response_tasks.len());
-    for task in response_tasks {
-        responses.push(
-            task.await
-                .map_err(|e| format!("Room participant task failed: {e}"))?,
-        );
-    }
-
-    let turn = RoomTurn {
-        id: uuid::Uuid::new_v4().to_string(),
-        idx: public_turns.len() as u64 + 1,
-        mode: RoomTurnMode::Review,
-        user_input: message.trim().to_string(),
-        target_participant_ids: targets
-            .iter()
-            .map(|target| target.participant.id.clone())
-            .collect(),
-        responses,
-        started_at,
-        completed_at: Some(now_iso()),
-    };
-    storage::rooms::append_public_turn(room_id, &turn)?;
-
-    Ok(turn)
-}
-
-pub async fn run_research_turn(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-) -> Result<RoomTurn, String> {
-    run_research_turn_with_runtime(room_id, message, sessions, None).await
-}
-
-pub async fn run_research_turn_with_runtime(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> Result<RoomTurn, String> {
-    let room_lock = room_orchestration_lock(room_id);
-    let _room_guard = room_lock.lock().await;
-
-    let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    if room.kind != RoomKind::Research {
-        return Err(format!("Room {room_id} is not a Research room"));
-    }
-
-    let topic = message.trim();
-    if topic.is_empty() {
-        return Err("Research topic is required".to_string());
-    }
-
-    let public_turns = storage::rooms::list_public_turns(room_id)?;
-    let targets = active_targets(&room.participants, sessions).await;
-    if targets.is_empty() {
-        return Err("No active room participants are available".to_string());
-    }
-
-    let started_at = now_iso();
-    let mut response_tasks = Vec::with_capacity(targets.len());
-
-    for target in &targets {
-        let target = target.clone();
-        let participant = target.participant.clone();
-        let run = storage::runs::get_run(&participant.run_id)
-            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = build_research_prompt(
-            &participant,
-            topic,
-            &public_turns,
-            &room.participants,
-            &room.memo,
-        );
-        let pipe_runtime = pipe_runtime.clone();
-
-        response_tasks.push(tokio::spawn(async move {
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
-                .await
-        }));
-    }
-
-    let mut responses = Vec::with_capacity(response_tasks.len());
-    for task in response_tasks {
-        responses.push(
-            task.await
-                .map_err(|e| format!("Room participant task failed: {e}"))?,
-        );
-    }
-
-    let completed_at = now_iso();
-    let turn = RoomTurn {
-        id: uuid::Uuid::new_v4().to_string(),
-        idx: public_turns.len() as u64 + 1,
-        mode: RoomTurnMode::Research,
-        user_input: topic.to_string(),
-        target_participant_ids: targets
-            .iter()
-            .map(|target| target.participant.id.clone())
-            .collect(),
-        responses,
-        started_at,
-        completed_at: Some(completed_at.clone()),
-    };
-    let artifact = build_research_artifact(&room, &turn, topic, &completed_at);
-    storage::rooms::write_research_artifact(room_id, &artifact)?;
-    storage::rooms::append_public_turn(room_id, &turn)?;
-
-    Ok(turn)
-}
-
-fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
-    let mut locks = ROOM_ORCHESTRATION_LOCKS
+fn group_chat_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
+    let mut locks = GROUP_CHAT_ORCHESTRATION_LOCKS
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     locks
@@ -713,10 +661,10 @@ fn run_orchestration_lock(run_id: &str) -> Arc<AsyncMutex<()>> {
         .clone()
 }
 
-pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
+pub fn parse_group_chat_command(input: &str) -> GroupChatCommand {
     let trimmed = input.trim();
     if let Some(rest) = strip_command_word(trimmed, "@debate") {
-        return RoundtableCommand::Debate {
+        return GroupChatCommand::Debate {
             input: rest.trim().to_string(),
         };
     }
@@ -728,7 +676,7 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
             .unwrap_or_default()
             .trim_start_matches('@')
             .to_string();
-        return RoundtableCommand::Summary { target };
+        return GroupChatCommand::Summary { target };
     }
 
     // /dm @Name msg → Private turn (written to private.json)
@@ -738,7 +686,7 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
             let target = parts.next().unwrap_or_default().to_string();
             let message = parts.next().unwrap_or_default().trim().to_string();
             if !target.is_empty() && !message.is_empty() {
-                return RoundtableCommand::Private { target, message };
+                return GroupChatCommand::Private { target, message };
             }
         }
     }
@@ -749,34 +697,13 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
         let target = parts.next().unwrap_or_default().to_string();
         let message = parts.next().unwrap_or_default().trim().to_string();
         if !target.is_empty() && !message.is_empty() {
-            return RoundtableCommand::SingleTarget { target, message };
+            return GroupChatCommand::SingleTarget { target, message };
         }
     }
 
-    RoundtableCommand::Fanout {
+    GroupChatCommand::Fanout {
         input: trimmed.to_string(),
     }
-}
-
-pub fn parse_driver_command(input: &str) -> Result<DriverCommand, String> {
-    let trimmed = input.trim();
-    let mut rest = strip_command_word(trimmed, "/review")
-        .map(str::trim)
-        .ok_or_else(|| "Driver rooms require an explicit /review request".to_string())?;
-    let mut targets = Vec::new();
-
-    while let Some(after_at) = rest.strip_prefix('@') {
-        let end = after_at.find(char::is_whitespace).unwrap_or(after_at.len());
-        if end == 0 {
-            break;
-        }
-        targets.push(after_at[..end].to_string());
-        rest = after_at[end..].trim_start();
-    }
-
-    let input = rest.trim().to_string();
-
-    Ok(DriverCommand::Review { targets, input })
 }
 
 fn strip_command_word<'a>(input: &'a str, command: &str) -> Option<&'a str> {
@@ -789,15 +716,14 @@ fn strip_command_word<'a>(input: &'a str, command: &str) -> Option<&'a str> {
 }
 
 pub fn build_debate_prompt(
-    target: &RoomParticipant,
+    target: &GroupChatParticipant,
     instruction: &str,
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
-    seat_memory_section: Option<&str>,
+    previous_turns: &[GroupChatTurn],
+    participants: &[GroupChatParticipant],
 ) -> String {
     let turn_num = previous_turns
         .iter()
-        .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
+        .filter(|turn| !matches!(turn.mode, GroupChatTurnMode::Private))
         .count() as u64
         + 1;
     let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · @debate]\n");
@@ -812,7 +738,7 @@ pub fn build_debate_prompt(
     let Some(last_turn) = previous_turns
         .iter()
         .rev()
-        .find(|turn| matches!(turn.mode, RoomTurnMode::Fanout | RoomTurnMode::Debate))
+        .find(|turn| matches!(turn.mode, GroupChatTurnMode::Fanout | GroupChatTurnMode::Debate))
     else {
         body.push_str("(无另两家上轮记录)\n");
         body.push_str("\n## 你的任务\n请基于用户问题发表新观点。\n");
@@ -827,7 +753,7 @@ pub fn build_debate_prompt(
             continue;
         }
         let label = participant_label(participants, &response.participant_id);
-        append_roundtable_view(
+        append_group_chat_view(
             &mut body,
             &label,
             response.preview.as_deref(),
@@ -855,10 +781,6 @@ pub fn build_debate_prompt(
         body.push_str("(无另两家上轮记录)\n");
     }
 
-    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
-        body.push_str(mem);
-        body.push('\n');
-    }
     body.push_str("\n## 你的任务\n");
     body.push_str("请基于另两家观点 + 用户补充信息，发表新观点：可以继承、可以反驳，但要明示引用对方哪一点。\n");
     body
@@ -868,16 +790,11 @@ pub fn build_fanout_prompt(
     turn_num: u64,
     user_input: &str,
     data_pack: Option<&str>,
-    seat_memory_section: Option<&str>,
 ) -> String {
     let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · 默认提问]\n");
     if let Some(data_pack) = data_pack.map(str::trim).filter(|value| !value.is_empty()) {
         body.push_str("\n## 数据接入\n");
         body.push_str(data_pack);
-        body.push('\n');
-    }
-    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
-        body.push_str(mem);
         body.push('\n');
     }
     body.push_str("\n## 用户问题\n");
@@ -897,12 +814,12 @@ pub fn build_singletarget_prompt(turn_num: u64, target_label: &str, user_message
 }
 
 pub fn build_summary_prompt(
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
+    previous_turns: &[GroupChatTurn],
+    participants: &[GroupChatParticipant],
 ) -> String {
     let public_turns = previous_turns
         .iter()
-        .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
+        .filter(|turn| !matches!(turn.mode, GroupChatTurnMode::Private))
         .collect::<Vec<_>>();
     let turn_num = public_turns.len() as u64 + 1;
     let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · @summary]\n\n");
@@ -920,7 +837,7 @@ pub fn build_summary_prompt(
         body.push('\n');
         for response in &turn.responses {
             let label = participant_label(participants, &response.participant_id);
-            append_roundtable_view(
+            append_group_chat_view(
                 &mut body,
                 &label,
                 response.preview.as_deref(),
@@ -940,7 +857,7 @@ enum DebateViewStyle {
     TailEllipsis,
 }
 
-fn append_roundtable_view(
+fn append_group_chat_view(
     body: &mut String,
     label: &str,
     preview: Option<&str>,
@@ -965,7 +882,7 @@ fn append_roundtable_view(
     }
 
     let text = preview.unwrap_or("(无输出)");
-    body.push_str(&truncate_roundtable_text(text, max_chars, style));
+    body.push_str(&truncate_group_chat_text(text, max_chars, style));
     body.push('\n');
 }
 
@@ -976,7 +893,7 @@ fn is_error_status(status: &str) -> bool {
     )
 }
 
-fn truncate_roundtable_text(text: &str, max_chars: usize, style: DebateViewStyle) -> String {
+fn truncate_group_chat_text(text: &str, max_chars: usize, style: DebateViewStyle) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
     }
@@ -1003,262 +920,7 @@ fn truncate_roundtable_text(text: &str, max_chars: usize, style: DebateViewStyle
     }
 }
 
-pub fn build_driver_review_prompt(
-    request: &str,
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
-    room_memo: &str,
-    cwd: &str,
-    arena_dir: &str,
-) -> String {
-    let mut body = String::from(
-        "You are a copilot reviewer in a Driver room. Work in read-only review mode: inspect the request, reason from the provided context, and do not edit files, run commands, or change project state.",
-    );
-    body.push_str("\n\nReview request:\n");
-    body.push_str(request.trim());
-    body.push_str("\n\nStable room/run references:\n");
-    body.push_str("- CWD: ");
-    body.push_str(cwd);
-    body.push('\n');
-    body.push_str("- Arena files: ");
-    body.push_str(arena_dir);
-    body.push('\n');
-    for participant in participants {
-        body.push_str("- ");
-        body.push_str(&participant.label);
-        body.push_str(" (");
-        body.push_str(&participant.role);
-        body.push_str("): participant_id=");
-        body.push_str(&participant.id);
-        body.push_str(" run_id=");
-        body.push_str(&participant.run_id);
-        body.push('\n');
-    }
-
-    if !room_memo.trim().is_empty() {
-        body.push_str("\nRoom memo:\n");
-        body.push_str(room_memo.trim());
-        body.push('\n');
-    }
-
-    body.push_str("\nRecent public room context:\n");
-    for turn in previous_turns.iter().rev().take(8).rev() {
-        body.push_str("\nUser: ");
-        body.push_str(&turn.user_input);
-        body.push('\n');
-        for response in &turn.responses {
-            let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(" [run_id=");
-            body.push_str(&response.run_id);
-            body.push_str("]: ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
-        }
-    }
-
-    body.push_str(
-        "\nReturn review findings, risks, and concrete suggestions. Do not claim you changed files.",
-    );
-    body
-}
-
-pub fn build_research_prompt(
-    target: &RoomParticipant,
-    topic: &str,
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
-    room_memo: &str,
-) -> String {
-    let mut body = String::from(
-        "You are a researcher in a Research room. Split the shared topic with the other participants and return a structured research result.",
-    );
-    body.push_str("\n\nResearch topic:\n");
-    body.push_str(topic.trim());
-    body.push_str("\n\nYour scoped subtask:\n");
-    body.push_str("- Participant: ");
-    body.push_str(&target.label);
-    body.push_str(" (");
-    body.push_str(&target.role);
-    body.push_str(")\n");
-    body.push_str(
-        "- Investigate the topic from your own angle. Include concrete findings, evidence, risks, open questions, and recommended next steps.",
-    );
-
-    let peer_labels = participants
-        .iter()
-        .filter(|participant| participant.id != target.id)
-        .map(|participant| participant.label.as_str())
-        .collect::<Vec<_>>();
-    if !peer_labels.is_empty() {
-        body.push_str("\n- Avoid duplicating these peers when possible: ");
-        body.push_str(&peer_labels.join(", "));
-    }
-
-    if !room_memo.trim().is_empty() {
-        body.push_str("\n\nRoom memo:\n");
-        body.push_str(room_memo.trim());
-    }
-
-    body.push_str("\n\nRecent public room context:\n");
-    for turn in previous_turns
-        .iter()
-        .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
-        .rev()
-        .take(8)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        body.push_str("\nUser: ");
-        body.push_str(&turn.user_input);
-        body.push('\n');
-        for response in &turn.responses {
-            let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(": ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
-        }
-    }
-
-    body.push_str(
-        "\nReturn markdown with sections: Findings, Evidence, Risks, Open Questions, Next Steps, Arena Memory Candidates.",
-    );
-    body.push_str(
-        "\nIn Arena Memory Candidates, mark durable project knowledge as lines starting with [fact], [decision], or [lesson].",
-    );
-    body
-}
-
-fn build_research_artifact(
-    room: &crate::room::models::Room,
-    turn: &RoomTurn,
-    topic: &str,
-    generated_at: &str,
-) -> ResearchArtifact {
-    ResearchArtifact {
-        schema_version: 2,
-        room_id: room.id.clone(),
-        topic: topic.to_string(),
-        turn_id: turn.id.clone(),
-        generated_at: generated_at.to_string(),
-        results: turn
-            .responses
-            .iter()
-            .map(|response| ResearchResult {
-                participant_id: response.participant_id.clone(),
-                run_id: response.run_id.clone(),
-                label: participant_label(&room.participants, &response.participant_id),
-                status: response.status.clone(),
-                preview: response.preview.clone(),
-                error: response.error.clone(),
-            })
-            .collect(),
-        memory_candidates: extract_arena_memory_candidates(turn, generated_at),
-    }
-}
-
-fn extract_arena_memory_candidates(
-    turn: &RoomTurn,
-    generated_at: &str,
-) -> Vec<ArenaMemoryCandidate> {
-    let mut candidates = Vec::new();
-    for response in &turn.responses {
-        let text = full_response_text(response).or_else(|| response.preview.clone());
-        let Some(text) = text else {
-            continue;
-        };
-        for line in text.lines() {
-            let line = line
-                .trim()
-                .trim_start_matches("- ")
-                .trim_start_matches("* ")
-                .trim();
-            let Some((kind, text)) = parse_memory_candidate_line(line) else {
-                continue;
-            };
-            if text.is_empty() {
-                continue;
-            }
-            candidates.push(ArenaMemoryCandidate {
-                id: uuid::Uuid::new_v4().to_string(),
-                kind,
-                text: text.to_string(),
-                source_participant_id: response.participant_id.clone(),
-                source_run_id: response.run_id.clone(),
-                source_turn_id: turn.id.clone(),
-                created_at: generated_at.to_string(),
-            });
-        }
-    }
-    candidates
-}
-
-fn full_response_text(response: &RoomResponseRef) -> Option<String> {
-    if response.event_seq_end < response.event_seq_start {
-        return None;
-    }
-
-    let mut texts = Vec::new();
-
-    for event in crate::storage::events::list_bus_events(
-        &response.run_id,
-        Some(response.event_seq_start.saturating_sub(1)),
-    ) {
-        let seq = event.get("_seq").and_then(|v| v.as_u64()).unwrap_or(0);
-        if seq > response.event_seq_end {
-            continue;
-        }
-        if event.get("type").and_then(|v| v.as_str()) == Some("message_complete") {
-            if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
-                if !text.trim().is_empty() {
-                    texts.push(text.to_string());
-                }
-            }
-        }
-    }
-
-    for event in crate::storage::events::list_events(
-        &response.run_id,
-        response.event_seq_start.saturating_sub(1),
-    ) {
-        if event.seq > response.event_seq_end {
-            continue;
-        }
-        if matches!(event.event_type, crate::models::RunEventType::Assistant) {
-            if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                if !text.trim().is_empty() {
-                    texts.push(text.to_string());
-                }
-            }
-        }
-    }
-
-    if texts.is_empty() {
-        None
-    } else {
-        Some(texts.join("\n"))
-    }
-}
-
-fn parse_memory_candidate_line(line: &str) -> Option<(ArenaMemoryKind, &str)> {
-    let lower = line.to_ascii_lowercase();
-    if lower.starts_with("[fact]") {
-        return Some((ArenaMemoryKind::Fact, line[6..].trim()));
-    }
-    if lower.starts_with("[decision]") {
-        return Some((ArenaMemoryKind::Decision, line[10..].trim()));
-    }
-    if lower.starts_with("[lesson]") {
-        return Some((ArenaMemoryKind::Lesson, line[8..].trim()));
-    }
-    None
-}
-
-fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> String {
+fn participant_label(participants: &[GroupChatParticipant], participant_id: &str) -> String {
     participants
         .iter()
         .find(|participant| participant.id == participant_id)
@@ -1267,19 +929,19 @@ fn participant_label(participants: &[RoomParticipant], participant_id: &str) -> 
 }
 
 async fn active_targets(
-    participants: &[RoomParticipant],
+    participants: &[GroupChatParticipant],
     sessions: &ActorSessionMap,
-) -> Vec<RoundtableTarget> {
+) -> Vec<GroupChatTarget> {
     let map = sessions.lock().await;
     participants
         .iter()
         .filter_map(|participant| {
             let run = storage::runs::get_run(&participant.run_id)?;
             let capabilities = AgentCapabilities::for_agent(&run.agent);
-            if capabilities.stream_session && can_use_room_actor_run(&run) {
-                return map.get(&participant.run_id).map(|handle| RoundtableTarget {
+            if capabilities.stream_session && can_use_group_chat_actor_run(&run) {
+                return map.get(&participant.run_id).map(|handle| GroupChatTarget {
                     participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Actor {
+                    runtime: GroupChatTargetRuntime::Actor {
                         cmd_tx: handle.cmd_tx.clone(),
                     },
                 });
@@ -1287,41 +949,9 @@ async fn active_targets(
             if capabilities.pipe_exec
                 && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec)
             {
-                return Some(RoundtableTarget {
+                return Some(GroupChatTarget {
                     participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Pipe,
-                });
-            }
-            None
-        })
-        .collect()
-}
-
-async fn active_copilot_targets(
-    participants: &[RoomParticipant],
-    sessions: &ActorSessionMap,
-) -> Vec<RoundtableTarget> {
-    let map = sessions.lock().await;
-    participants
-        .iter()
-        .filter(|participant| participant.role == "copilot")
-        .filter_map(|participant| {
-            let run = storage::runs::get_run(&participant.run_id)?;
-            let capabilities = AgentCapabilities::for_agent(&run.agent);
-            if capabilities.stream_session && can_use_room_actor_run(&run) {
-                return map.get(&participant.run_id).map(|handle| RoundtableTarget {
-                    participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Actor {
-                        cmd_tx: handle.cmd_tx.clone(),
-                    },
-                });
-            }
-            if capabilities.pipe_exec
-                && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec)
-            {
-                return Some(RoundtableTarget {
-                    participant: participant.clone(),
-                    runtime: RoundtableTargetRuntime::Pipe,
+                    runtime: GroupChatTargetRuntime::Pipe,
                 });
             }
             None
@@ -1330,45 +960,45 @@ async fn active_copilot_targets(
 }
 
 async fn active_target_for_participant(
-    participant: RoomParticipant,
+    participant: GroupChatParticipant,
     sessions: &ActorSessionMap,
-) -> Result<RoundtableTarget, String> {
+) -> Result<GroupChatTarget, String> {
     let run = storage::runs::get_run(&participant.run_id)
         .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
     let capabilities = AgentCapabilities::for_agent(&run.agent);
-    if capabilities.stream_session && can_use_room_actor_run(&run) {
+    if capabilities.stream_session && can_use_group_chat_actor_run(&run) {
         let map = sessions.lock().await;
         let cmd_tx = map
             .get(&participant.run_id)
             .map(|handle| handle.cmd_tx.clone())
             .ok_or_else(|| {
                 format!(
-                    "Room participant {} is not attached to an active session",
+                    "GroupChat participant {} is not attached to an active session",
                     participant.label
                 )
             })?;
-        return Ok(RoundtableTarget {
+        return Ok(GroupChatTarget {
             participant,
-            runtime: RoundtableTargetRuntime::Actor { cmd_tx },
+            runtime: GroupChatTargetRuntime::Actor { cmd_tx },
         });
     }
     if capabilities.pipe_exec && matches!(run.resolved_execution_path(), ExecutionPath::PipeExec) {
-        return Ok(RoundtableTarget {
+        return Ok(GroupChatTarget {
             participant,
-            runtime: RoundtableTargetRuntime::Pipe,
+            runtime: GroupChatTargetRuntime::Pipe,
         });
     }
 
     Err(format!(
-        "Room participant {} uses agent '{}' which does not support this Room execution path",
+        "GroupChat participant {} uses agent '{}' which does not support this GroupChat execution path",
         participant.label, participant.agent
     ))
 }
 
 fn find_participant<'a>(
-    participants: &'a [RoomParticipant],
+    participants: &'a [GroupChatParticipant],
     target: &str,
-) -> Option<&'a RoomParticipant> {
+) -> Option<&'a GroupChatParticipant> {
     let normalized = target.trim().trim_start_matches('@').to_ascii_lowercase();
     participants.iter().find(|participant| {
         participant.id.eq_ignore_ascii_case(&normalized)
@@ -1379,11 +1009,11 @@ fn find_participant<'a>(
 
 /// Like `find_participant` but returns an error if multiple participants match by label.
 fn find_participant_unique<'a>(
-    participants: &'a [RoomParticipant],
+    participants: &'a [GroupChatParticipant],
     target: &str,
-) -> Result<&'a RoomParticipant, String> {
+) -> Result<&'a GroupChatParticipant, String> {
     let normalized = target.trim().trim_start_matches('@').to_ascii_lowercase();
-    let matches: Vec<&RoomParticipant> = participants
+    let matches: Vec<&GroupChatParticipant> = participants
         .iter()
         .filter(|participant| {
             participant.id.eq_ignore_ascii_case(&normalized)
@@ -1392,12 +1022,39 @@ fn find_participant_unique<'a>(
         })
         .collect();
     match matches.len() {
-        0 => Err(format!("Room participant @{target} not found")),
+        0 => Err(format!("GroupChat participant @{target} not found")),
         1 => Ok(matches[0]),
         _ => Err(format!(
             "Ambiguous participant name '{target}' — please use a unique label"
         )),
     }
+}
+
+/// Scan a turn's response previews for `@Label` mentions of participants
+/// that haven't already been chained to. Returns the first valid mention.
+fn extract_first_mention(
+    turn: &GroupChatTurn,
+    participants: &[GroupChatParticipant],
+    exclude_ids: &HashSet<String>,
+) -> Option<String> {
+    for response in &turn.responses {
+        let text = response.preview.as_deref()?;
+        for word in text.split_whitespace() {
+            let candidate = word.trim_start_matches('@');
+            if candidate == word || candidate.is_empty() {
+                continue;
+            }
+            let normalized = candidate.to_ascii_lowercase();
+            let matched = participants.iter().find(|p| {
+                p.label.to_ascii_lowercase() == normalized
+                    && !exclude_ids.contains(&p.id)
+            });
+            if let Some(participant) = matched {
+                return Some(participant.label.clone());
+            }
+        }
+    }
+    None
 }
 
 fn outcome_status_label(status: TurnOutcomeStatus) -> &'static str {
@@ -1518,12 +1175,12 @@ mod tests {
     use crate::agent::adapter::ActorSessionMap;
     use crate::agent::session_actor::{ActorCommand, SessionActorHandle};
     use crate::models::RunStatus;
-    use crate::room::models::RoomResponseRef;
+    use crate::group_chat::models::GroupChatResponseRef;
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    fn participant(id: &str, label: &str) -> RoomParticipant {
-        RoomParticipant {
+    fn participant(id: &str, label: &str) -> GroupChatParticipant {
+        GroupChatParticipant {
             id: id.to_string(),
             run_id: format!("run-{id}"),
             agent: "claude".to_string(),
@@ -1533,15 +1190,15 @@ mod tests {
         }
     }
 
-    fn public_turn() -> RoomTurn {
-        RoomTurn {
+    fn public_turn() -> GroupChatTurn {
+        GroupChatTurn {
             id: "turn-1".to_string(),
             idx: 1,
-            mode: RoomTurnMode::Fanout,
+            mode: GroupChatTurnMode::Fanout,
             user_input: "Which API should we use?".to_string(),
             target_participant_ids: vec!["p1".to_string(), "p2".to_string()],
             responses: vec![
-                RoomResponseRef {
+                GroupChatResponseRef {
                     participant_id: "p1".to_string(),
                     run_id: "run-p1".to_string(),
                     event_seq_start: 1,
@@ -1550,7 +1207,7 @@ mod tests {
                     status: "complete".to_string(),
                     error: None,
                 },
-                RoomResponseRef {
+                GroupChatResponseRef {
                     participant_id: "p2".to_string(),
                     run_id: "run-p2".to_string(),
                     event_seq_start: 4,
@@ -1756,35 +1413,35 @@ mod tests {
     }
 
     #[test]
-    fn parses_roundtable_commands() {
+    fn parses_group_chat_commands() {
         assert_eq!(
-            parse_roundtable_command("Compare the APIs"),
-            RoundtableCommand::Fanout {
+            parse_group_chat_command("Compare the APIs"),
+            GroupChatCommand::Fanout {
                 input: "Compare the APIs".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("@debate focus on risks"),
-            RoundtableCommand::Debate {
+            parse_group_chat_command("@debate focus on risks"),
+            GroupChatCommand::Debate {
                 input: "focus on risks".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("@summary @Alice"),
-            RoundtableCommand::Summary {
+            parse_group_chat_command("@summary @Alice"),
+            GroupChatCommand::Summary {
                 target: "Alice".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("@Alice check this"),
-            RoundtableCommand::SingleTarget {
+            parse_group_chat_command("@Alice check this"),
+            GroupChatCommand::SingleTarget {
                 target: "Alice".to_string(),
                 message: "check this".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("/dm @Alice check this privately"),
-            RoundtableCommand::Private {
+            parse_group_chat_command("/dm @Alice check this privately"),
+            GroupChatCommand::Private {
                 target: "Alice".to_string(),
                 message: "check this privately".to_string()
             }
@@ -1794,42 +1451,19 @@ mod tests {
     #[test]
     fn command_words_do_not_capture_similarly_named_singletargets() {
         assert_eq!(
-            parse_roundtable_command("@debateAlice check this"),
-            RoundtableCommand::SingleTarget {
+            parse_group_chat_command("@debateAlice check this"),
+            GroupChatCommand::SingleTarget {
                 target: "debateAlice".to_string(),
                 message: "check this".to_string()
             }
         );
         assert_eq!(
-            parse_roundtable_command("@summaryBot check this"),
-            RoundtableCommand::SingleTarget {
+            parse_group_chat_command("@summaryBot check this"),
+            GroupChatCommand::SingleTarget {
                 target: "summaryBot".to_string(),
                 message: "check this".to_string()
             }
         );
-    }
-
-    #[test]
-    fn parses_driver_review_commands() {
-        assert_eq!(
-            parse_driver_command("/review @Alice @Bob check the patch").unwrap(),
-            DriverCommand::Review {
-                targets: vec!["Alice".to_string(), "Bob".to_string()],
-                input: "check the patch".to_string(),
-            }
-        );
-        assert_eq!(
-            parse_driver_command("/review check the patch").unwrap(),
-            DriverCommand::Review {
-                targets: vec![],
-                input: "check the patch".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn driver_requires_explicit_review_command() {
-        assert!(parse_driver_command("check the patch").is_err());
     }
 
     #[test]
@@ -1839,7 +1473,6 @@ mod tests {
             "challenge assumptions",
             &[public_turn()],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
-            None,
         );
 
         assert!(prompt.contains("challenge assumptions"));
@@ -1849,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn fanout_prompt_uses_roundtable_header_and_independent_instruction() {
+    fn fanout_prompt_uses_group_chat_header_and_independent_instruction() {
         let prompt = build_fanout_prompt(2, "Compare the APIs", None);
 
         assert!(prompt.contains("第 2 轮"));
@@ -1868,7 +1501,7 @@ mod tests {
             "p4".to_string(),
         ];
         turn.responses[1].preview = Some("x".repeat(5_200));
-        turn.responses.push(RoomResponseRef {
+        turn.responses.push(GroupChatResponseRef {
             participant_id: "p3".to_string(),
             run_id: "run-p3".to_string(),
             event_seq_start: 7,
@@ -1888,7 +1521,6 @@ mod tests {
                 participant("p3", "Cara"),
                 participant("p4", "Dana"),
             ],
-            None,
         );
 
         assert!(prompt.contains("## 另两家上一轮观点"));
@@ -1902,13 +1534,13 @@ mod tests {
     #[test]
     fn debate_prompt_uses_latest_fanout_or_debate_turn_not_summary() {
         let fanout = public_turn();
-        let summary = RoomTurn {
+        let summary = GroupChatTurn {
             id: "turn-summary".to_string(),
             idx: 2,
-            mode: RoomTurnMode::Summary,
+            mode: GroupChatTurnMode::Summary,
             user_input: "@summary @Alice".to_string(),
             target_participant_ids: vec!["p1".to_string()],
-            responses: vec![RoomResponseRef {
+            responses: vec![GroupChatResponseRef {
                 participant_id: "p1".to_string(),
                 run_id: "run-p1".to_string(),
                 event_seq_start: 7,
@@ -1926,7 +1558,6 @@ mod tests {
             "",
             &[fanout, summary],
             &[participant("p1", "Alice"), participant("p2", "Bob")],
-            None,
         );
 
         assert!(prompt.contains("Bob answer"));
@@ -1945,38 +1576,14 @@ mod tests {
     }
 
     #[test]
-    fn driver_review_prompt_includes_readonly_context_and_run_refs() {
-        let mut driver = participant("driver", "Driver");
-        driver.role = "driver".to_string();
-        let mut reviewer = participant("reviewer", "Reviewer");
-        reviewer.role = "copilot".to_string();
-        let prompt = build_driver_review_prompt(
-            "Check the patch",
-            &[public_turn()],
-            &[driver, reviewer],
-            "Room memo",
-            "D:/work/app",
-            "D:/data/rooms/room-1/.arena",
-        );
-
-        assert!(prompt.contains("read-only"));
-        assert!(prompt.contains("Check the patch"));
-        assert!(prompt.contains("Room memo"));
-        assert!(prompt.contains("run-driver"));
-        assert!(prompt.contains("run-reviewer"));
-        assert!(prompt.contains(".arena"));
-        assert!(prompt.contains("Which API should we use?"));
-    }
-
-    #[test]
     fn fanout_sends_same_message_to_active_peers_and_records_public_turn() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1996,7 +1603,7 @@ mod tests {
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "Compare options", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "Compare options", &sessions).await }
                 });
 
                 for rx in [&mut rx_a, &mut rx_b] {
@@ -2010,10 +1617,10 @@ mod tests {
                 }
 
                 let turn = send_task.await.unwrap().unwrap();
-                assert_eq!(turn.mode, RoomTurnMode::Fanout);
+                assert_eq!(turn.mode, GroupChatTurnMode::Fanout);
                 assert_eq!(turn.responses.len(), 2);
 
-                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
+                let stored = crate::storage::group_chats::list_group_chat_public_turns(&room.id).unwrap();
                 assert_eq!(stored.len(), 1);
                 assert_eq!(stored[0].user_input, "Compare options");
             });
@@ -2023,12 +1630,12 @@ mod tests {
     #[test]
     fn fanout_dispatches_to_all_targets_before_waiting_for_completion() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2037,7 +1644,7 @@ mod tests {
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "Compare options", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "Compare options", &sessions).await }
                 });
 
                 let first = rx_a.recv().await.unwrap();
@@ -2070,20 +1677,20 @@ mod tests {
     #[test]
     fn explicit_target_without_active_actor_returns_error_without_turn() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
-            crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
                 let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-                let error = run_roundtable_turn(&room.id, "@Alice check privately", &sessions)
+                let error = run_group_chat_turn(&room.id, "@Alice check privately", &sessions)
                     .await
                     .unwrap_err();
 
                 assert!(error.contains("not attached to an active session"));
-                assert!(crate::storage::rooms::list_private_turns(&room.id)
+                assert!(crate::storage::group_chats::list_group_chat_private_turns(&room.id)
                     .unwrap()
                     .is_empty());
             });
@@ -2093,9 +1700,9 @@ mod tests {
     #[test]
     fn concurrent_room_sends_allocate_unique_turn_indexes() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2110,12 +1717,12 @@ mod tests {
                 let first_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "First", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "First", &sessions).await }
                 });
                 let second_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "Second", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "Second", &sessions).await }
                 });
 
                 tokio::task::yield_now().await;
@@ -2152,7 +1759,7 @@ mod tests {
                 first_task.await.unwrap().unwrap();
                 second_task.await.unwrap().unwrap();
 
-                let turns = crate::storage::rooms::list_public_turns(&room.id).unwrap();
+                let turns = crate::storage::group_chats::list_group_chat_public_turns(&room.id).unwrap();
                 let mut indexes = turns.iter().map(|turn| turn.idx).collect::<Vec<_>>();
                 indexes.sort_unstable();
                 assert_eq!(indexes, vec![1, 2]);
@@ -2164,18 +1771,18 @@ mod tests {
     fn shared_run_across_rooms_is_not_sent_concurrently() {
         with_temp_data_dir(|| {
             let room_a =
-                crate::storage::rooms::create_room("Room A".into(), "".into(), None).unwrap();
+                crate::storage::group_chats::create_group_chat("Room A".into(), None).unwrap();
             let room_b =
-                crate::storage::rooms::create_room("Room B".into(), "".into(), None).unwrap();
+                crate::storage::group_chats::create_group_chat("Room B".into(), None).unwrap();
             create_run("run-shared");
-            crate::storage::rooms::attach_run(
+            crate::storage::group_chats::attach_group_chat_run(
                 &room_a.id,
                 "run-shared",
                 Some("Shared".to_string()),
                 None,
             )
             .unwrap();
-            crate::storage::rooms::attach_run(
+            crate::storage::group_chats::attach_group_chat_run(
                 &room_b.id,
                 "run-shared",
                 Some("Shared".to_string()),
@@ -2195,12 +1802,12 @@ mod tests {
                 let first_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room_a.id.clone();
-                    async move { run_roundtable_turn(&room_id, "First", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "First", &sessions).await }
                 });
                 let second_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room_b.id.clone();
-                    async move { run_roundtable_turn(&room_id, "Second", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "Second", &sessions).await }
                 });
 
                 let first = rx.recv().await.unwrap();
@@ -2234,26 +1841,26 @@ mod tests {
     #[test]
     fn debate_sends_peer_context_excluding_each_targets_own_response() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
                 .unwrap();
-            let room = crate::storage::rooms::get_room(&room.id).unwrap();
+            let room = crate::storage::group_chats::get_group_chat(&room.id).unwrap();
             let alice_id = room.participants[0].id.clone();
             let bob_id = room.participants[1].id.clone();
-            crate::storage::rooms::append_public_turn(
+            crate::storage::group_chats::append_group_chat_public_turn(
                 &room.id,
-                &RoomTurn {
+                &GroupChatTurn {
                     id: "turn-1".to_string(),
                     idx: 1,
-                    mode: RoomTurnMode::Fanout,
+                    mode: GroupChatTurnMode::Fanout,
                     user_input: "Which API should we use?".to_string(),
                     target_participant_ids: vec![alice_id.clone(), bob_id.clone()],
                     responses: vec![
-                        RoomResponseRef {
+                        GroupChatResponseRef {
                             participant_id: alice_id,
                             run_id: "run-p1".to_string(),
                             event_seq_start: 1,
@@ -2262,7 +1869,7 @@ mod tests {
                             status: "complete".to_string(),
                             error: None,
                         },
-                        RoomResponseRef {
+                        GroupChatResponseRef {
                             participant_id: bob_id,
                             run_id: "run-p2".to_string(),
                             event_seq_start: 3,
@@ -2285,7 +1892,7 @@ mod tests {
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "@debate risks", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "@debate risks", &sessions).await }
                 });
 
                 let alice_prompt = receive_text(&mut rx_a).await;
@@ -2388,14 +1995,14 @@ mod tests {
     #[test]
     fn summary_routes_to_exactly_one_target() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::append_public_turn(&room.id, &public_turn()).unwrap();
+            crate::storage::group_chats::append_group_chat_public_turn(&room.id, &public_turn()).unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
@@ -2404,7 +2011,7 @@ mod tests {
                 let send_task = tokio::spawn({
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
-                    async move { run_roundtable_turn(&room_id, "@summary @Alice", &sessions).await }
+                    async move { run_group_chat_turn(&room_id, "@summary @Alice", &sessions).await }
                 });
 
                 let summary_prompt = receive_text(&mut rx_a).await;
@@ -2413,7 +2020,7 @@ mod tests {
                 assert!(summary_prompt.contains("Summarize"));
                 assert!(summary_prompt.contains("Which API should we use?"));
                 assert!(rx_b.try_recv().is_err());
-                assert_eq!(turn.mode, RoomTurnMode::Summary);
+                assert_eq!(turn.mode, GroupChatTurnMode::Summary);
                 assert_eq!(turn.target_participant_ids.len(), 1);
             });
         });
@@ -2422,12 +2029,12 @@ mod tests {
     #[test]
     fn private_message_writes_private_store_only() {
         with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room("Room".into(), "".into(), None).unwrap();
+            let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::rooms::attach_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
                 .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2438,7 +2045,7 @@ mod tests {
                     let sessions = sessions.clone();
                     let room_id = room.id.clone();
                     async move {
-                        run_roundtable_turn(&room_id, "@Alice check privately", &sessions).await
+                        run_group_chat_turn(&room_id, "@Alice check privately", &sessions).await
                     }
                 });
 
@@ -2447,12 +2054,12 @@ mod tests {
 
                 assert_eq!(private_prompt, "check privately");
                 assert!(rx_b.try_recv().is_err());
-                assert_eq!(turn.mode, RoomTurnMode::Private);
-                assert!(crate::storage::rooms::list_public_turns(&room.id)
+                assert_eq!(turn.mode, GroupChatTurnMode::Private);
+                assert!(crate::storage::group_chats::list_group_chat_public_turns(&room.id)
                     .unwrap()
                     .is_empty());
                 assert_eq!(
-                    crate::storage::rooms::list_private_turns(&room.id)
+                    crate::storage::group_chats::list_group_chat_private_turns(&room.id)
                         .unwrap()
                         .len(),
                     1
@@ -2461,431 +2068,4 @@ mod tests {
         });
     }
 
-    #[test]
-    fn driver_review_routes_to_copilots_and_records_review_turn() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Driver Room".into(),
-                "Review implementation".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Driver,
-            )
-            .unwrap();
-            create_run("run-driver");
-            create_run("run-a");
-            create_run("run-b");
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-driver",
-                Some("Lead".to_string()),
-                Some("driver".to_string()),
-            )
-            .unwrap();
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-a",
-                Some("Alice".to_string()),
-                Some("copilot".to_string()),
-            )
-            .unwrap();
-            crate::storage::rooms::attach_run(
-                &room.id,
-                "run-b",
-                Some("Bob".to_string()),
-                Some("copilot".to_string()),
-            )
-            .unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-                let (tx_driver, mut rx_driver) = tokio::sync::mpsc::channel(1);
-                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
-                let (tx_b, mut rx_b) = tokio::sync::mpsc::channel(1);
-                sessions.lock().await.insert(
-                    "run-driver".to_string(),
-                    actor_handle("run-driver", tx_driver),
-                );
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-b".to_string(), actor_handle("run-b", tx_b));
-
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_driver_turn(&room_id, "/review @Alice patch risk", &sessions).await
-                    }
-                });
-
-                let alice_prompt = receive_text(&mut rx_a).await;
-                let turn = send_task.await.unwrap().unwrap();
-
-                assert!(alice_prompt.contains("read-only"));
-                assert!(alice_prompt.contains("patch risk"));
-                assert!(rx_driver.try_recv().is_err());
-                assert!(rx_b.try_recv().is_err());
-                assert_eq!(turn.mode, RoomTurnMode::Review);
-                assert_eq!(turn.target_participant_ids.len(), 1);
-
-                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
-                assert_eq!(stored.len(), 1);
-                assert_eq!(stored[0].mode, RoomTurnMode::Review);
-
-                let arena = crate::storage::data_dir()
-                    .join("rooms")
-                    .join(&room.id)
-                    .join(".arena");
-                assert!(arena.join("context.md").exists());
-                assert!(arena.join("state.md").exists());
-                assert!(arena.join("memory").exists());
-                let driver_mcp = arena.join("driver-mcp.json");
-                assert!(driver_mcp.exists());
-                let driver_mcp_text = std::fs::read_to_string(driver_mcp).unwrap();
-                assert!(driver_mcp_text.contains("Review implementation"));
-                assert!(driver_mcp_text.contains("patch risk"));
-            });
-        });
-    }
-
-    #[test]
-    fn research_prompt_frames_participant_scoped_subtask() {
-        let mut alice = participant("p1", "Alice");
-        alice.role = "researcher".to_string();
-        let prompt = build_research_prompt(
-            &alice,
-            "Compare local vector database options",
-            &[public_turn()],
-            &[alice.clone(), participant("p2", "Bob")],
-            "Prefer local-first tools.",
-        );
-
-        assert!(prompt.contains("Research topic"));
-        assert!(prompt.contains("Compare local vector database options"));
-        assert!(prompt.contains("Alice"));
-        assert!(prompt.contains("researcher"));
-        assert!(prompt.contains("structured research result"));
-        assert!(prompt.contains("Prefer local-first tools."));
-        assert!(prompt.contains("Which API should we use?"));
-        assert!(prompt.contains("Arena Memory Candidates"));
-        assert!(prompt.contains("[fact]"));
-        assert!(prompt.contains("[decision]"));
-        assert!(prompt.contains("[lesson]"));
-    }
-
-    #[test]
-    fn research_artifact_extracts_arena_memory_candidates_from_marked_previews() {
-        let alice = participant("p1", "Alice");
-        let room = crate::room::models::Room {
-            id: "room-1".to_string(),
-            kind: RoomKind::Research,
-            name: "Research Room".to_string(),
-            description: String::new(),
-            cwd: Some("D:/work/app".to_string()),
-            memo: String::new(),
-            participants: vec![alice.clone()],
-            seat_memories: std::collections::HashMap::new(),
-            seat_memory_inbox: std::collections::HashMap::new(),
-            seat_profile: None,
-            last_checkpoint_turn: 0,
-            last_checkpoint_at: None,
-            created_at: "2026-05-02T00:00:00Z".to_string(),
-            updated_at: "2026-05-02T00:00:00Z".to_string(),
-        };
-        let turn = RoomTurn {
-            id: "turn-1".to_string(),
-            idx: 1,
-            mode: RoomTurnMode::Research,
-            user_input: "Compare options".to_string(),
-            target_participant_ids: vec![alice.id.clone()],
-            responses: vec![RoomResponseRef {
-                participant_id: alice.id.clone(),
-                run_id: alice.run_id.clone(),
-                event_seq_start: 1,
-                event_seq_end: 2,
-                preview: Some(
-                    "[fact] SQLite is already embedded.\n- [decision] Prefer local storage first.\n* [lesson] Keep snapshots append-only."
-                        .to_string(),
-                ),
-                status: "complete".to_string(),
-                error: None,
-            }],
-            started_at: "2026-05-02T00:00:00Z".to_string(),
-            completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-        };
-
-        let artifact =
-            build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-        assert_eq!(artifact.schema_version, 2);
-        assert_eq!(artifact.memory_candidates.len(), 3);
-        assert_eq!(artifact.memory_candidates[0].kind, ArenaMemoryKind::Fact);
-        assert_eq!(
-            artifact.memory_candidates[1].text,
-            "Prefer local storage first."
-        );
-        assert_eq!(
-            artifact.memory_candidates[2].source_turn_id,
-            "turn-1".to_string()
-        );
-    }
-
-    #[test]
-    fn research_artifact_extracts_memory_candidates_from_full_response_events() {
-        with_temp_data_dir(|| {
-            create_run("run-p1");
-            let alice = participant("p1", "Alice");
-            let room = crate::room::models::Room {
-                id: "room-1".to_string(),
-                kind: RoomKind::Research,
-                name: "Research Room".to_string(),
-                description: String::new(),
-                cwd: Some("D:/work/app".to_string()),
-                memo: String::new(),
-                participants: vec![alice.clone()],
-                seat_memories: std::collections::HashMap::new(),
-                seat_memory_inbox: std::collections::HashMap::new(),
-                seat_profile: None,
-                last_checkpoint_turn: 0,
-                last_checkpoint_at: None,
-                created_at: "2026-05-02T00:00:00Z".to_string(),
-                updated_at: "2026-05-02T00:00:00Z".to_string(),
-            };
-            let full_text = format!(
-                "{}\n\nArena Memory Candidates\n[fact] SQLite is already embedded.",
-                "Introductory research context. ".repeat(8)
-            );
-            let event = crate::storage::events::append_event(
-                &alice.run_id,
-                crate::models::RunEventType::Assistant,
-                serde_json::json!({ "text": full_text }),
-            )
-            .unwrap();
-            let turn = RoomTurn {
-                id: "turn-1".to_string(),
-                idx: 1,
-                mode: RoomTurnMode::Research,
-                user_input: "Compare options".to_string(),
-                target_participant_ids: vec![alice.id.clone()],
-                responses: vec![RoomResponseRef {
-                    participant_id: alice.id.clone(),
-                    run_id: alice.run_id.clone(),
-                    event_seq_start: event.seq,
-                    event_seq_end: event.seq,
-                    preview: Some("Introductory research context.".to_string()),
-                    status: "complete".to_string(),
-                    error: None,
-                }],
-                started_at: "2026-05-02T00:00:00Z".to_string(),
-                completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-            };
-
-            let artifact =
-                build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-            assert_eq!(artifact.memory_candidates.len(), 1);
-            assert_eq!(
-                artifact.memory_candidates[0].text,
-                "SQLite is already embedded."
-            );
-        });
-    }
-
-    #[test]
-    fn research_artifact_extracts_memory_candidates_from_bus_message_complete_events() {
-        with_temp_data_dir(|| {
-            create_run("run-p1");
-            let alice = participant("p1", "Alice");
-            let writer = crate::storage::events::EventWriter::new();
-            crate::storage::events::persist_bus_event(
-                &writer,
-                &alice.run_id,
-                &crate::models::BusEvent::MessageComplete {
-                    run_id: alice.run_id.clone(),
-                    message_id: "msg-1".to_string(),
-                    text: format!(
-                        "{}\n\nArena Memory Candidates\n[decision] Keep research artifacts append-only.",
-                        "Detailed findings before candidates. ".repeat(8)
-                    ),
-                    parent_tool_use_id: None,
-                    model: None,
-                    stop_reason: None,
-                    message_usage: None,
-                },
-            )
-            .unwrap();
-            let room = crate::room::models::Room {
-                id: "room-1".to_string(),
-                kind: RoomKind::Research,
-                name: "Research Room".to_string(),
-                description: String::new(),
-                cwd: Some("D:/work/app".to_string()),
-                memo: String::new(),
-                participants: vec![alice.clone()],
-                seat_memories: std::collections::HashMap::new(),
-                seat_memory_inbox: std::collections::HashMap::new(),
-                seat_profile: None,
-                last_checkpoint_turn: 0,
-                last_checkpoint_at: None,
-                created_at: "2026-05-02T00:00:00Z".to_string(),
-                updated_at: "2026-05-02T00:00:00Z".to_string(),
-            };
-            let turn = RoomTurn {
-                id: "turn-1".to_string(),
-                idx: 1,
-                mode: RoomTurnMode::Research,
-                user_input: "Compare options".to_string(),
-                target_participant_ids: vec![alice.id.clone()],
-                responses: vec![RoomResponseRef {
-                    participant_id: alice.id.clone(),
-                    run_id: alice.run_id.clone(),
-                    event_seq_start: 1,
-                    event_seq_end: 1,
-                    preview: Some("Detailed findings before candidates.".to_string()),
-                    status: "complete".to_string(),
-                    error: None,
-                }],
-                started_at: "2026-05-02T00:00:00Z".to_string(),
-                completed_at: Some("2026-05-02T00:00:01Z".to_string()),
-            };
-
-            let artifact =
-                build_research_artifact(&room, &turn, "Compare options", "2026-05-02T00:00:01Z");
-
-            assert_eq!(artifact.memory_candidates.len(), 1);
-            assert_eq!(
-                artifact.memory_candidates[0].kind,
-                ArenaMemoryKind::Decision
-            );
-            assert_eq!(
-                artifact.memory_candidates[0].text,
-                "Keep research artifacts append-only."
-            );
-        });
-    }
-
-    #[test]
-    fn research_turn_fans_out_and_writes_structured_artifact() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "Compare approaches".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            crate::storage::rooms::update_memo(&room.id, "Prefer local-first tools.".to_string())
-                .unwrap();
-            create_run("run-a");
-            create_run("run-b");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
-                .unwrap();
-            crate::storage::rooms::attach_run(&room.id, "run-b", Some("Bob".to_string()), None)
-                .unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let (sessions, mut rx_a, mut rx_b) = sessions_for_two_runs("run-a", "run-b").await;
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_research_turn(
-                            &room_id,
-                            "Compare local vector database options",
-                            &sessions,
-                        )
-                        .await
-                    }
-                });
-
-                let alice_prompt = receive_text(&mut rx_a).await;
-                let bob_prompt = receive_text(&mut rx_b).await;
-                let turn = send_task.await.unwrap().unwrap();
-
-                assert!(alice_prompt.contains("Compare local vector database options"));
-                assert!(alice_prompt.contains("Alice"));
-                assert!(bob_prompt.contains("Compare local vector database options"));
-                assert!(bob_prompt.contains("Bob"));
-                assert_ne!(alice_prompt, bob_prompt);
-                assert_eq!(turn.mode, RoomTurnMode::Research);
-                assert_eq!(turn.target_participant_ids.len(), 2);
-
-                let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
-                assert_eq!(stored.len(), 1);
-                assert_eq!(stored[0].mode, RoomTurnMode::Research);
-
-                let artifact = crate::storage::rooms::read_research_artifact(&room.id)
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(artifact.schema_version, 2);
-                assert_eq!(artifact.topic, "Compare local vector database options");
-                assert_eq!(artifact.turn_id, turn.id);
-                assert_eq!(artifact.results.len(), 2);
-                assert_eq!(artifact.results[0].label, "Alice");
-                assert_eq!(artifact.results[1].label, "Bob");
-                assert!(artifact.memory_candidates.is_empty());
-                assert_eq!(
-                    crate::storage::rooms::list_research_artifacts(&room.id)
-                        .unwrap()
-                        .len(),
-                    1
-                );
-            });
-        });
-    }
-
-    #[test]
-    fn research_turn_does_not_persist_public_turn_when_artifact_write_fails() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "Compare approaches".into(),
-                Some("D:/work/app".to_string()),
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            create_run("run-a");
-            crate::storage::rooms::attach_run(&room.id, "run-a", Some("Alice".to_string()), None)
-                .unwrap();
-
-            let research_path = crate::storage::data_dir()
-                .join("rooms")
-                .join(&room.id)
-                .join("research");
-            std::fs::write(&research_path, "block writes").unwrap();
-
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async move {
-                let sessions: ActorSessionMap = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-                let (tx_a, mut rx_a) = tokio::sync::mpsc::channel(1);
-                sessions
-                    .lock()
-                    .await
-                    .insert("run-a".to_string(), actor_handle("run-a", tx_a));
-
-                let send_task = tokio::spawn({
-                    let sessions = sessions.clone();
-                    let room_id = room.id.clone();
-                    async move {
-                        run_research_turn(&room_id, "Compare local storage options", &sessions)
-                            .await
-                    }
-                });
-
-                let _prompt = receive_text(&mut rx_a).await;
-                let error = send_task.await.unwrap().unwrap_err();
-
-                assert!(error.contains("research"));
-                assert!(crate::storage::rooms::list_public_turns(&room.id)
-                    .unwrap()
-                    .is_empty());
-            });
-        });
-    }
 }

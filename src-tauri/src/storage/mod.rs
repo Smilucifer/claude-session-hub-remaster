@@ -11,7 +11,7 @@ pub mod mcp_registry;
 pub mod memos;
 pub mod plugins;
 pub mod prompt_index;
-pub mod rooms;
+pub mod group_chats;
 pub mod run_index;
 pub mod runs;
 pub mod settings;
