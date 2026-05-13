@@ -51,6 +51,8 @@ import type {
   BalanceHelperSettings,
   ValidatePlatformCredentialsResponse,
   AiCharacter,
+  PlanArtifact,
+  PlanTaskInput,
 } from "./types";
 
 // Runs
@@ -247,6 +249,42 @@ export async function deleteGroupChat(id: string): Promise<void> {
 export async function cancelGroupChatTurn(roomId: string): Promise<boolean> {
   dbg("api", "cancelGroupChatTurn", roomId);
   return invoke<boolean>("cancel_group_chat_turn", { roomId });
+}
+
+// Plans
+
+export async function createPlan(
+  groupId: string,
+  title: string,
+  tasks: PlanTaskInput[],
+): Promise<PlanArtifact> {
+  dbg("api", "createPlan", { groupId, title, taskCount: tasks.length });
+  return invoke<PlanArtifact>("create_plan", { groupChatId: groupId, title, tasks });
+}
+
+export async function updatePlan(
+  planId: string,
+  title?: string,
+  tasks?: PlanTaskInput[],
+  userNotes?: string,
+): Promise<PlanArtifact> {
+  dbg("api", "updatePlan", { planId, title, taskCount: tasks?.length });
+  return invoke<PlanArtifact>("update_plan", {
+    planId,
+    title: title ?? null,
+    tasks: tasks ?? null,
+    userNotes: userNotes ?? null,
+  });
+}
+
+export async function approvePlan(planId: string): Promise<PlanArtifact> {
+  dbg("api", "approvePlan", { planId });
+  return invoke<PlanArtifact>("approve_plan", { planId });
+}
+
+export async function completePlan(planId: string): Promise<PlanArtifact> {
+  dbg("api", "completePlan", { planId });
+  return invoke<PlanArtifact>("complete_plan", { planId });
 }
 
 // AI Characters

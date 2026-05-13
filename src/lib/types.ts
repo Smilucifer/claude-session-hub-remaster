@@ -154,6 +154,36 @@ export interface GroupChatDetail {
   updated_at: string;
 }
 
+// ── Plan types ──
+
+export type PlanStatus = "draft" | "active" | "completed";
+export type TaskStatus = "todo" | "in_progress" | "done" | "blocked";
+
+export interface PlanTask {
+  id: string;
+  description: string;
+  assignee_id?: string;
+  status: TaskStatus;
+}
+
+export interface PlanArtifact {
+  id: string;
+  group_chat_id: string;
+  title: string;
+  tasks: PlanTask[];
+  status: PlanStatus;
+  user_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanTaskInput {
+  id?: string;
+  description: string;
+  assignee_id?: string;
+  status?: string;
+}
+
 export interface ImportWatermark {
   offset: number;
   mtimeNs: number;
