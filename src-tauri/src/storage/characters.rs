@@ -125,6 +125,64 @@ pub fn delete_memory_from_log(character_id: &str, memory_id: &str) -> Result<(),
     Ok(())
 }
 
+/// Atomically update a memory entry in the log under per-ID lock.
+/// Returns the updated MemoryNode.
+pub fn update_memory_in_log(
+    character_id: &str,
+    memory_id: &str,
+    content: Option<String>,
+    memory_type: Option<String>,
+    confidence: Option<f64>,
+    tags: Option<Vec<String>>,
+) -> Result<MemoryNode, String> {
+    validate_character_id(character_id)?;
+    let lock = char_lock(character_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut entries = read_log_entries_unlocked(character_id)?;
+    let idx = entries
+        .iter()
+        .position(|n| n.id == memory_id)
+        .ok_or_else(|| format!("Memory not found: {}", memory_id))?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Some(c) = content {
+        entries[idx].content = c;
+    }
+    if let Some(t) = memory_type {
+        entries[idx].memory_type = t;
+    }
+    if let Some(c) = confidence {
+        entries[idx].confidence = c;
+    }
+    if let Some(t) = tags {
+        entries[idx].tags = t;
+    }
+    entries[idx].updated_at = now;
+
+    let updated = entries[idx].clone();
+
+    // Rewrite atomically via temp file + rename
+    let path = memory_log_path(character_id);
+    let tmp_path = path.with_extension(format!("jsonl.{}.tmp", uuid::Uuid::new_v4()));
+    let mut file =
+        std::fs::File::create(&tmp_path).map_err(|e| format!("update_memory_log: create tmp: {e}"))?;
+    use std::io::Write;
+    for node in &entries {
+        let line = serde_json::to_string(node)
+            .map_err(|e| format!("update_memory_log: serialize: {e}"))?
+            + "\n";
+        file.write_all(line.as_bytes())
+            .map_err(|e| format!("update_memory_log: write: {e}"))?;
+    }
+    file.flush()
+        .map_err(|e| format!("update_memory_log: flush: {e}"))?;
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| format!("update_memory_log: rename: {e}"))?;
+
+    Ok(updated)
+}
+
 // --- Memory Graph (derived) ---
 
 fn memory_graph_path(character_id: &str) -> PathBuf {

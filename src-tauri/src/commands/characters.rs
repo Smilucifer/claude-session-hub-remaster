@@ -1,7 +1,6 @@
 use crate::group_chat::memory_graph::{compute_relevance_edges, detect_communities, detect_knowledge_gaps};
 use crate::models::{AiCharacter, AllSettings, CommunityInfo, KnowledgeGapInfo, MemoryGraphData, MemoryNode, MemorySource};
 use crate::storage;
-use std::io::Write;
 
 #[tauri::command]
 pub fn list_characters() -> Result<Vec<AiCharacter>, String> {
@@ -163,7 +162,9 @@ pub async fn create_character_memory(
     graph.nodes.push(node.clone());
     let new_edges = compute_relevance_edges(&node, &existing, &graph.edges);
     graph.edges.extend(new_edges);
-    let _ = storage::characters::save_memory_graph(&character_id, &graph);
+    if let Err(e) = storage::characters::save_memory_graph(&character_id, &graph) {
+        log::warn!("[characters] save_memory_graph failed for {}: {}", character_id, e);
+    }
 
     // 3. LanceDB upsert (fire-and-forget if embedding fails)
     if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(&content).await {
@@ -187,37 +188,14 @@ pub async fn update_character_memory(
     confidence: Option<f64>,
     tags: Option<Vec<String>>,
 ) -> Result<MemoryNode, String> {
-    let mut entries = storage::characters::read_all_memory_log_entries(&character_id)?;
-    let idx = entries
-        .iter()
-        .position(|n| n.id == memory_id)
-        .ok_or("Memory not found")?;
-
-    let now = chrono::Utc::now().to_rfc3339();
-    if let Some(ref c) = content {
-        entries[idx].content = c.clone();
-    }
-    if let Some(t) = memory_type {
-        entries[idx].memory_type = t;
-    }
-    if let Some(c) = confidence {
-        entries[idx].confidence = c;
-    }
-    if let Some(t) = tags {
-        entries[idx].tags = t;
-    }
-    entries[idx].updated_at = now;
-
-    let updated = entries[idx].clone();
-
-    // Rewrite log
-    let path = storage::characters::memory_log_path(&character_id);
-    let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
-    for node in &entries {
-        let line = serde_json::to_string(node).map_err(|e| e.to_string())? + "\n";
-        file.write_all(line.as_bytes())
-            .map_err(|e| e.to_string())?;
-    }
+    let updated = storage::characters::update_memory_in_log(
+        &character_id,
+        &memory_id,
+        content.clone(),
+        memory_type,
+        confidence,
+        tags,
+    )?;
 
     // Update vector if content changed
     if let Some(ref c) = content {
@@ -226,7 +204,7 @@ pub async fn update_character_memory(
                 .await;
         if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(c).await {
             let _ = crate::commands::vectorstore::vector_upsert(
-                character_id.clone(),
+                character_id,
                 memory_id,
                 embedding_vec,
             )
