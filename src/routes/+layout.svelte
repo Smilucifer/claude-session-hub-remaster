@@ -12,6 +12,9 @@
     listMemoryFiles,
     softDeleteRuns,
     stopSession,
+    listGroupChats,
+    listGroupChatRunIndex,
+    createGroupChat,
   } from "$lib/api";
   import ProjectFolderItem from "$lib/components/ProjectFolderItem.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
@@ -30,6 +33,7 @@
     PromptFavorite,
     PromptSearchResult,
     MemoryFileCandidate,
+    GroupChatSummary,
   } from "$lib/types";
   import { cwdDisplayLabel, truncate, snippetAround, relativeTime } from "$lib/utils/format";
   import { filterVisibleCandidates } from "$lib/utils/memory-helpers";
@@ -140,6 +144,15 @@
   // ── Folder tree state ──
   let expandedProjects = $state<Set<string>>(new Set());
   let runsLoadSucceededOnce = $state(false);
+
+  // ── Group chat sidebar state ──
+  let groupChats = $state<GroupChatSummary[]>([]);
+  let groupChatRunIndexMap = $state<Map<string, string[]>>(new Map());
+  let groupChatsExpanded = $state(true);
+  let showGroupChatCreateDialog = $state(false);
+  let groupChatCreateName = $state("");
+  let groupChatCreateCwd = $state("");
+  let groupChatCreating = $state(false);
 
   // ── Deep search (backend full-text) ──
   let searchResults = $state<PromptSearchResult[]>([]);
@@ -468,6 +481,78 @@
     }
   }
 
+  async function loadGroupChats() {
+    try {
+      const [chats, runIndex] = await Promise.all([
+        listGroupChats(),
+        listGroupChatRunIndex(),
+      ]);
+      groupChats = chats.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      const map = new Map<string, string[]>();
+      for (const entry of runIndex) {
+        map.set(entry.room_id, entry.run_ids);
+      }
+      groupChatRunIndexMap = map;
+    } catch {
+      // Silently fail
+    }
+  }
+
+  function openGroupChatCreateDialog() {
+    groupChatCreateName = "";
+    groupChatCreateCwd = "";
+    showGroupChatCreateDialog = true;
+  }
+
+  async function pickGroupChatCwd() {
+    if (getTransport().isDesktop()) {
+      try {
+        const { open } = await import("@tauri-apps/plugin-dialog");
+        const selected = await open({ directory: true, title: t("groupChat_selectProjectFolder") });
+        if (selected) {
+          groupChatCreateCwd = normalizeCwd(selected as string) || "";
+        }
+      } catch (e) {
+        dbgWarn("layout", "failed to open folder dialog for group chat:", e);
+      }
+    } else {
+      const input = window.prompt(t("groupChat_selectProjectFolder"), groupChatCreateCwd || "/");
+      if (input) {
+        groupChatCreateCwd = normalizeCwd(input.trim()) || "";
+      }
+    }
+  }
+
+  async function submitGroupChatCreate() {
+    if (!groupChatCreateName.trim()) return;
+    if (groupChatCreating) return;
+    groupChatCreating = true;
+    try {
+      const detail = await createGroupChat(
+        groupChatCreateName.trim(),
+        groupChatCreateCwd || undefined,
+      );
+      showGroupChatCreateDialog = false;
+      // Reload to populate the run index map, then navigate
+      await loadGroupChats();
+      const runIds = groupChatRunIndexMap.get(detail.id);
+      if (runIds && runIds.length > 0) {
+        goto(`/chat?run=${runIds[0]}`);
+      }
+    } catch (e) {
+      dbgWarn("layout", "failed to create group chat:", e);
+    } finally {
+      groupChatCreating = false;
+    }
+  }
+
+  function navigateToGroupChat(chat: GroupChatSummary) {
+    const runIds = groupChatRunIndexMap.get(chat.id);
+    if (runIds && runIds.length > 0) {
+      goto(`/chat?run=${runIds[0]}`);
+    }
+  }
+
   // ── Deep search ──
 
   function onDeepQueryInput() {
@@ -589,6 +674,7 @@
     loadRuns();
     loadSettings();
     loadSidebarFavorites();
+    loadGroupChats();
     loadAgentSettingsCache();
 
     // Fetch app version for bottom-left display
@@ -742,6 +828,7 @@
     // Immediate refresh when chat page signals a status change
     function onRunsChanged() {
       loadRuns();
+      loadGroupChats();
       // Invalidate git cache unconditionally; if currently viewing Git tab on Explorer,
       // reload immediately — otherwise lazy $effect picks it up on next visit.
       ++_gitSeq; // cancel in-flight request so it can't backfill _gitLoadedCwd
@@ -850,6 +937,7 @@
       .listen("clawgo:status-changed", (payload: unknown) => {
         dbg("layout", "status-changed", payload);
         loadRuns();
+        loadGroupChats();
       })
       .then((fn) => {
         if (destroyed) {
@@ -1676,6 +1764,22 @@
               stroke-linejoin="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg
             >
           </button>
+          <button
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors duration-150"
+            onclick={openGroupChatCreateDialog}
+            title={t("sidebar_newGroupChat")}
+          >
+            <svg
+              class="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg
+            >
+          </button>
         </div>
 
         {#if isPluginsPage}
@@ -2306,6 +2410,65 @@
                       : () => newChatInFolder(folder.cwd)}
                   />
                 {/each}
+
+                <!-- Group Chats section -->
+                {#if groupChats.length > 0}
+                  <div class="mt-2 border-t border-sidebar-border pt-2">
+                    <button
+                      class="flex w-full items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground hover:text-sidebar-foreground transition-colors"
+                      onclick={() => (groupChatsExpanded = !groupChatsExpanded)}
+                    >
+                      <svg
+                        class="h-3 w-3 shrink-0 transition-transform duration-150 {groupChatsExpanded
+                          ? 'rotate-90'
+                          : ''}"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg
+                      >
+                      <span>{t("sidebar_groupChats")}</span>
+                      <span class="ml-auto text-[10px] text-muted-foreground/60"
+                        >{groupChats.length}</span
+                      >
+                    </button>
+                    {#if groupChatsExpanded}
+                      {#each groupChats as chat (chat.id)}
+                        <button
+                          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+                          onclick={() => navigateToGroupChat(chat)}
+                        >
+                          <svg
+                            class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            ><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle
+                              cx="9"
+                              cy="7"
+                              r="4"
+                            /><path
+                              d="M22 21v-2a4 4 0 0 0-3-3.87"
+                            /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg
+                          >
+                          <span class="flex-1 min-w-0 truncate">{chat.name}</span>
+                          <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                            >{chat.participant_count}</span
+                          >
+                          <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                            >{relativeTime(chat.updated_at)}</span
+                          >
+                        </button>
+                      {/each}
+                    {/if}
+                  </div>
+                {/if}
+
                 <!-- Open folder... -->
                 <button
                   class="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
@@ -2515,5 +2678,57 @@
     >
       {t("sidebar_deleteOk")}
     </button>
+  </div>
+</Modal>
+
+<Modal bind:open={showGroupChatCreateDialog} title={t("sidebar_groupChatCreate_title")}>
+  <div class="flex flex-col gap-4">
+    <div>
+      <label for="gc-create-name" class="block text-sm font-medium mb-1">{t("sidebar_groupChatCreate_name")}</label>
+      <input
+        id="gc-create-name"
+        type="text"
+        class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+        placeholder={t("groupChat_namePlaceholder")}
+        bind:value={groupChatCreateName}
+        onkeydown={(e) => {
+          if (e.key === "Enter" && groupChatCreateName.trim()) submitGroupChatCreate();
+        }}
+      />
+    </div>
+    <div>
+      <label for="gc-create-cwd" class="block text-sm font-medium mb-1">{t("groupChat_projectPathPlaceholder")}</label>
+      <div class="flex gap-2">
+        <input
+          id="gc-create-cwd"
+          type="text"
+          class="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+          placeholder={t("groupChat_projectPathUnset")}
+          value={groupChatCreateCwd}
+          readonly
+        />
+        <button
+          class="shrink-0 rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+          onclick={pickGroupChatCwd}
+        >
+          {t("sidebar_groupChatCreate_browse")}
+        </button>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-2">
+      <button
+        class="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-accent transition-colors"
+        onclick={() => (showGroupChatCreateDialog = false)}
+      >
+        {t("sidebar_groupChatCreate_cancel")}
+      </button>
+      <button
+        class="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+        disabled={!groupChatCreateName.trim() || groupChatCreating}
+        onclick={submitGroupChatCreate}
+      >
+        {groupChatCreating ? "..." : t("sidebar_groupChatCreate_create")}
+      </button>
+    </div>
   </div>
 </Modal>
