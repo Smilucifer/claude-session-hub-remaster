@@ -4,8 +4,10 @@
     GroupChatDetail,
     GroupChatParticipantDetail,
     AiCharacter,
+    PlanArtifact,
     RunStatus,
   } from "$lib/types";
+  import PlanPanel from "./PlanPanel.svelte";
   import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
   import { t } from "$lib/i18n/index.svelte";
   import { dbg, dbgWarn } from "$lib/utils/debug";
@@ -14,6 +16,7 @@
 
   // ── State ──
   let detail = $state<GroupChatDetail | null>(null);
+  let activePlan = $state<PlanArtifact | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let panelOpen = $state(true);
@@ -53,6 +56,7 @@
     error = null;
     try {
       detail = await api.getGroupChat(groupChat.room_id);
+      activePlan = await api.getPlanForGroupChat(groupChat.room_id);
     } catch (e) {
       dbgWarn("GroupChatLayout", "loadDetail failed", e);
       error = e instanceof Error ? e.message : String(e);
@@ -227,9 +231,18 @@
   async function handleSend() {
     const text = composerText.trim();
     if (!text || !detail) return;
-    dbg("GroupChatLayout", "send", { len: text.length });
+    // Prepend plan context if active plan exists and message is addressed to someone
+    let messageToSend = text;
+    if (activePlan && activePlan.status === "active" && text.startsWith("@")) {
+      const taskSummary = activePlan.tasks.length > 0
+        ? "\nActive plan tasks:\n" + activePlan.tasks.map((t) => `- ${t.description} [${t.status}]`).join("\n")
+        : "";
+      const notesPart = activePlan.user_notes ? `\nUser notes: ${activePlan.user_notes}` : "";
+      messageToSend = `[Plan: ${activePlan.title}]${taskSummary}${notesPart}\n\n${text}`;
+    }
+    dbg("GroupChatLayout", "send", { len: messageToSend.length });
     try {
-      const updated = await api.sendGroupChatMessage(detail.id, text);
+      const updated = await api.sendGroupChatMessage(detail.id, messageToSend);
       detail = updated;
       composerText = "";
       if (textareaEl) textareaEl.style.height = "auto";
@@ -351,6 +364,16 @@
           <p class="text-sm">{t("groupChat_noTurns")}</p>
           <p class="text-xs mt-1 text-muted-foreground/60">{t("groupChat_roundtablePlaceholder")}</p>
         </div>
+      </div>
+
+      <!-- Plan panel -->
+      <div class="border-t border-border shrink-0">
+        <PlanPanel
+          plan={activePlan}
+          groupId={detail.id}
+          {participants}
+          onPlanUpdated={(p) => { activePlan = p; }}
+        />
       </div>
 
       <!-- Composer area -->

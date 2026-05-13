@@ -253,6 +253,11 @@ export async function cancelGroupChatTurn(roomId: string): Promise<boolean> {
 
 // Plans
 
+export async function getPlanForGroupChat(groupId: string): Promise<PlanArtifact | null> {
+  dbg("api", "getPlanForGroupChat", { groupId });
+  return invoke<PlanArtifact | null>("get_plan_for_group_chat", { groupChatId: groupId });
+}
+
 export async function createPlan(
   groupId: string,
   title: string,

@@ -24,6 +24,13 @@ fn into_plan_task(input: PlanTaskInput) -> PlanTask {
 }
 
 #[tauri::command]
+pub fn get_plan_for_group_chat(
+    group_chat_id: String,
+) -> Result<Option<PlanArtifact>, String> {
+    Ok(storage::group_chats::get_plan_for_group_chat(&group_chat_id))
+}
+
+#[tauri::command]
 pub fn create_plan(
     group_chat_id: String,
     title: String,

@@ -170,6 +170,7 @@ pub fn run() {
             commands::group_chat::list_group_chat_run_index,
             commands::group_chat::get_group_chat_turn_snapshot,
             commands::group_chat::cancel_group_chat_turn,
+            commands::plans::get_plan_for_group_chat,
             commands::plans::create_plan,
             commands::plans::update_plan,
             commands::plans::approve_plan,

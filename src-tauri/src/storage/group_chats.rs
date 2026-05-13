@@ -433,6 +433,10 @@ pub fn create_plan(
     Ok(plan)
 }
 
+pub fn get_plan_for_group_chat(group_chat_id: &str) -> Option<PlanArtifact> {
+    read_plan(group_chat_id)
+}
+
 pub fn get_plan(plan_id: &str) -> Option<PlanArtifact> {
     let room = find_plan_group_chat(plan_id)?;
     let plan = read_plan(&room.id)?;
