@@ -10,6 +10,7 @@ use crate::group_chat::adapter::{
     adapter_for_run, can_use_group_chat_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
 use crate::group_chat::context::{check_handoff, record_participant_turn, HandoffDecision};
+use crate::group_chat::memory_extraction::{auto_extract_memories, can_extract, record_extraction};
 use crate::group_chat::memory_injection::{search_memories_for_injection, format_memory_injection};
 use crate::group_chat::models::{
     GroupChatParticipant, GroupChatResponseRef, GroupChatTurn, GroupChatTurnMode,
@@ -436,6 +437,24 @@ pub async fn run_group_chat_turn_with_runtime(
                     current_turn = auto_turn;
                 }
             }
+
+            // ── Auto-extraction: fire-and-forget memory extraction ──
+            let gc_id = room_id.to_string();
+            let participants_snapshot: Vec<String> =
+                room.participants.iter().map(|p| p.character_id.clone()).collect();
+            tokio::spawn(async move {
+                for cid in &participants_snapshot {
+                    if cid.is_empty() || cid == "__orphan__" {
+                        continue;
+                    }
+                    if !can_extract(&gc_id, cid) {
+                        continue;
+                    }
+                    let turns: Vec<String> = Vec::new();
+                    auto_extract_memories(cid, &turns).await;
+                    record_extraction(&gc_id, cid);
+                }
+            });
 
             Ok(turn)
         }
