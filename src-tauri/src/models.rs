@@ -358,6 +358,15 @@ pub struct UserSettings {
     /// Reusable AI character templates for group chat participants.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ai_characters: Vec<AiCharacter>,
+    /// Native hook configurations (event → groups).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub hooks: std::collections::HashMap<String, serde_json::Value>,
+    /// Managed plugin enabled states (name → enabled).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub enabled_plugins: std::collections::HashMap<String, bool>,
+    /// Whether native hooks have been migrated from legacy format.
+    #[serde(default)]
+    pub native_hooks_migrated: bool,
     pub updated_at: String,
 }
 
@@ -541,6 +550,9 @@ impl Default for UserSettings {
             windows_msvc_env_mode: WindowsMsvcEnvMode::Auto,
             mcp_servers: std::collections::HashMap::new(),
             ai_characters: vec![],
+            hooks: std::collections::HashMap::new(),
+            enabled_plugins: std::collections::HashMap::new(),
+            native_hooks_migrated: false,
             updated_at: now_iso(),
         }
     }
