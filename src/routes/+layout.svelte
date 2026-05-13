@@ -15,6 +15,7 @@
     listGroupChats,
     listGroupChatRunIndex,
     createGroupChat,
+    deleteGroupChat,
   } from "$lib/api";
   import ProjectFolderItem from "$lib/components/ProjectFolderItem.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
@@ -498,6 +499,15 @@
     }
   }
 
+  async function deleteGroupChatHandler(id: string) {
+    try {
+      await deleteGroupChat(id);
+      groupChats = groupChats.filter((c) => c.id !== id);
+    } catch {
+      // Silently fail
+    }
+  }
+
   function openGroupChatCreateDialog() {
     groupChatCreateName = "";
     groupChatCreateCwd = "";
@@ -533,14 +543,8 @@
         groupChatCreateCwd || undefined,
       );
       showGroupChatCreateDialog = false;
-      // Reload to populate the run index map, then navigate
       await loadGroupChats();
-      const runIds = groupChatRunIndexMap.get(detail.id);
-      if (runIds && runIds.length > 0) {
-        goto(`/chat?run=${runIds[0]}`);
-      } else {
-        goto(`/chat?groupChatId=${detail.id}`);
-      }
+      goto(`/chat?groupChatId=${detail.id}`);
     } catch (e) {
       dbgWarn("layout", "failed to create group chat:", e);
     } finally {
@@ -549,13 +553,7 @@
   }
 
   function navigateToGroupChat(chat: GroupChatSummary) {
-    const runIds = groupChatRunIndexMap.get(chat.id);
-    if (runIds && runIds.length > 0) {
-      goto(`/chat?run=${runIds[0]}`);
-    } else {
-      // Empty group chat (no participants/runs yet) — navigate with groupChatId
-      goto(`/chat?groupChatId=${chat.id}`);
-    }
+    goto(`/chat?groupChatId=${chat.id}`);
   }
 
   // ── Deep search ──
@@ -2441,34 +2439,51 @@
                     </button>
                     {#if groupChatsExpanded}
                       {#each groupChats as chat (chat.id)}
-                        <button
-                          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
-                          onclick={() => navigateToGroupChat(chat)}
-                        >
-                          <svg
-                            class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            ><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle
-                              cx="9"
-                              cy="7"
-                              r="4"
-                            /><path
-                              d="M22 21v-2a4 4 0 0 0-3-3.87"
-                            /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg
+                        <div class="group flex w-full items-center gap-1 rounded-md hover:bg-sidebar-accent/50 transition-colors">
+                          <button
+                            class="flex flex-1 min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-sidebar-foreground"
+                            onclick={() => navigateToGroupChat(chat)}
                           >
-                          <span class="flex-1 min-w-0 truncate">{chat.name}</span>
-                          <span class="shrink-0 text-[10px] text-muted-foreground/60"
-                            >{chat.participant_count}</span
+                            <svg
+                              class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              ><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle
+                                cx="9"
+                                cy="7"
+                                r="4"
+                              /><path
+                                d="M22 21v-2a4 4 0 0 0-3-3.87"
+                              /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg
+                            >
+                            <span class="flex-1 min-w-0 truncate">{chat.name}</span>
+                            <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                              >{chat.participant_count}</span
+                            >
+                            <span class="shrink-0 text-[10px] text-muted-foreground/60"
+                              >{relativeTime(chat.updated_at)}</span
+                            >
+                          </button>
+                          <button
+                            class="hidden group-hover:flex shrink-0 items-center justify-center h-5 w-5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                            onclick={(e) => { e.stopPropagation(); deleteGroupChatHandler(chat.id); }}
+                            title="Delete group chat"
                           >
-                          <span class="shrink-0 text-[10px] text-muted-foreground/60"
-                            >{relativeTime(chat.updated_at)}</span
-                          >
-                        </button>
+                            <svg
+                              class="h-3 w-3"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            ><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                          </button>
+                        </div>
                       {/each}
                     {/if}
                   </div>

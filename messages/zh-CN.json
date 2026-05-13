@@ -1625,6 +1625,11 @@
   "groupChat_quickCreate": "快速创建",
   "groupChat_orSelectCharacter": "或从角色库选择",
   "groupChat_noCharacters": "暂未创建角色",
+  "groupChat_rolePlanner": "规划者",
+  "groupChat_roleExecutor": "执行者",
+  "groupChat_roleReviewer": "审查者",
+  "groupChat_yourMessage": "你的消息",
+  "groupChat_replies": "条回复",
 
   "planPanel_title": "计划",
   "planPanel_createTitle": "创建计划",

@@ -285,6 +285,11 @@ async fn create_group_chat_participant_impl(
     )?;
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
     if matches!(run.resolved_execution_path(), ExecutionPath::SessionActor) {
+        let permission_mode_override = if role.as_deref() == Some("executor") {
+            None // executor needs full tool access (bypass mode)
+        } else {
+            Some("plan".to_string()) // planner and custom roles: read-only
+        };
         if let Err(e) = crate::commands::session::start_session_impl(
             emitter,
             sessions,
@@ -296,7 +301,7 @@ async fn create_group_chat_participant_impl(
             None,
             None,
             platform_id,
-            Some("plan".to_string()),
+            permission_mode_override,
         )
         .await
         {

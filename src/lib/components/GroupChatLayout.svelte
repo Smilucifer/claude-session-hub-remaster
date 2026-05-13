@@ -11,6 +11,8 @@
   import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
   import { t } from "$lib/i18n/index.svelte";
   import { dbg, dbgWarn } from "$lib/utils/debug";
+  import { getTransport } from "$lib/transport";
+  import type { BusEvent } from "$lib/types";
 
   let { groupChat }: { groupChat: api.GroupChatRunIndexEntry | null } = $props();
 
@@ -38,6 +40,77 @@
 
   // ── Derived ──
   let participants = $derived(detail?.participants ?? []);
+
+  // ── Bus event state (permission prompts & thinking for participants) ──
+  interface PendingPermission {
+    requestId: string;
+    toolName: string;
+    toolUseId: string;
+    toolInput: Record<string, unknown>;
+    participantLabel: string;
+  }
+  let pendingPermissions = $state<Map<string, PendingPermission>>(new Map()); // keyed by run_id
+  let thinkingTexts = $state<Map<string, string>>(new Map()); // keyed by run_id, accumulated thinking
+  let thinkingCollapsed = $state<Map<string, boolean>>(new Map()); // keyed by run_id
+  let unlistenBus: (() => void) | undefined;
+
+  function startBusListener() {
+    if (unlistenBus) return;
+    const transport = getTransport();
+    transport.listen<BusEvent>("bus-event", (ev) => {
+      const pid = participantRunIds().find((_pid, _label, runId) => runId === ev.run_id);
+      if (!pid) return;
+      if (ev.type === "permission_prompt") {
+        const p = pendingPermissions;
+        // Only track for planner runs (executor has bypass mode)
+        p.set(ev.run_id, {
+          requestId: ev.request_id,
+          toolName: ev.tool_name,
+          toolUseId: ev.tool_use_id,
+          toolInput: ev.tool_input as Record<string, unknown>,
+          participantLabel: pid.label,
+        });
+        pendingPermissions = new Map(p);
+      } else if (ev.type === "thinking_delta" && ev.text) {
+        const current = thinkingTexts.get(ev.run_id) ?? "";
+        thinkingTexts.set(ev.run_id, current + ev.text);
+        thinkingTexts = new Map(thinkingTexts);
+      } else if (ev.type === "message_complete" || ev.type === "run_state") {
+        // Clear thinking on message complete or run state change
+        if (ev.type === "message_complete" && thinkingTexts.has(ev.run_id)) {
+          thinkingTexts.delete(ev.run_id);
+          thinkingTexts = new Map(thinkingTexts);
+        }
+      }
+    }).then((unlisten) => {
+      unlistenBus = unlisten;
+    });
+  }
+
+  function stopBusListener() {
+    unlistenBus?.();
+    unlistenBus = undefined;
+  }
+
+  // Map of run_id -> { label, role } for quick lookups
+  function participantRunIds(): Array<{ label: string; role: string; runId: string }> {
+    return participants.map((p) => ({
+      label: p.participant.label,
+      role: p.participant.role ?? "custom",
+      runId: p.participant.run_id,
+    }));
+  }
+
+  async function respondPermission(runId: string, requestId: string, behavior: "allow" | "deny") {
+    try {
+      await api.respondPermission(runId, requestId, behavior);
+    } catch (e) {
+      dbgWarn("GroupChatLayout", "respondPermission failed", e);
+    }
+    const p = pendingPermissions;
+    p.delete(runId);
+    pendingPermissions = new Map(p);
+  }
 
   let filteredMentionParticipants = $derived.by(() => {
     if (!mentionOpen) return [];
@@ -69,6 +142,16 @@
   $effect(() => {
     const roomId = groupChat?.room_id;
     if (roomId) loadDetail();
+  });
+
+  // Bus event lifecycle: start listener when participants exist, stop on cleanup
+  $effect(() => {
+    if (detail && participants.length > 0) {
+      startBusListener();
+    }
+    return () => {
+      stopBusListener();
+    };
   });
 
   // ── Character picker ──
@@ -319,6 +402,67 @@
         return "bg-muted text-muted-foreground";
     }
   }
+
+  // ── Timeline helpers ──
+  function getParticipantInfo(participantId: string): GroupChatParticipantDetail | undefined {
+    return participants.find((p) => p.participant.id === participantId);
+  }
+
+  function turnModeLabel(mode: string): string {
+    switch (mode) {
+      case "fanout": return t("groupChat_turnFanout");
+      case "debate": return t("groupChat_turnDebate");
+      case "summary": return t("groupChat_turnSummary");
+      case "private": return t("groupChat_turnPrivate");
+      case "singletarget": return t("groupChat_turnSingleTarget");
+      default: return mode;
+    }
+  }
+
+  function roleLabel(role: string): string {
+    switch (role) {
+      case "planner": return t("groupChat_rolePlanner");
+      case "executor": return t("groupChat_roleExecutor");
+      case "reviewer": return t("groupChat_roleReviewer");
+      default: return role;
+    }
+  }
+
+  function roleCardBorder(role: string): string {
+    switch (role) {
+      case "planner": return "border-purple-500/20";
+      case "executor": return "border-blue-500/20";
+      case "reviewer": return "border-emerald-500/20";
+      default: return "border-border/50";
+    }
+  }
+
+  function roleCardBg(role: string): string {
+    switch (role) {
+      case "planner": return "bg-purple-500/3";
+      case "executor": return "bg-blue-500/3";
+      case "reviewer": return "bg-emerald-500/3";
+      default: return "";
+    }
+  }
+
+  function roleHeaderBg(role: string): string {
+    switch (role) {
+      case "planner": return "bg-purple-500/8";
+      case "executor": return "bg-blue-500/8";
+      case "reviewer": return "bg-emerald-500/8";
+      default: return "bg-muted/30";
+    }
+  }
+
+  function roleAvatarBg(role: string): string {
+    switch (role) {
+      case "planner": return "bg-purple-600";
+      case "executor": return "bg-blue-600";
+      case "reviewer": return "bg-emerald-600";
+      default: return "bg-muted-foreground";
+    }
+  }
 </script>
 
 <div class="flex h-full overflow-hidden bg-background">
@@ -358,12 +502,122 @@
         <p class="text-sm text-destructive">{error}</p>
       </div>
     {:else if detail}
-      <!-- Placeholder: future timeline goes here -->
-      <div class="flex-1 flex items-center justify-center p-8">
-        <div class="text-center text-muted-foreground max-w-sm">
-          <p class="text-sm">{t("groupChat_noTurns")}</p>
-          <p class="text-xs mt-1 text-muted-foreground/60">{t("groupChat_roundtablePlaceholder")}</p>
+      <!-- Pending permission prompts -->
+      {#each [...pendingPermissions.entries()] as [runId, perm] (perm.requestId)}
+        <div class="mx-4 mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 flex items-center justify-between">
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-yellow-400/90">
+              {perm.participantLabel} wants to use <span class="font-mono">{perm.toolName}</span>
+            </p>
+            {#if Object.keys(perm.toolInput).length > 0}
+              <pre class="mt-1 text-[10px] text-muted-foreground truncate max-w-md">{JSON.stringify(perm.toolInput)}</pre>
+            {/if}
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0 ml-3">
+            <button
+              class="rounded-md bg-green-600/20 px-3 py-1 text-[11px] font-medium text-green-400 hover:bg-green-600/30 transition-colors"
+              onclick={() => respondPermission(runId, perm.requestId, "allow")}
+            >{t("common_allow")}</button>
+            <button
+              class="rounded-md bg-red-600/20 px-3 py-1 text-[11px] font-medium text-red-400 hover:bg-red-600/30 transition-colors"
+              onclick={() => respondPermission(runId, perm.requestId, "deny")}
+            >{t("common_deny")}</button>
+          </div>
         </div>
+      {/each}
+
+      <!-- Message timeline -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-6">
+        {#if detail.turns.length === 0}
+          <div class="flex items-center justify-center h-full">
+            <div class="text-center text-muted-foreground max-w-sm">
+              <p class="text-sm">{t("groupChat_noTurns")}</p>
+            </div>
+          </div>
+        {:else}
+          {#each detail.turns as turn (turn.id)}
+            {@const modeLabel = turnModeLabel(turn.mode)}
+            <div class="space-y-3">
+              <!-- Turn header -->
+              <div class="flex items-center gap-2 pb-1 border-b border-border/50">
+                <span class="text-[11px] font-semibold text-muted-foreground">
+                  TURN {turn.idx} · {modeLabel}
+                </span>
+                <span class="text-[10px] text-muted-foreground/50">
+                  {turn.responses.length} {t("groupChat_replies")}
+                </span>
+                {#if turn.completed_at}
+                  <span class="text-[10px] text-muted-foreground/50 ml-auto">
+                    {turn.completed_at.slice(11, 19)}
+                  </span>
+                {/if}
+              </div>
+
+              <!-- User message -->
+              <div class="rounded-lg border border-blue-500/15 bg-blue-500/5 px-3 py-2">
+                <span class="text-[10px] font-semibold text-blue-400/70">{t("groupChat_yourMessage")}</span>
+                <p class="text-xs mt-0.5">{turn.user_input}</p>
+              </div>
+
+              <!-- Participant responses -->
+              {#each turn.responses as resp (resp.participant_id)}
+                {@const pinfo = getParticipantInfo(resp.participant_id)}
+                {@const role = pinfo?.role ?? "custom"}
+                {@const roleName = roleLabel(role)}
+                {@const hasThinking = thinkingTexts.has(resp.run_id)}
+                {@const thinkingContent = thinkingTexts.get(resp.run_id) ?? ""}
+                {@const isThinkingOpen = !(thinkingCollapsed.get(resp.run_id) ?? true)}
+
+                <div class="rounded-lg border {roleCardBorder(role)} {roleCardBg(role)} overflow-hidden">
+                  <!-- Message header -->
+                  <div class="flex items-center gap-2 px-3 py-1.5 {roleHeaderBg(role)}">
+                    <span class="w-5 h-5 rounded-full {roleAvatarBg(role)} text-[10px] font-bold text-white flex items-center justify-center shrink-0">
+                      {pinfo?.label?.charAt(0)?.toUpperCase() ?? "?"}
+                    </span>
+                    <span class="text-xs font-medium truncate">{pinfo?.label ?? resp.participant_id}</span>
+                    <span class="text-[10px] rounded px-1 py-0.5 {roleBadgeColor(role)}">{roleName}</span>
+                    <span class="text-[10px] text-muted-foreground/50">{providerLabel(pinfo?.agent ?? "", pinfo?.run?.platform_id)}</span>
+                    {#if resp.status}
+                      <span class="ml-auto w-1.5 h-1.5 rounded-full {statusColor(resp.status as RunStatus)} shrink-0"></span>
+                    {/if}
+                  </div>
+
+                  <!-- Thinking toggle (if available) -->
+                  {#if hasThinking}
+                    <button
+                      class="flex items-center gap-1 px-3 py-1 text-[10px] text-blue-400/60 hover:text-blue-400 transition-colors w-full"
+                      onclick={() => {
+                        const key = resp.run_id;
+                        const m = thinkingCollapsed;
+                        m.set(key, !(m.get(key) ?? true));
+                        thinkingCollapsed = new Map(m);
+                      }}
+                    >
+                      <svg class="h-2.5 w-2.5 transition-transform {isThinkingOpen ? 'rotate-90' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                      {t("chat_thoughtProcess")}
+                    </button>
+                    {#if isThinkingOpen}
+                      <div class="px-3 py-1.5 text-[10px] text-blue-300/70 border-t border-blue-500/10 whitespace-pre-wrap break-all">
+                        {thinkingContent}
+                      </div>
+                    {/if}
+                  {/if}
+
+                  <!-- Message body -->
+                  <div class="px-3 py-2 text-xs">
+                    {#if resp.preview}
+                      <p>{resp.preview}</p>
+                    {:else if resp.error}
+                      <p class="text-red-400/80">{resp.error}</p>
+                    {:else}
+                      <p class="text-muted-foreground/50 italic">{t("groupChat_waitingResponse")}</p>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/each}
+        {/if}
       </div>
 
       <!-- Plan panel -->

@@ -1625,6 +1625,11 @@
   "groupChat_quickCreate": "Quick Create",
   "groupChat_orSelectCharacter": "Or select from character library",
   "groupChat_noCharacters": "No characters created yet",
+  "groupChat_rolePlanner": "Planner",
+  "groupChat_roleExecutor": "Executor",
+  "groupChat_roleReviewer": "Reviewer",
+  "groupChat_yourMessage": "Your message",
+  "groupChat_replies": "replies",
 
   "planPanel_title": "Plan",
   "planPanel_createTitle": "Create a Plan",

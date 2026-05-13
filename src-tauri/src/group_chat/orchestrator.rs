@@ -415,12 +415,22 @@ async fn execute_actor_turn(
 ) -> GroupChatResponseRef {
     let event_seq_start = storage::events::next_seq(&participant.run_id);
     let mut adapter = adapter_for_run(run).with_command_sender(cmd_tx);
+
+    // Resolve and prepend role system prompt for the Actor path
+    let user_settings = storage::settings::get_user_settings();
+    let full_prompt = match resolve_participant_system_prompt(participant, &user_settings.ai_characters) {
+        Some(role_prompt) if !role_prompt.is_empty() => {
+            format!("{}\n\n---\n\n{}", role_prompt, target_prompt)
+        }
+        _ => target_prompt.to_string(),
+    };
+
     // Transition to Running so wait_turn_complete does not mistake a
     // pre-existing Idle status (from a previous turn) for an immediate
     // completion.  The session actor also calls persist_idle_running later,
     // but that call is a no-op when the status is already Running.
     let _ = storage::runs::update_status(&participant.run_id, RunStatus::Running, None, None);
-    match adapter.stream_message(target_prompt).await {
+    match adapter.stream_message(&full_prompt).await {
         Ok(()) => match adapter.wait_turn_complete().await {
             Ok(outcome) => {
                 let event_seq_end =
@@ -586,14 +596,39 @@ async fn execute_pipe_turn(
 /// Build a system prompt for a participant based on their role type and optional custom instruction.
 fn build_role_system_prompt(role_type: &str, role_instruction: &Option<String>) -> String {
     let base = match role_type {
-        "planner" => {
-            "你可以读取文件和搜索代码来辅助规划。你不可以执行修改文件系统或运行命令的工具。"
-        }
-        "executor" => "你严格按照计划执行任务。你不可以偏离计划内容。",
+        "planner" => concat!(
+            "You are a strategic planner in a multi-agent group chat. Your responsibilities:\n\n",
+            "1. TASK DECOMPOSITION: Break complex user requests into concrete, ordered sub-tasks.\n",
+            "2. CONTEXT ANALYSIS: Read relevant project files and search the web to understand the codebase before planning.\n",
+            "3. COORDINATION: Assign tasks to appropriate participants. Use @mentions to route subtasks.\n",
+            "4. PLAN OUTPUT: Produce a numbered checklist with clear success criteria for each item.\n\n",
+            "CONSTRAINTS:\n",
+            "- You can READ files, search code, and search the web, but you CANNOT modify the filesystem, run commands, or execute tools that change state.\n",
+            "- Do NOT implement - only plan. The executors will carry out your instructions.\n",
+            "- When uncertain about the codebase, request more context rather than guessing.\n\n",
+            "IMPORTANT: You are in a group chat context. Do NOT initiate any work, analyze files, or execute tools until the user sends an explicit message to this group chat. Wait for instructions. Your first response should only acknowledge readiness.\n\n",
+            "OUTPUT CONSTRAINT: Your response must be NO MORE THAN 300 characters (~60 words). Be concise. Use bullet points when listing tasks. Omit explanations.",
+        ),
+        "executor" => concat!(
+            "You are a task executor in a multi-agent group chat. Your responsibilities:\n\n",
+            "1. FOLLOW THE PLAN: Execute only the tasks assigned to you. Do not deviate from the plan.\n",
+            "2. REPORT PROGRESS: Clearly state which task you completed and what the result was.\n",
+            "3. ASK FOR CLARIFICATION: If a task is ambiguous, ask the planner for clarification before executing.\n",
+            "4. SIGNAL COMPLETION: End your response with a brief summary of what was accomplished.\n\n",
+            "CONSTRAINTS:\n",
+            "- Stay within the scope of your assigned task. Do not expand or reinterpret the plan.\n",
+            "- If you encounter an obstacle, report it rather than working around it silently.\n",
+            "- Coordinate with other executors - reference their outputs when relevant.\n\n",
+            "IMPORTANT: You are in a group chat context. Do NOT initiate any work until the planner assigns you a task. Wait for instructions.",
+        ),
         _ => "",
     };
     let custom = role_instruction.as_deref().unwrap_or("");
-    format!("{}\n{}", base, custom).trim().to_string()
+    if custom.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}\n\n{}", base, custom)
+    }
 }
 
 /// Look up the AiCharacter whose label matches the participant's label,
@@ -1092,6 +1127,11 @@ fn run_preview(run_id: &str) -> Option<String> {
     );
     if let Some(text) = run_events.into_iter().rev().find_map(|event| {
         if !matches!(event.event_type, crate::models::RunEventType::Assistant) {
+            return None;
+        }
+        // Skip thinking and tool_use subtypes — only capture final text responses
+        let subtype = event.payload.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
+        if subtype == "thinking" || subtype == "tool_use" {
             return None;
         }
         event
