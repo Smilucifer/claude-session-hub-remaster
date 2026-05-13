@@ -9,6 +9,7 @@ use crate::agent::windows_msvc_env::{
 use crate::group_chat::adapter::{
     adapter_for_run, can_use_group_chat_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
+use crate::group_chat::context::{check_handoff, record_participant_turn, HandoffDecision};
 use crate::group_chat::models::{
     GroupChatParticipant, GroupChatResponseRef, GroupChatTurn, GroupChatTurnMode,
 };
@@ -241,6 +242,41 @@ pub async fn run_group_chat_turn_with_runtime(
         storage::group_chats::append_group_chat_private_turn(room_id, &turn)?;
     } else {
         storage::group_chats::append_group_chat_public_turn(room_id, &turn)?;
+    }
+
+    // ── Task 38: session handoff trigger ──
+    // Record turn count and check handoff threshold for each responding participant.
+    let public_turns_after = if is_private {
+        storage::group_chats::list_group_chat_public_turns(room_id)?
+    } else {
+        // turn was just appended; re-read to include it
+        let mut turns = storage::group_chats::list_group_chat_public_turns(room_id)?;
+        if turns.last().map(|t| t.id.as_str()) != Some(&turn.id) {
+            turns.push(turn.clone());
+        }
+        turns
+    };
+    for resp in &turn.responses {
+        let _ = record_participant_turn(room_id, &resp.participant_id);
+        if let Some(participant) = room.participants.iter().find(|p| p.id == resp.participant_id) {
+            match check_handoff(&room, participant, &public_turns_after) {
+                HandoffDecision::Handoff { bootstrap_context } => {
+                    log::info!(
+                        "[group-chat] handoff triggered for participant {} (session_seq={}): context length={}",
+                        participant.label,
+                        crate::group_chat::context::load_participant_meta(room_id, &participant.id).session_seq,
+                        bootstrap_context.len(),
+                    );
+                    // TODO: spawn fresh session with bootstrap_context as first message.
+                    // For now, reset session state so the next turn starts fresh.
+                    let _ = crate::group_chat::context::reset_session_after_handoff(
+                        room_id,
+                        &participant.id,
+                    );
+                }
+                HandoffDecision::Continue => {}
+            }
+        }
     }
 
     Ok(turn)
