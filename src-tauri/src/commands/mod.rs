@@ -9,6 +9,7 @@ pub mod cli_sync;
 pub mod clipboard;
 pub mod control;
 pub mod diagnostics;
+pub mod embedding;
 pub mod events;
 pub mod export;
 pub mod files;

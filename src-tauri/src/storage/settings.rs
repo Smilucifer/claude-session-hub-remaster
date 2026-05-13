@@ -1,6 +1,6 @@
 use crate::models::{
-    AgentSettings, AllSettings, BalanceHelperSettings, ConnectionProfile, UserSettings,
-    WindowsMsvcEnvMode,
+    AgentSettings, AllSettings, BalanceHelperSettings, ConnectionProfile, EmbeddingConfig,
+    UserSettings, WindowsMsvcEnvMode,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -463,6 +463,17 @@ pub fn save(settings: &AllSettings) -> Result<(), String> {
 
 pub fn get_user_settings() -> UserSettings {
     load().user
+}
+
+pub fn get_embedding_config() -> Option<EmbeddingConfig> {
+    load().user.embedding_config
+}
+
+pub fn update_embedding_config(config: EmbeddingConfig) -> Result<EmbeddingConfig, String> {
+    let mut all = load();
+    all.user.embedding_config = Some(config.clone());
+    save(&all)?;
+    Ok(config)
 }
 
 /// Save web server config fields. Called by restart_with_config on success.
