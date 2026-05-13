@@ -538,6 +538,8 @@
       const runIds = groupChatRunIndexMap.get(detail.id);
       if (runIds && runIds.length > 0) {
         goto(`/chat?run=${runIds[0]}`);
+      } else {
+        goto(`/chat?groupChatId=${detail.id}`);
       }
     } catch (e) {
       dbgWarn("layout", "failed to create group chat:", e);
@@ -550,6 +552,9 @@
     const runIds = groupChatRunIndexMap.get(chat.id);
     if (runIds && runIds.length > 0) {
       goto(`/chat?run=${runIds[0]}`);
+    } else {
+      // Empty group chat (no participants/runs yet) — navigate with groupChatId
+      goto(`/chat?groupChatId=${chat.id}`);
     }
   }
 

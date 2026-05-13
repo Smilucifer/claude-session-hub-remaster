@@ -7,6 +7,7 @@
   "settings_tab_shortcuts": "Shortcuts",
   "settings_tab_remote": "Remote",
   "settings_tab_debug": "Debug",
+  "settings_tab_characters": "Characters",
 
   "settings_general_connection": "Connection",
   "settings_general_saved": "Saved",
@@ -1709,5 +1710,6 @@
   "settings_characters_planner": "Planner",
   "settings_characters_executor": "Executor",
   "settings_characters_custom": "Custom",
-  "settings_characters_delete_confirm": "Delete this character"
+  "settings_characters_delete_confirm": "Delete this character",
+  "settings_characters_manage": "Manage Characters"
 }

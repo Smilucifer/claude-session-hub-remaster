@@ -7,6 +7,7 @@
   "settings_tab_shortcuts": "快捷键",
   "settings_tab_remote": "远程",
   "settings_tab_debug": "调试",
+  "settings_tab_characters": "角色库",
 
   "settings_general_connection": "连接",
   "settings_general_saved": "已保存",
@@ -1709,5 +1710,6 @@
   "settings_characters_planner": "规划者",
   "settings_characters_executor": "执行者",
   "settings_characters_custom": "自定义",
-  "settings_characters_delete_confirm": "确定删除此角色"
+  "settings_characters_delete_confirm": "确定删除此角色",
+  "settings_characters_manage": "管理角色库"
 }

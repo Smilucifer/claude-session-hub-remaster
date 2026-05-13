@@ -39,7 +39,7 @@
   import { getTransport } from "$lib/transport";
 
   // ── Tab state ──
-  type SettingsTab = "general" | "connection" | "cli-config" | "shortcuts" | "remote" | "debug";
+  type SettingsTab = "general" | "connection" | "cli-config" | "shortcuts" | "remote" | "debug" | "characters";
   const VALID_TABS: SettingsTab[] = [
     "general",
     "connection",
@@ -47,6 +47,7 @@
     "shortcuts",
     "remote",
     "debug",
+    "characters",
   ];
   const urlTab = $page.url.searchParams.get("tab");
   const initialTab: SettingsTab = VALID_TABS.includes(urlTab as SettingsTab)
@@ -61,6 +62,7 @@
     shortcuts: () => t("settings_tab_shortcuts"),
     remote: () => t("settings_tab_remote"),
     debug: () => t("settings_tab_debug"),
+    characters: () => t("settings_tab_characters"),
   };
 
   const tabs: { id: SettingsTab; icon: string }[] = [
@@ -85,6 +87,7 @@
       icon: "M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z",
     },
     { id: "debug", icon: "m18 16 4-4-4-4 M6 8l-4 4 4 4 M14.5 4l-5 16" },
+    { id: "characters", icon: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" },
   ];
 
   let settings = $state<UserSettings | null>(null);
@@ -3438,6 +3441,21 @@
             {t("settings_debug_maxEntries")}
           </p>
         {/if}
+      </Card>
+    {:else if activeTab === "characters"}
+      <Card class="p-6 space-y-4">
+        <p class="text-sm text-muted-foreground">
+          {t("settings_characters")}
+        </p>
+        <a
+          href="/settings/characters"
+          class="inline-flex items-center gap-2 rounded-md border border-input px-4 py-2 text-sm font-medium hover:bg-accent transition-colors"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          {t("settings_characters_manage")}
+        </a>
       </Card>
     {/if}
   </div>

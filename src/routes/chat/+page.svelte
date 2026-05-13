@@ -1138,7 +1138,11 @@
 
   // ── Group chat detection ──
   let groupChatRunIndex = $state<api.GroupChatRunIndexEntry[]>([]);
-  let currentGroupChat = $derived(groupChatRunIndex.find((e) => e.run_ids.includes(runId)) ?? null);
+  let groupChatIdParam = $derived($page.url.searchParams.get("groupChatId"));
+  let currentGroupChat = $derived(
+    groupChatRunIndex.find((e) => e.run_ids.includes(runId)) ??
+    (groupChatIdParam ? groupChatRunIndex.find((e) => e.room_id === groupChatIdParam) ?? { room_id: groupChatIdParam, room_name: "", run_ids: [] } : null)
+  );
 
   // Consume ?agent=codex from command palette shortcuts for a new chat.
   $effect(() => {
@@ -1437,6 +1441,16 @@
     api.listGroupChatRunIndex().then((index) => {
       groupChatRunIndex = index;
     }).catch(() => {});
+  });
+
+  // Clean groupChatId from URL after consumption (matches agent/folder/scrollTo cleanup pattern)
+  $effect(() => {
+    if (!groupChatIdParam) return;
+    untrack(() => {
+      const clean = new URL($page.url);
+      clean.searchParams.delete("groupChatId");
+      replaceState(clean, {});
+    });
   });
 
   // Handle scrollTo for already-loaded runs (e.g., clicking a second search result
