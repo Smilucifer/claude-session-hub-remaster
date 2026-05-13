@@ -51,6 +51,13 @@ import type {
   BalanceHelperSettings,
   ValidatePlatformCredentialsResponse,
   AiCharacter,
+  CommunityInfo,
+  EmbeddingConfig,
+  KnowledgeGapInfo,
+  MemoryGraphData,
+  MemoryNode,
+  TestEmbeddingResult,
+  VectorSearchResult,
 } from "./types";
 
 // Runs
@@ -1538,4 +1545,87 @@ export async function cancelRalphLoop(
 ): Promise<{ iteration: number; immediate: boolean }> {
   dbg("api", "cancelRalphLoop", { runId });
   return invoke<{ iteration: number; immediate: boolean }>("cancel_ralph_loop", { runId });
+}
+
+// ── Embedding Config ──
+
+export async function getEmbeddingConfig(): Promise<EmbeddingConfig | null> {
+  dbg("api", "getEmbeddingConfig");
+  return invoke<EmbeddingConfig | null>("get_embedding_config");
+}
+
+export async function updateEmbeddingConfig(config: EmbeddingConfig): Promise<EmbeddingConfig> {
+  dbg("api", "updateEmbeddingConfig");
+  return invoke<EmbeddingConfig>("update_embedding_config", { config });
+}
+
+export async function testEmbeddingConnection(): Promise<TestEmbeddingResult> {
+  dbg("api", "testEmbeddingConnection");
+  return invoke<TestEmbeddingResult>("test_embedding_connection");
+}
+
+// ── Character Memory CRUD ──
+
+export async function listCharacterMemories(characterId: string): Promise<MemoryNode[]> {
+  dbg("api", "listCharacterMemories", { characterId });
+  return invoke<MemoryNode[]>("list_character_memories", { characterId });
+}
+
+export async function getCharacterMemory(characterId: string, memoryId: string): Promise<MemoryNode | null> {
+  dbg("api", "getCharacterMemory", { characterId, memoryId });
+  return invoke<MemoryNode | null>("get_character_memory", { characterId, memoryId });
+}
+
+export async function createCharacterMemory(
+  characterId: string,
+  content: string,
+  type: string,
+  confidence: number,
+  tags: string[],
+): Promise<MemoryNode> {
+  dbg("api", "createCharacterMemory", { characterId, content: content.slice(0, 80), memoryType: type });
+  return invoke<MemoryNode>("create_character_memory", { characterId, content, memoryType: type, confidence, tags });
+}
+
+export async function updateCharacterMemory(
+  characterId: string,
+  memoryId: string,
+  updates: { content?: string; memoryType?: string; confidence?: number; tags?: string[] },
+): Promise<MemoryNode> {
+  dbg("api", "updateCharacterMemory", { characterId, memoryId, ...updates });
+  return invoke<MemoryNode>("update_character_memory", { characterId, memoryId, ...updates });
+}
+
+export async function deleteCharacterMemory(characterId: string, memoryId: string): Promise<void> {
+  dbg("api", "deleteCharacterMemory", { characterId, memoryId });
+  return invoke<void>("delete_character_memory", { characterId, memoryId });
+}
+
+// ── Knowledge Graph ──
+
+export async function getMemoryGraph(characterId: string): Promise<MemoryGraphData> {
+  dbg("api", "getMemoryGraph", { characterId });
+  return invoke<MemoryGraphData>("get_memory_graph", { characterId });
+}
+
+export async function getMemoryCommunities(characterId: string): Promise<CommunityInfo[]> {
+  dbg("api", "getMemoryCommunities", { characterId });
+  return invoke<CommunityInfo[]>("get_memory_communities", { characterId });
+}
+
+export async function getKnowledgeGaps(characterId: string): Promise<KnowledgeGapInfo[]> {
+  dbg("api", "getKnowledgeGaps", { characterId });
+  return invoke<KnowledgeGapInfo[]>("get_knowledge_gaps", { characterId });
+}
+
+// ── Vector Store ──
+
+export async function vectorSearch(characterId: string, queryVector: number[], topK: number): Promise<VectorSearchResult[]> {
+  dbg("api", "vectorSearch", { characterId, topK });
+  return invoke<VectorSearchResult[]>("vector_search", { characterId, queryVector, topK });
+}
+
+export async function resetVectorStore(characterId: string): Promise<number> {
+  dbg("api", "resetVectorStore", { characterId });
+  return invoke<number>("reset_vector_store", { characterId });
 }
