@@ -10,7 +10,7 @@ use crate::room::adapter::{
     adapter_for_run, can_use_room_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
 use crate::room::models::{
-    ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult, RoomKind,
+    ArenaMemoryCandidate, ArenaMemoryKind, ResearchArtifact, ResearchResult,
     RoomParticipant, RoomResponseRef, RoomTurn, RoomTurnMode,
 };
 use crate::{
@@ -64,11 +64,6 @@ pub enum RoundtableCommand {
     Summary { target: String },
     Private { target: String, message: String },
     SingleTarget { target: String, message: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DriverCommand {
-    Review { targets: Vec<String>, input: String },
 }
 
 pub async fn run_roundtable_turn(
@@ -183,23 +178,14 @@ pub async fn run_roundtable_turn_with_runtime(
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
         let target_prompt = match mode {
             RoomTurnMode::Fanout => {
-                let mem = room.seat_memories.get(&participant.id);
-                let section = crate::room::memory::build_memory_prompt_section(
-                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
-                );
-                build_fanout_prompt(turn_num, &prompt, None, section.as_deref())
+                build_fanout_prompt(turn_num, &prompt, None)
             }
             RoomTurnMode::Debate => {
-                let mem = room.seat_memories.get(&participant.id);
-                let section = crate::room::memory::build_memory_prompt_section(
-                    mem.map(|v| v.as_slice()).unwrap_or(&[]),
-                );
                 build_debate_prompt(
                     &participant,
                     &prompt,
                     &public_turns,
                     &room.participants,
-                    section.as_deref(),
                 )
             }
             _ => prompt.clone(),
@@ -489,210 +475,6 @@ fn failed_response(
     }
 }
 
-pub async fn run_driver_turn(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-) -> Result<RoomTurn, String> {
-    run_driver_turn_with_runtime(room_id, message, sessions, None).await
-}
-
-pub async fn run_driver_turn_with_runtime(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> Result<RoomTurn, String> {
-    let room_lock = room_orchestration_lock(room_id);
-    let _room_guard = room_lock.lock().await;
-
-    let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    if room.kind != RoomKind::Driver {
-        return Err(format!("Room {room_id} is not a Driver room"));
-    }
-
-    let DriverCommand::Review {
-        targets: requested_targets,
-        input,
-    } = parse_driver_command(message)?;
-    if input.trim().is_empty() {
-        return Err("Review request is required".to_string());
-    }
-
-    let public_turns = storage::rooms::list_public_turns(room_id)?;
-    let targets = if requested_targets.is_empty() {
-        active_copilot_targets(&room.participants, sessions).await
-    } else {
-        let mut resolved = Vec::with_capacity(requested_targets.len());
-        for target in requested_targets {
-            let participant = find_participant(&room.participants, &target)
-                .ok_or_else(|| format!("Room participant @{target} not found"))?
-                .clone();
-            if participant.role != "copilot" {
-                return Err(format!(
-                    "Room participant {} is not a copilot reviewer",
-                    participant.label
-                ));
-            }
-            resolved.push(active_target_for_participant(participant, sessions).await?);
-        }
-        resolved
-    };
-
-    if targets.is_empty() {
-        return Err("No active copilot participants are available".to_string());
-    }
-
-    let arena_dir = storage::data_dir()
-        .join("rooms")
-        .join(room_id)
-        .join(".arena");
-    let cwd = room.cwd.as_deref().unwrap_or("(no room cwd)");
-    let prompt = build_driver_review_prompt(
-        &input,
-        &public_turns,
-        &room.participants,
-        &room.memo,
-        cwd,
-        &arena_dir.to_string_lossy(),
-    );
-    storage::rooms::write_driver_arena_files(&room, &public_turns, &input, &prompt)?;
-    storage::rooms::write_driver_mcp_bundle(&room, &public_turns, &input, &prompt)?;
-
-    let started_at = now_iso();
-    let mut response_tasks = Vec::with_capacity(targets.len());
-
-    for target in &targets {
-        let target = target.clone();
-        let participant = target.participant.clone();
-        let run = storage::runs::get_run(&participant.run_id)
-            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = prompt.clone();
-        let pipe_runtime = pipe_runtime.clone();
-
-        response_tasks.push(tokio::spawn(async move {
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
-                .await
-        }));
-    }
-
-    let mut responses = Vec::with_capacity(response_tasks.len());
-    for task in response_tasks {
-        responses.push(
-            task.await
-                .map_err(|e| format!("Room participant task failed: {e}"))?,
-        );
-    }
-
-    let turn = RoomTurn {
-        id: uuid::Uuid::new_v4().to_string(),
-        idx: public_turns.len() as u64 + 1,
-        mode: RoomTurnMode::Review,
-        user_input: message.trim().to_string(),
-        target_participant_ids: targets
-            .iter()
-            .map(|target| target.participant.id.clone())
-            .collect(),
-        responses,
-        started_at,
-        completed_at: Some(now_iso()),
-    };
-    storage::rooms::append_public_turn(room_id, &turn)?;
-
-    Ok(turn)
-}
-
-pub async fn run_research_turn(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-) -> Result<RoomTurn, String> {
-    run_research_turn_with_runtime(room_id, message, sessions, None).await
-}
-
-pub async fn run_research_turn_with_runtime(
-    room_id: &str,
-    message: &str,
-    sessions: &ActorSessionMap,
-    pipe_runtime: Option<RoomPipeRuntime>,
-) -> Result<RoomTurn, String> {
-    let room_lock = room_orchestration_lock(room_id);
-    let _room_guard = room_lock.lock().await;
-
-    let room =
-        storage::rooms::get_room(room_id).ok_or_else(|| format!("Room {room_id} not found"))?;
-    if room.kind != RoomKind::Research {
-        return Err(format!("Room {room_id} is not a Research room"));
-    }
-
-    let topic = message.trim();
-    if topic.is_empty() {
-        return Err("Research topic is required".to_string());
-    }
-
-    let public_turns = storage::rooms::list_public_turns(room_id)?;
-    let targets = active_targets(&room.participants, sessions).await;
-    if targets.is_empty() {
-        return Err("No active room participants are available".to_string());
-    }
-
-    let started_at = now_iso();
-    let mut response_tasks = Vec::with_capacity(targets.len());
-
-    for target in &targets {
-        let target = target.clone();
-        let participant = target.participant.clone();
-        let run = storage::runs::get_run(&participant.run_id)
-            .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = build_research_prompt(
-            &participant,
-            topic,
-            &public_turns,
-            &room.participants,
-            &room.memo,
-        );
-        let pipe_runtime = pipe_runtime.clone();
-
-        response_tasks.push(tokio::spawn(async move {
-            let run_lock = run_orchestration_lock(&participant.run_id);
-            let _run_guard = run_lock.lock().await;
-            execute_roundtable_target(target, &participant, &run, &target_prompt, pipe_runtime)
-                .await
-        }));
-    }
-
-    let mut responses = Vec::with_capacity(response_tasks.len());
-    for task in response_tasks {
-        responses.push(
-            task.await
-                .map_err(|e| format!("Room participant task failed: {e}"))?,
-        );
-    }
-
-    let completed_at = now_iso();
-    let turn = RoomTurn {
-        id: uuid::Uuid::new_v4().to_string(),
-        idx: public_turns.len() as u64 + 1,
-        mode: RoomTurnMode::Research,
-        user_input: topic.to_string(),
-        target_participant_ids: targets
-            .iter()
-            .map(|target| target.participant.id.clone())
-            .collect(),
-        responses,
-        started_at,
-        completed_at: Some(completed_at.clone()),
-    };
-    let artifact = build_research_artifact(&room, &turn, topic, &completed_at);
-    storage::rooms::write_research_artifact(room_id, &artifact)?;
-    storage::rooms::append_public_turn(room_id, &turn)?;
-
-    Ok(turn)
-}
-
 fn room_orchestration_lock(room_id: &str) -> Arc<AsyncMutex<()>> {
     let mut locks = ROOM_ORCHESTRATION_LOCKS
         .lock()
@@ -758,27 +540,6 @@ pub fn parse_roundtable_command(input: &str) -> RoundtableCommand {
     }
 }
 
-pub fn parse_driver_command(input: &str) -> Result<DriverCommand, String> {
-    let trimmed = input.trim();
-    let mut rest = strip_command_word(trimmed, "/review")
-        .map(str::trim)
-        .ok_or_else(|| "Driver rooms require an explicit /review request".to_string())?;
-    let mut targets = Vec::new();
-
-    while let Some(after_at) = rest.strip_prefix('@') {
-        let end = after_at.find(char::is_whitespace).unwrap_or(after_at.len());
-        if end == 0 {
-            break;
-        }
-        targets.push(after_at[..end].to_string());
-        rest = after_at[end..].trim_start();
-    }
-
-    let input = rest.trim().to_string();
-
-    Ok(DriverCommand::Review { targets, input })
-}
-
 fn strip_command_word<'a>(input: &'a str, command: &str) -> Option<&'a str> {
     let rest = input.strip_prefix(command)?;
     if rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace) {
@@ -793,7 +554,6 @@ pub fn build_debate_prompt(
     instruction: &str,
     previous_turns: &[RoomTurn],
     participants: &[RoomParticipant],
-    seat_memory_section: Option<&str>,
 ) -> String {
     let turn_num = previous_turns
         .iter()
@@ -855,10 +615,6 @@ pub fn build_debate_prompt(
         body.push_str("(无另两家上轮记录)\n");
     }
 
-    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
-        body.push_str(mem);
-        body.push('\n');
-    }
     body.push_str("\n## 你的任务\n");
     body.push_str("请基于另两家观点 + 用户补充信息，发表新观点：可以继承、可以反驳，但要明示引用对方哪一点。\n");
     body
@@ -868,16 +624,11 @@ pub fn build_fanout_prompt(
     turn_num: u64,
     user_input: &str,
     data_pack: Option<&str>,
-    seat_memory_section: Option<&str>,
 ) -> String {
     let mut body = format!("[通用圆桌 · 第 {turn_num} 轮 · 默认提问]\n");
     if let Some(data_pack) = data_pack.map(str::trim).filter(|value| !value.is_empty()) {
         body.push_str("\n## 数据接入\n");
         body.push_str(data_pack);
-        body.push('\n');
-    }
-    if let Some(mem) = seat_memory_section.filter(|s| !s.trim().is_empty()) {
-        body.push_str(mem);
         body.push('\n');
     }
     body.push_str("\n## 用户问题\n");
@@ -1001,136 +752,6 @@ fn truncate_roundtable_text(text: &str, max_chars: usize, style: DebateViewStyle
             format!("{head}…[已截断]")
         }
     }
-}
-
-pub fn build_driver_review_prompt(
-    request: &str,
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
-    room_memo: &str,
-    cwd: &str,
-    arena_dir: &str,
-) -> String {
-    let mut body = String::from(
-        "You are a copilot reviewer in a Driver room. Work in read-only review mode: inspect the request, reason from the provided context, and do not edit files, run commands, or change project state.",
-    );
-    body.push_str("\n\nReview request:\n");
-    body.push_str(request.trim());
-    body.push_str("\n\nStable room/run references:\n");
-    body.push_str("- CWD: ");
-    body.push_str(cwd);
-    body.push('\n');
-    body.push_str("- Arena files: ");
-    body.push_str(arena_dir);
-    body.push('\n');
-    for participant in participants {
-        body.push_str("- ");
-        body.push_str(&participant.label);
-        body.push_str(" (");
-        body.push_str(&participant.role);
-        body.push_str("): participant_id=");
-        body.push_str(&participant.id);
-        body.push_str(" run_id=");
-        body.push_str(&participant.run_id);
-        body.push('\n');
-    }
-
-    if !room_memo.trim().is_empty() {
-        body.push_str("\nRoom memo:\n");
-        body.push_str(room_memo.trim());
-        body.push('\n');
-    }
-
-    body.push_str("\nRecent public room context:\n");
-    for turn in previous_turns.iter().rev().take(8).rev() {
-        body.push_str("\nUser: ");
-        body.push_str(&turn.user_input);
-        body.push('\n');
-        for response in &turn.responses {
-            let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(" [run_id=");
-            body.push_str(&response.run_id);
-            body.push_str("]: ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
-        }
-    }
-
-    body.push_str(
-        "\nReturn review findings, risks, and concrete suggestions. Do not claim you changed files.",
-    );
-    body
-}
-
-pub fn build_research_prompt(
-    target: &RoomParticipant,
-    topic: &str,
-    previous_turns: &[RoomTurn],
-    participants: &[RoomParticipant],
-    room_memo: &str,
-) -> String {
-    let mut body = String::from(
-        "You are a researcher in a Research room. Split the shared topic with the other participants and return a structured research result.",
-    );
-    body.push_str("\n\nResearch topic:\n");
-    body.push_str(topic.trim());
-    body.push_str("\n\nYour scoped subtask:\n");
-    body.push_str("- Participant: ");
-    body.push_str(&target.label);
-    body.push_str(" (");
-    body.push_str(&target.role);
-    body.push_str(")\n");
-    body.push_str(
-        "- Investigate the topic from your own angle. Include concrete findings, evidence, risks, open questions, and recommended next steps.",
-    );
-
-    let peer_labels = participants
-        .iter()
-        .filter(|participant| participant.id != target.id)
-        .map(|participant| participant.label.as_str())
-        .collect::<Vec<_>>();
-    if !peer_labels.is_empty() {
-        body.push_str("\n- Avoid duplicating these peers when possible: ");
-        body.push_str(&peer_labels.join(", "));
-    }
-
-    if !room_memo.trim().is_empty() {
-        body.push_str("\n\nRoom memo:\n");
-        body.push_str(room_memo.trim());
-    }
-
-    body.push_str("\n\nRecent public room context:\n");
-    for turn in previous_turns
-        .iter()
-        .filter(|turn| !matches!(turn.mode, RoomTurnMode::Private))
-        .rev()
-        .take(8)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        body.push_str("\nUser: ");
-        body.push_str(&turn.user_input);
-        body.push('\n');
-        for response in &turn.responses {
-            let label = participant_label(participants, &response.participant_id);
-            body.push_str("- ");
-            body.push_str(&label);
-            body.push_str(": ");
-            body.push_str(response.preview.as_deref().unwrap_or("(no preview)"));
-            body.push('\n');
-        }
-    }
-
-    body.push_str(
-        "\nReturn markdown with sections: Findings, Evidence, Risks, Open Questions, Next Steps, Arena Memory Candidates.",
-    );
-    body.push_str(
-        "\nIn Arena Memory Candidates, mark durable project knowledge as lines starting with [fact], [decision], or [lesson].",
-    );
-    body
 }
 
 fn build_research_artifact(
