@@ -285,6 +285,10 @@ export interface AiCharacter {
   default_provider: string;
   default_model?: string;
   icon?: string;
+  avatar_path?: string;
+  personality?: string;
+  expertise?: string[];
+  memory_config?: MemoryConfig;
   created_at: string;
   updated_at: string;
 }
@@ -1678,4 +1682,78 @@ export function isElementSelection(v: unknown): v is ElementSelection {
   if (!Object.values(styles as Record<string, unknown>).every((v) => typeof v === "string"))
     return false;
   return true;
+}
+
+// ── Character Memory System types ──
+
+export interface MemorySource {
+  kind: "chat" | "manual" | "inference";
+  run_id?: string;
+  group_chat_id?: string;
+}
+
+export interface MemoryNode {
+  id: string;
+  character_id: string;
+  content: string;
+  type: "fact" | "experience" | "preference" | "rule" | "relationship";
+  confidence: number;
+  source: MemorySource;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  relation: "supports" | "contradicts" | "extends" | "related" | "causes";
+  weight: number;
+}
+
+export interface MemoryGraphData {
+  nodes: MemoryNode[];
+  edges: MemoryEdge[];
+}
+
+export interface CommunityInfo {
+  id: number;
+  label: string;
+  cohesion: number;
+  node_count: number;
+  edge_count: number;
+  node_ids: string[];
+}
+
+export interface KnowledgeGapInfo {
+  gap_type: "isolated_node" | "sparse_community" | "bridge_node";
+  description: string;
+  suggestion: string;
+  affected_node_ids: string[];
+}
+
+export interface EmbeddingConfig {
+  enabled: boolean;
+  endpoint: string;
+  api_key?: string;
+  model: string;
+}
+
+export interface TestEmbeddingResult {
+  success: boolean;
+  latency_ms: number;
+  dimension: number;
+  error?: string;
+}
+
+export interface VectorSearchResult {
+  page_id: string;
+  score: number;
+  memory?: MemoryNode;
+}
+
+export interface MemoryConfig {
+  auto_learn: boolean;
+  retention_days?: number;
 }
