@@ -12,7 +12,6 @@ import type { TaskRun } from "$lib/types";
 export interface RoomRunMapping {
   roomId: string;
   roomName: string;
-  roomKind: string;
 }
 
 export interface ConversationGroup {

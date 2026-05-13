@@ -133,7 +133,6 @@ export async function listRooms(): Promise<RoomSummary[]> {
 export interface RoomRunIndexEntry {
   room_id: string;
   room_name: string;
-  room_kind: string;
   run_ids: string[];
 }
 

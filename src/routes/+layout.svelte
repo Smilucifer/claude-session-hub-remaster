@@ -473,7 +473,6 @@
           map.set(runId, {
             roomId: entry.room_id,
             roomName: entry.room_name || "Unnamed Room",
-            roomKind: entry.room_kind,
           });
         }
       }
