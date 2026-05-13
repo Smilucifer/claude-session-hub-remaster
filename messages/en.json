@@ -1603,6 +1603,9 @@
   "groupChat_memoryRecall": "Recalled {count} times",
   "groupChat_memoryPersisted": "Pinned",
   "groupChat_memoryEmpty": "No seat memories yet",
+  "groupChat_onboarding_title": "No AI Characters Yet",
+  "groupChat_onboarding_message": "Create a Planner character to get started with group chats.",
+  "groupChat_onboarding_create_planner": "Create Planner",
 
   "appUpdate_available": "A new version ({version}) is available.",
   "appUpdate_download": "Download",

@@ -1,5 +1,5 @@
 import * as api from "$lib/api";
-import type { GroupChatDetail, GroupChatSummary, GroupChatTurnSnapshot } from "$lib/types";
+import type { AiCharacter, GroupChatDetail, GroupChatSummary, GroupChatTurnSnapshot } from "$lib/types";
 import { dbg, dbgWarn } from "$lib/utils/debug";
 import {
   getPhase7Provider,
@@ -324,6 +324,36 @@ export class GroupChatStore {
     const trimmed = target.trim().replace(/^@+/, "");
     if (!trimmed) return;
     await this.sendMessage(`@summary @${trimmed}`);
+  }
+
+  /**
+   * Check if onboarding is needed: no AI characters exist yet.
+   * Returns the list of existing characters for the caller to use.
+   */
+  async checkOnboardingNeeded(): Promise<{ needed: boolean; characters: AiCharacter[] }> {
+    try {
+      const characters = await api.listCharacters();
+      return { needed: characters.length === 0, characters };
+    } catch (e) {
+      dbgWarn("group-chat", "checkOnboardingNeeded error", e);
+      // On error, assume onboarding not needed to avoid blocking the user
+      return { needed: false, characters: [] };
+    }
+  }
+
+  /**
+   * Create a Planner character with sensible defaults.
+   * Returns the newly created character.
+   */
+  async createPlannerCharacter(): Promise<AiCharacter> {
+    return api.createCharacter(
+      "Planner",
+      "planner",
+      "You are a strategic planner. Break down tasks, coordinate participants, and ensure quality outcomes.",
+      "claude",
+      null,
+      null,
+    );
   }
 
   async deleteRoom(id: string): Promise<void> {

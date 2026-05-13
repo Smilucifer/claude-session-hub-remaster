@@ -1603,6 +1603,9 @@
   "groupChat_memoryRecall": "引用 {count} 次",
   "groupChat_memoryPersisted": "已固定",
   "groupChat_memoryEmpty": "暂无座位记忆",
+  "groupChat_onboarding_title": "还没有 AI 角色",
+  "groupChat_onboarding_message": "先创建一个 Planner 角色，开启群聊之旅",
+  "groupChat_onboarding_create_planner": "创建 Planner 角色",
 
   "appUpdate_available": "发现新版本（{version}）。",
   "appUpdate_download": "下载",
