@@ -66,16 +66,17 @@ export interface TaskRun {
   conversation_ref?: ConversationRef;
 }
 
-export interface RoomParticipant {
+export interface GroupChatParticipant {
   id: string;
   run_id: string;
   agent: string;
   label: string;
   role: string;
   joined_at: string;
+  character_id: string;
 }
 
-export type RoomTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget";
+export type GroupChatTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget";
 
 export type AgentKind = "claude" | "codex" | "unknown";
 export type ResumeCapability = "session_id" | "latest" | "none";
@@ -93,7 +94,7 @@ export interface AgentCapabilities {
   permission_protocol: boolean;
 }
 
-export interface RoomResponseRef {
+export interface GroupChatResponseRef {
   participant_id: string;
   run_id: string;
   event_seq_start: number;
@@ -103,13 +104,13 @@ export interface RoomResponseRef {
   error?: string;
 }
 
-export interface RoomTurn {
+export interface GroupChatTurn {
   id: string;
   idx: number;
-  mode: RoomTurnMode;
+  mode: GroupChatTurnMode;
   user_input: string;
   target_participant_ids: string[];
-  responses: RoomResponseRef[];
+  responses: GroupChatResponseRef[];
   started_at: string;
   completed_at?: string;
 }
@@ -122,12 +123,12 @@ export interface ParticipantSnapshot {
   error?: string;
 }
 
-export interface RoomTurnSnapshot {
-  turn: RoomTurn;
+export interface GroupChatTurnSnapshot {
+  turn: GroupChatTurn;
   participant_contents: ParticipantSnapshot[];
 }
 
-export interface RoomSummary {
+export interface GroupChatSummary {
   id: string;
   name: string;
   cwd?: string;
@@ -136,19 +137,19 @@ export interface RoomSummary {
   updated_at: string;
 }
 
-export interface RoomParticipantDetail {
-  participant: RoomParticipant;
+export interface GroupChatParticipantDetail {
+  participant: GroupChatParticipant;
   run?: TaskRun;
   capabilities: AgentCapabilities;
 }
 
-export interface RoomDetail {
+export interface GroupChatDetail {
   id: string;
   name: string;
   cwd?: string;
   memo: string;
-  participants: RoomParticipantDetail[];
-  turns: RoomTurn[];
+  participants: GroupChatParticipantDetail[];
+  turns: GroupChatTurn[];
   created_at: string;
   updated_at: string;
 }

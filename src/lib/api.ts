@@ -45,9 +45,9 @@ import type {
   AgentDefinitionSummary,
   RunSearchFilters,
   RunSearchResponse,
-  RoomDetail,
-  RoomSummary,
-  RoomTurnSnapshot,
+  GroupChatDetail,
+  GroupChatSummary,
+  GroupChatTurnSnapshot,
   BalanceHelperSettings,
   ValidatePlatformCredentialsResponse,
 } from "./types";
@@ -123,56 +123,56 @@ export async function softDeleteRuns(ids: string[]): Promise<number> {
   return invoke<number>("soft_delete_runs", { ids });
 }
 
-// Rooms
+// Group Chats
 
-export async function listRooms(): Promise<RoomSummary[]> {
-  dbg("api", "listRooms");
-  return invoke<RoomSummary[]>("list_rooms");
+export async function listGroupChats(): Promise<GroupChatSummary[]> {
+  dbg("api", "listGroupChats");
+  return invoke<GroupChatSummary[]>("list_group_chats");
 }
 
-export interface RoomRunIndexEntry {
+export interface GroupChatRunIndexEntry {
   room_id: string;
   room_name: string;
   run_ids: string[];
 }
 
-export async function listRoomRunIndex(): Promise<RoomRunIndexEntry[]> {
-  dbg("api", "listRoomRunIndex");
-  return invoke<RoomRunIndexEntry[]>("list_room_run_index");
+export async function listGroupChatRunIndex(): Promise<GroupChatRunIndexEntry[]> {
+  dbg("api", "listGroupChatRunIndex");
+  return invoke<GroupChatRunIndexEntry[]>("list_group_chat_run_index");
 }
 
-export async function getRoomTurnSnapshot(
+export async function getGroupChatTurnSnapshot(
   roomId: string,
   turnId: string,
-): Promise<RoomTurnSnapshot> {
-  dbg("api", "getRoomTurnSnapshot", { roomId, turnId });
-  return invoke<RoomTurnSnapshot>("get_room_turn_snapshot", { roomId, turnId });
+): Promise<GroupChatTurnSnapshot> {
+  dbg("api", "getGroupChatTurnSnapshot", { roomId, turnId });
+  return invoke<GroupChatTurnSnapshot>("get_group_chat_turn_snapshot", { roomId, turnId });
 }
 
-export async function getRoom(id: string): Promise<RoomDetail> {
-  dbg("api", "getRoom", { id });
-  return invoke<RoomDetail>("get_room", { id });
+export async function getGroupChat(id: string): Promise<GroupChatDetail> {
+  dbg("api", "getGroupChat", { id });
+  return invoke<GroupChatDetail>("get_group_chat", { id });
 }
 
-export async function createRoom(
+export async function createGroupChat(
   name: string,
   cwd?: string,
-): Promise<RoomDetail> {
-  dbg("api", "createRoom", { name, cwd });
-  return invoke<RoomDetail>("create_room", {
+): Promise<GroupChatDetail> {
+  dbg("api", "createGroupChat", { name, cwd });
+  return invoke<GroupChatDetail>("create_group_chat", {
     name,
     cwd: cwd ?? null,
   });
 }
 
-export async function attachRoomRun(
+export async function attachGroupChatRun(
   roomId: string,
   runId: string,
   label?: string,
   role?: string,
-): Promise<RoomDetail> {
-  dbg("api", "attachRoomRun", { roomId, runId });
-  return invoke<RoomDetail>("attach_room_run", {
+): Promise<GroupChatDetail> {
+  dbg("api", "attachGroupChatRun", { roomId, runId });
+  return invoke<GroupChatDetail>("attach_group_chat_run", {
     roomId,
     runId,
     label: label ?? null,
@@ -180,7 +180,7 @@ export async function attachRoomRun(
   });
 }
 
-export async function createRoomClaudeParticipant(
+export async function createGroupChatClaudeParticipant(
   roomId: string,
   prompt: string,
   cwd: string,
@@ -189,9 +189,9 @@ export async function createRoomClaudeParticipant(
   connectionProfileId?: string,
   label?: string,
   role?: string,
-): Promise<RoomDetail> {
-  dbg("api", "createRoomClaudeParticipant", { roomId, cwd });
-  return invoke<RoomDetail>("create_room_claude_participant", {
+): Promise<GroupChatDetail> {
+  dbg("api", "createGroupChatClaudeParticipant", { roomId, cwd });
+  return invoke<GroupChatDetail>("create_group_chat_claude_participant", {
     roomId,
     prompt,
     cwd,
@@ -203,7 +203,7 @@ export async function createRoomClaudeParticipant(
   });
 }
 
-export async function createRoomParticipant(
+export async function createGroupChatParticipant(
   roomId: string,
   agent: "claude" | "codex",
   prompt: string,
@@ -213,9 +213,9 @@ export async function createRoomParticipant(
   connectionProfileId?: string,
   label?: string,
   role?: string,
-): Promise<RoomDetail> {
-  dbg("api", "createRoomParticipant", { roomId, agent, cwd });
-  return invoke<RoomDetail>("create_room_participant", {
+): Promise<GroupChatDetail> {
+  dbg("api", "createGroupChatParticipant", { roomId, agent, cwd });
+  return invoke<GroupChatDetail>("create_group_chat_participant", {
     roomId,
     agent,
     prompt,
@@ -228,24 +228,24 @@ export async function createRoomParticipant(
   });
 }
 
-export async function updateRoomMemo(roomId: string, memo: string): Promise<RoomDetail> {
-  dbg("api", "updateRoomMemo", { roomId });
-  return invoke<RoomDetail>("update_room_memo", { roomId, memo });
+export async function updateGroupChatMemo(roomId: string, memo: string): Promise<GroupChatDetail> {
+  dbg("api", "updateGroupChatMemo", { roomId });
+  return invoke<GroupChatDetail>("update_group_chat_memo", { roomId, memo });
 }
 
-export async function sendRoomMessage(roomId: string, message: string): Promise<RoomDetail> {
-  dbg("api", "sendRoomMessage", { roomId, messageLength: message.length });
-  return invoke<RoomDetail>("send_room_message", { roomId, message });
+export async function sendGroupChatMessage(roomId: string, message: string): Promise<GroupChatDetail> {
+  dbg("api", "sendGroupChatMessage", { roomId, messageLength: message.length });
+  return invoke<GroupChatDetail>("send_group_chat_message", { roomId, message });
 }
 
-export async function deleteRoom(id: string): Promise<void> {
-  dbg("api", "deleteRoom", { id });
-  return invoke<void>("delete_room", { id });
+export async function deleteGroupChat(id: string): Promise<void> {
+  dbg("api", "deleteGroupChat", { id });
+  return invoke<void>("delete_group_chat", { id });
 }
 
-export async function cancelRoomTurn(roomId: string): Promise<boolean> {
-  dbg("api", "cancelRoomTurn", roomId);
-  return invoke<boolean>("cancel_room_turn", { roomId });
+export async function cancelGroupChatTurn(roomId: string): Promise<boolean> {
+  dbg("api", "cancelGroupChatTurn", roomId);
+  return invoke<boolean>("cancel_group_chat_turn", { roomId });
 }
 
 // Prompt search & favorites
