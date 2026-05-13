@@ -74,10 +74,7 @@ pub fn append_memory_log(character_id: &str, node: &MemoryNode) -> Result<(), St
     Ok(())
 }
 
-pub fn read_all_memory_log_entries(character_id: &str) -> Result<Vec<MemoryNode>, String> {
-    validate_character_id(character_id)?;
-    let _lk = char_lock(character_id);
-    let _lock = _lk.lock().unwrap_or_else(|e| e.into_inner());
+fn read_log_entries_unlocked(character_id: &str) -> Result<Vec<MemoryNode>, String> {
     let path = memory_log_path(character_id);
     if !path.exists() {
         return Ok(Vec::new());
@@ -97,11 +94,18 @@ pub fn read_all_memory_log_entries(character_id: &str) -> Result<Vec<MemoryNode>
     Ok(entries)
 }
 
+pub fn read_all_memory_log_entries(character_id: &str) -> Result<Vec<MemoryNode>, String> {
+    validate_character_id(character_id)?;
+    let _lk = char_lock(character_id);
+    let _lock = _lk.lock().unwrap_or_else(|e| e.into_inner());
+    read_log_entries_unlocked(character_id)
+}
+
 pub fn delete_memory_from_log(character_id: &str, memory_id: &str) -> Result<(), String> {
     validate_character_id(character_id)?;
     let lock = char_lock(character_id);
     let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-    let entries = read_all_memory_log_entries(character_id)?;
+    let entries = read_log_entries_unlocked(character_id)?;
     let filtered: Vec<_> = entries.into_iter().filter(|n| n.id != memory_id).collect();
     let path = memory_log_path(character_id);
 
