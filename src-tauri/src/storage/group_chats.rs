@@ -49,7 +49,7 @@ fn validate_group_chat_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn save_group_chat(room: &GroupChat) -> Result<(), String> {
+pub(crate) fn save_group_chat(room: &GroupChat) -> Result<(), String> {
     validate_group_chat_id(&room.id)?;
     let dir = group_chat_dir(&room.id);
     super::ensure_dir(&dir).map_err(|e| e.to_string())?;

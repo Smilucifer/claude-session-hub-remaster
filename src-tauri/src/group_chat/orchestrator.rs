@@ -697,15 +697,19 @@ fn build_role_system_prompt(role_type: &str, role_instruction: &Option<String>) 
     }
 }
 
-/// Look up the AiCharacter whose label matches the participant's label,
+/// Look up the AiCharacter linked via participant.character_id,
 /// then build a role system prompt from its role_type and role_instruction.
+/// ID-based lookup — no label fallback.
 fn resolve_participant_system_prompt(
     participant: &GroupChatParticipant,
     ai_characters: &[crate::models::AiCharacter],
 ) -> Option<String> {
+    if participant.character_id.is_empty() || participant.character_id == "__orphan__" {
+        return None;
+    }
     let character = ai_characters
         .iter()
-        .find(|c| c.label.eq_ignore_ascii_case(&participant.label))?;
+        .find(|c| c.id == participant.character_id)?;
     let prompt = build_role_system_prompt(&character.role_type, &character.role_instruction);
     if prompt.is_empty() {
         None
@@ -1292,6 +1296,7 @@ mod tests {
             agent: "claude".to_string(),
             label: label.to_string(),
             role: "participant".to_string(),
+            character_id: String::new(),
             joined_at: "2026-04-30T00:00:00Z".to_string(),
         }
     }
