@@ -1,12 +1,16 @@
 # Claw GO Remaster Implementation Roadmap
 
 **Date:** 2026-04-30
-**Status:** Active
+**Status:** Done (v2.0.0 — Phase 10 Group Chat refactor complete)
 **Source:** `thinking.md`, `docs/ADR-001-room-over-run.md`
 
 ## Progress Snapshot
 
-Last updated: 2026-05-05 after native Codex/Gemini chat parity, connection-profile UI parity, and Windows npm shim suppression work.
+Last updated: 2026-05-13 after Phase 10 Group Chat refactor (v2.0.0).
+
+### Done (new)
+
+- Phase 10 Group Chat refactor merged. Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt injection, Auto-chain routing. 56 files changed, +4700/-6600 lines.
 
 ### Done
 
