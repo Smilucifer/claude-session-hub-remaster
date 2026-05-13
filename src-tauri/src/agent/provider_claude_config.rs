@@ -250,16 +250,25 @@ pub fn write_provider_claude_config(
     })
 }
 
-/// Write a minimal settings JSON containing managed configs (MCP servers, hooks, plugins).
-/// Used when there is no provider config but managed configs exist.
-pub fn write_managed_settings(
+fn mcp_config_temp_path(run_id: &str) -> PathBuf {
+    crate::storage::data_dir()
+        .join("provider-claude-configs")
+        .join(format!("session-{run_id}-mcp.json"))
+}
+
+/// Write a standalone MCP config JSON file containing only mcpServers.
+/// CC 2.1.140+ ignores mcpServers in --settings JSON; MCP servers must be
+/// injected via --mcp-config <path> instead.
+pub fn write_mcp_config(
     run_id: &str,
     managed: &ManagedConfig,
 ) -> Result<PathBuf, String> {
-    // Reuse the shared JSON builder with an empty env — same structure as provider sessions.
-    let config = provider_config_json_from_env(&HashMap::new(), managed);
+    let config = json!({
+        "mcpServers": managed.mcp_servers,
+    });
 
-    let path = provider_claude_config_temp_path(run_id);
+    let path = mcp_config_temp_path(run_id);
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("create mcp config dir {}: {e}", parent.display()))?;
@@ -271,10 +280,39 @@ pub fn write_managed_settings(
         .map_err(|e| format!("write mcp config {}: {e}", path.display()))?;
 
     log::info!(
-        "[provider_claude_config] wrote managed settings for run {}: {} (mcp={}, hooks={}, plugins={})",
+        "[provider_claude_config] wrote standalone MCP config for run {}: {} ({} servers)",
         run_id,
         path.display(),
-        managed.mcp_servers.len(),
+        managed.mcp_servers.len()
+    );
+
+    Ok(path)
+}
+
+/// Write a minimal settings JSON containing managed configs (hooks, plugins).
+/// Used when there is no provider config but managed configs exist.
+pub fn write_managed_settings(
+    run_id: &str,
+    managed: &ManagedConfig,
+) -> Result<PathBuf, String> {
+    // Reuse the shared JSON builder with an empty env — same structure as provider sessions.
+    let config = provider_config_json_from_env(&HashMap::new(), managed);
+
+    let path = provider_claude_config_temp_path(run_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create managed settings dir {}: {e}", parent.display()))?;
+    }
+
+    let serialized =
+        serde_json::to_string_pretty(&config).map_err(|e| format!("serialize managed settings: {e}"))?;
+    fs::write(&path, serialized)
+        .map_err(|e| format!("write managed settings {}: {e}", path.display()))?;
+
+    log::info!(
+        "[provider_claude_config] wrote managed settings for run {}: {} (hooks={}, plugins={})",
+        run_id,
+        path.display(),
         managed.hooks.len(),
         managed.enabled_plugins.len()
     );
@@ -554,9 +592,9 @@ fn provider_config_json_from_env(
     managed: &ManagedConfig,
 ) -> Value {
     // Merge order: native base → strip secrets → overlay env → force
-    // permissions → fixed fields → merge MCP. The native base ensures
-    // hooks, enabledMcpjsonServers, enabledPlugins, extraKnownMarketplaces,
-    // and other user fields survive the --settings override.
+    // permissions → fixed fields → hooks + plugins overlay. MCP servers
+    // are injected separately via --mcp-config (CC 2.1.140+ ignores
+    // mcpServers in --settings).
     let mut config = crate::storage::cli_config::load_cli_config();
 
     // SAFETY: load_cli_config() always returns Value::Object.
@@ -608,21 +646,6 @@ fn provider_config_json_from_env(
         "language".to_string(),
         Value::String("简体中文".to_string()),
     );
-
-    // mcpServers: merge native + Claw GO managed (additive).
-    // Assumes upstream has already deduplicated by name.
-    if !managed.mcp_servers.is_empty() {
-        let existing = obj
-            .get("mcpServers")
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
-        let mut merged = existing;
-        for (name, cfg) in managed.mcp_servers {
-            merged.insert(name.clone(), cfg.clone());
-        }
-        obj.insert("mcpServers".to_string(), Value::Object(merged));
-    }
 
     // hooks: managed overwrites native per-event (not concat).
     if !managed.hooks.is_empty() {
@@ -678,7 +701,7 @@ mod tests {
         }
     }
 
-    fn managed_with_mcp(mcp: &HashMap<String, serde_json::Value>) -> ManagedConfig {
+    fn managed_with_mcp(mcp: &HashMap<String, serde_json::Value>) -> ManagedConfig<'_> {
         static EMPTY: std::sync::OnceLock<HashMap<String, serde_json::Value>> = std::sync::OnceLock::new();
         static EMPTY_PLUGINS: std::sync::OnceLock<HashMap<String, bool>> = std::sync::OnceLock::new();
         ManagedConfig {
@@ -1358,16 +1381,56 @@ mod tests {
     }
 
     #[test]
-    fn provider_config_merges_mcp_servers_additively() {
+    fn provider_config_does_not_inject_managed_mcp_servers() {
+        // Managed MCP servers are no longer injected into --settings JSON;
+        // they go through the separate --mcp-config file instead.
         let env = HashMap::new();
         let managed_mcp = HashMap::from([(
             "my-server".to_string(),
             serde_json::json!({"command": "node", "args": ["server.js"]}),
         )]);
         let config = provider_config_json_from_env(&env, &managed_with_mcp(&managed_mcp));
-        let mcp = config.get("mcpServers").and_then(|v| v.as_object()).unwrap();
-        assert!(mcp.contains_key("my-server"));
-        // If native settings also have mcpServers, they should be preserved too.
+        // Native mcpServers may still exist (from ~/.claude/settings.json),
+        // but managed MCP servers must NOT be present.
+        if let Some(mcp) = config.get("mcpServers").and_then(|v| v.as_object()) {
+            assert!(
+                !mcp.contains_key("my-server"),
+                "managed MCP servers must not appear in --settings JSON"
+            );
+        }
+    }
+
+    #[test]
+    fn writes_mcp_config_to_correct_path() {
+        let _guard = crate::storage::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("CLAW_GO_DATA_DIR");
+        std::env::set_var("CLAW_GO_DATA_DIR", tmp.path());
+
+        let managed_mcp = HashMap::from([(
+            "my-server".to_string(),
+            serde_json::json!({"command": "node", "args": ["server.js"]}),
+        )]);
+        let result = write_mcp_config("test-mcp-001", &managed_with_mcp(&managed_mcp)).unwrap();
+
+        assert!(result.ends_with(std::path::Path::new(
+            "provider-claude-configs/session-test-mcp-001-mcp.json"
+        )));
+        let content = fs::read_to_string(&result).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let servers = parsed.get("mcpServers").and_then(|v| v.as_object()).unwrap();
+        assert!(servers.contains_key("my-server"));
+        assert_eq!(
+            servers["my-server"]["command"].as_str(),
+            Some("node")
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("CLAW_GO_DATA_DIR", value),
+            None => std::env::remove_var("CLAW_GO_DATA_DIR"),
+        }
     }
 
     #[test]

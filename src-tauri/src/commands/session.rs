@@ -663,25 +663,42 @@ pub(crate) async fn start_session_impl(
         }
         None => None,
     };
-    // If no provider config was generated but managed configs exist,
+    // If no provider config was generated but managed configs (hooks, plugins) exist,
     // write a minimal settings JSON so managed configs are injected via --settings.
-    let has_managed_configs = !managed.mcp_servers.is_empty()
-        || !managed.hooks.is_empty()
+    let has_managed_configs = !managed.hooks.is_empty()
         || !managed.enabled_plugins.is_empty();
-    let mcp_only_config_path = if provider_config.is_none() && has_managed_configs {
+    let managed_settings_path = if provider_config.is_none() && has_managed_configs {
         match crate::agent::provider_claude_config::write_managed_settings(&run_id, &managed) {
             Ok(path) => {
                 log::info!(
-                    "[session] managed settings written: {} (mcp={}, hooks={}, plugins={})",
+                    "[session] managed settings written: {} (hooks={}, plugins={})",
                     path.display(),
-                    managed.mcp_servers.len(),
                     managed.hooks.len(),
                     managed.enabled_plugins.len()
                 );
                 Some(path)
             }
             Err(e) => {
-                log::warn!("[session] failed to write MCP-only settings: {e}");
+                log::warn!("[session] failed to write managed settings: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // MCP servers are written to a standalone file for --mcp-config (CC 2.1.140+
+    // ignores mcpServers in --settings JSON).
+    let mcp_config_path = if !managed.mcp_servers.is_empty() {
+        match crate::agent::provider_claude_config::write_mcp_config(&run_id, &managed) {
+            Ok(path) => {
+                log::info!(
+                    "[session] MCP config written for --mcp-config: {}",
+                    path.display()
+                );
+                Some(path)
+            }
+            Err(e) => {
+                log::warn!("[session] failed to write MCP config: {e}");
                 None
             }
         }
@@ -806,7 +823,8 @@ pub(crate) async fn start_session_impl(
         provider_config
             .as_ref()
             .map(|c| c.json_path.as_path())
-            .or(mcp_only_config_path.as_deref()),
+            .or(managed_settings_path.as_deref()),
+        mcp_config_path.as_deref(),
     )
     .await?;
     let child = spawn_result.child;
@@ -1401,6 +1419,7 @@ pub(crate) async fn approve_session_tool_impl(
         user.windows_msvc_env_mode,
         resolved.extra_env.as_ref(),
         None,
+        None,
     )
     .await?;
     let child = spawn_result.child;
@@ -1842,6 +1861,7 @@ async fn spawn_cli_process(
     windows_msvc_env_mode: WindowsMsvcEnvMode,
     extra_env: Option<&std::collections::HashMap<String, String>>,
     provider_config_path: Option<&std::path::Path>,
+    mcp_config_path: Option<&std::path::Path>,
 ) -> Result<SpawnCliResult, String> {
     // Build CLI args (shared between local and remote)
     let mut claude_args: Vec<String> = vec![
@@ -1860,6 +1880,12 @@ async fn spawn_cli_process(
         claude_args.push("--settings".into());
         claude_args.push(config_path.to_string_lossy().into_owned());
         log::info!("[session] --settings {}", config_path.display());
+    }
+
+    if let Some(mcp_path) = mcp_config_path {
+        claude_args.push("--mcp-config".into());
+        claude_args.push(mcp_path.to_string_lossy().into_owned());
+        log::info!("[session] --mcp-config {}", mcp_path.display());
     }
 
     // Session mode args
