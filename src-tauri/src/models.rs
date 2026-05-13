@@ -355,6 +355,9 @@ pub struct UserSettings {
     /// Injected into every generated session JSON via `--settings`.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub mcp_servers: std::collections::HashMap<String, serde_json::Value>,
+    /// Reusable AI character templates for group chat participants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ai_characters: Vec<AiCharacter>,
     pub updated_at: String,
 }
 
@@ -537,6 +540,7 @@ impl Default for UserSettings {
             github_proxy_port: 7890,
             windows_msvc_env_mode: WindowsMsvcEnvMode::Auto,
             mcp_servers: std::collections::HashMap::new(),
+            ai_characters: vec![],
             updated_at: now_iso(),
         }
     }
@@ -1850,6 +1854,24 @@ pub struct ConfiguredMcpServer {
     pub env_keys: Vec<String>,
     #[serde(default)]
     pub header_keys: Vec<String>,
+}
+
+// ── AI Character types ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCharacter {
+    pub id: String,
+    pub label: String,
+    pub role_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_instruction: Option<String>,
+    pub default_provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 // ── Keybinding types ──

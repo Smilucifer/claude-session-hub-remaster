@@ -50,6 +50,7 @@ import type {
   GroupChatTurnSnapshot,
   BalanceHelperSettings,
   ValidatePlatformCredentialsResponse,
+  AiCharacter,
 } from "./types";
 
 // Runs
@@ -246,6 +247,52 @@ export async function deleteGroupChat(id: string): Promise<void> {
 export async function cancelGroupChatTurn(roomId: string): Promise<boolean> {
   dbg("api", "cancelGroupChatTurn", roomId);
   return invoke<boolean>("cancel_group_chat_turn", { roomId });
+}
+
+// AI Characters
+
+export async function listCharacters(): Promise<AiCharacter[]> {
+  dbg("api", "listCharacters");
+  return invoke<AiCharacter[]>("list_characters");
+}
+
+export async function createCharacter(
+  label: string,
+  roleType: string,
+  roleInstruction: string | null,
+  defaultProvider: string,
+  defaultModel: string | null,
+  icon: string | null,
+): Promise<AiCharacter> {
+  dbg("api", "createCharacter", { label, roleType });
+  return invoke<AiCharacter>("create_character", {
+    label,
+    roleType,
+    roleInstruction,
+    defaultProvider,
+    defaultModel,
+    icon,
+  });
+}
+
+export async function updateCharacter(
+  id: string,
+  updates: {
+    label?: string;
+    roleType?: string;
+    roleInstruction?: string | null;
+    defaultProvider?: string;
+    defaultModel?: string | null;
+    icon?: string | null;
+  },
+): Promise<AiCharacter> {
+  dbg("api", "updateCharacter", { id, ...updates });
+  return invoke<AiCharacter>("update_character", { id, ...updates });
+}
+
+export async function deleteCharacter(id: string): Promise<void> {
+  dbg("api", "deleteCharacter", { id });
+  return invoke<void>("delete_character", { id });
 }
 
 // Prompt search & favorites

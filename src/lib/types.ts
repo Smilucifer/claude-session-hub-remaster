@@ -248,6 +248,7 @@ export interface UserSettings {
   github_proxy_port?: number;
   windows_msvc_env_mode?: WindowsMsvcEnvMode;
   mcp_servers?: Record<string, McpServerConfig>;
+  ai_characters?: AiCharacter[];
   updated_at: string;
 }
 
@@ -275,6 +276,18 @@ export interface BalanceHelperSettings {
 }
 
 export type WindowsMsvcEnvMode = "auto" | "always" | "off";
+
+export interface AiCharacter {
+  id: string;
+  label: string;
+  role_type: string;
+  role_instruction?: string;
+  default_provider: string;
+  default_model?: string;
+  icon?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type WindowsMsvcEnvStatusState =
   | "disabled"
