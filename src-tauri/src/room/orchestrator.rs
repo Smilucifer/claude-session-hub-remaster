@@ -2440,23 +2440,6 @@ mod tests {
                 let stored = crate::storage::rooms::list_public_turns(&room.id).unwrap();
                 assert_eq!(stored.len(), 1);
                 assert_eq!(stored[0].mode, RoomTurnMode::Research);
-
-                let artifact = crate::storage::rooms::read_research_artifact(&room.id)
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(artifact.schema_version, 2);
-                assert_eq!(artifact.topic, "Compare local vector database options");
-                assert_eq!(artifact.turn_id, turn.id);
-                assert_eq!(artifact.results.len(), 2);
-                assert_eq!(artifact.results[0].label, "Alice");
-                assert_eq!(artifact.results[1].label, "Bob");
-                assert!(artifact.memory_candidates.is_empty());
-                assert_eq!(
-                    crate::storage::rooms::list_research_artifacts(&room.id)
-                        .unwrap()
-                        .len(),
-                    1
-                );
             });
         });
     }

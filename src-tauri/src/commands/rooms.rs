@@ -32,7 +32,7 @@ fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
         memo: room.memo,
         participants,
         turns: storage::rooms::list_public_turns(room_id)?,
-        research_artifact: storage::rooms::read_research_artifact(room_id)?,
+        research_artifact: None,
         seat_memories: room.seat_memories,
         seat_memory_inbox: room.seat_memory_inbox,
         seat_profile: room.seat_profile,
@@ -471,56 +471,6 @@ pub fn update_room_memo(room_id: String, memo: String) -> Result<RoomDetail, Str
 }
 
 #[tauri::command]
-pub fn add_seat_memory_entry(
-    room_id: String,
-    participant_id: String,
-    kind: crate::room::models::MemoryKind,
-    key: String,
-    content: String,
-) -> Result<RoomDetail, String> {
-    if key.len() > 200 {
-        return Err("Memory key too long (max 200 chars)".to_string());
-    }
-    if content.len() > 2000 {
-        return Err("Memory content too long (max 2000 chars)".to_string());
-    }
-    let now = crate::models::now_iso();
-    let entry = crate::room::models::SeatMemoryEntry {
-        id: format!("mem-{}-{}", &now[..10], &uuid_simple()[..8]),
-        kind,
-        key,
-        content,
-        recall: 0,
-        last_accessed: String::new(),
-        created_at: now,
-        persisted: false,
-        source_turn_id: None,
-    };
-    storage::rooms::add_seat_memory_entry(&room_id, &participant_id, entry)?;
-    room_detail(&room_id)
-}
-
-#[tauri::command]
-pub fn delete_seat_memory_entry(
-    room_id: String,
-    participant_id: String,
-    entry_id: String,
-) -> Result<RoomDetail, String> {
-    storage::rooms::delete_seat_memory_entry(&room_id, &participant_id, &entry_id)?;
-    room_detail(&room_id)
-}
-
-#[tauri::command]
-pub fn clear_seat_memory(room_id: String, participant_id: String) -> Result<RoomDetail, String> {
-    storage::rooms::clear_seat_memory(&room_id, &participant_id)?;
-    room_detail(&room_id)
-}
-
-fn uuid_simple() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-#[tauri::command]
 pub async fn send_room_message(
     app: AppHandle,
     sessions: State<'_, ActorSessionMap>,
@@ -535,26 +485,8 @@ pub async fn send_room_message(
         process_map: process_map.inner().clone(),
     });
     match room.kind {
-        RoomKind::Roundtable => {
+        RoomKind::Roundtable | RoomKind::Driver | RoomKind::Research => {
             crate::room::orchestrator::run_roundtable_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime.clone(),
-            )
-            .await?;
-        }
-        RoomKind::Driver => {
-            crate::room::orchestrator::run_driver_turn_with_runtime(
-                &room_id,
-                &message,
-                sessions.inner(),
-                pipe_runtime.clone(),
-            )
-            .await?;
-        }
-        RoomKind::Research => {
-            crate::room::orchestrator::run_research_turn_with_runtime(
                 &room_id,
                 &message,
                 sessions.inner(),
@@ -892,30 +824,4 @@ mod tests {
         });
     }
 
-    #[test]
-    fn room_detail_includes_latest_research_artifact() {
-        with_temp_data_dir(|| {
-            let room = crate::storage::rooms::create_room_with_kind(
-                "Research Room".into(),
-                "".into(),
-                None,
-                crate::room::models::RoomKind::Research,
-            )
-            .unwrap();
-            let artifact = crate::room::models::ResearchArtifact {
-                schema_version: 2,
-                room_id: room.id.clone(),
-                topic: "Compare search tools".into(),
-                turn_id: "turn-1".into(),
-                generated_at: "2026-05-02T00:00:00Z".into(),
-                results: vec![],
-                memory_candidates: vec![],
-            };
-            crate::storage::rooms::write_research_artifact(&room.id, &artifact).unwrap();
-
-            let detail = super::room_detail(&room.id).unwrap();
-
-            assert_eq!(detail.research_artifact, Some(artifact));
-        });
-    }
 }
