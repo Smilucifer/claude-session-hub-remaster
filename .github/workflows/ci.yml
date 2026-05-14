@@ -77,6 +77,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -164,6 +168,9 @@ jobs:
         with:
           workspaces: src-tauri
           key: universal-apple-darwin
+
+      - name: Install protoc
+        run: brew install protobuf
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

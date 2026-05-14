@@ -42,6 +42,10 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.target }}
 
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
