@@ -213,12 +213,12 @@ pub fn write_provider_claude_config(
     cred: &PlatformCredential,
     run_id: &str,
     managed: &ManagedConfig,
-    disable_plugins: bool,
+    disable_hooks_and_plugins: bool,
 ) -> Result<ProviderClaudeConfigMaterialized, String> {
     // Build env vars dynamically from the latest credential (from settings page).
     let env = provider_env_from_credential(platform_id, cred)?;
     // Merge into the fixed JSON template.
-    let json_value = provider_config_json_from_env(&env, managed, disable_plugins);
+    let json_value = provider_config_json_from_env(&env, managed, disable_hooks_and_plugins);
     // Each session gets a unique temp JSON so stale cache is impossible.
     let path = provider_claude_config_temp_path(run_id);
 
@@ -295,10 +295,10 @@ pub fn write_mcp_config(
 pub fn write_managed_settings(
     run_id: &str,
     managed: &ManagedConfig,
-    disable_plugins: bool,
+    disable_hooks_and_plugins: bool,
 ) -> Result<PathBuf, String> {
     // Reuse the shared JSON builder with an empty env — same structure as provider sessions.
-    let config = provider_config_json_from_env(&HashMap::new(), managed, disable_plugins);
+    let config = provider_config_json_from_env(&HashMap::new(), managed, disable_hooks_and_plugins);
 
     let path = provider_claude_config_temp_path(run_id);
     if let Some(parent) = path.parent() {
@@ -592,7 +592,7 @@ fn build_parameterized_env(
 fn provider_config_json_from_env(
     env: &HashMap<String, String>,
     managed: &ManagedConfig,
-    disable_plugins: bool,
+    disable_hooks_and_plugins: bool,
 ) -> Value {
     // Merge order: native base → strip secrets → overlay env → force
     // permissions → fixed fields → hooks + plugins overlay. MCP servers
@@ -650,7 +650,7 @@ fn provider_config_json_from_env(
         Value::String("简体中文".to_string()),
     );
 
-    if disable_plugins {
+    if disable_hooks_and_plugins {
         // Group chat non-executor participants: strip all hooks and plugins
         // to prevent skill-driven behavior (superpowers, TDD, code-review, etc.).
         // MCP servers are unaffected — they use a separate --mcp-config path.
@@ -1540,7 +1540,7 @@ mod tests {
     }
 
     #[test]
-    fn disable_plugins_strips_all_hooks_and_plugins() {
+    fn disable_hooks_and_plugins_strips_all_hooks_and_plugins() {
         let env = HashMap::new();
         let config = provider_config_json_from_env(&env, &empty_managed(), true);
 
@@ -1551,13 +1551,13 @@ mod tests {
             .expect("enabledPlugins must exist");
         assert!(
             plugins.is_empty(),
-            "enabledPlugins must be empty when disable_plugins=true, got: {plugins:?}"
+            "enabledPlugins must be empty when disable_hooks_and_plugins=true, got: {plugins:?}"
         );
 
         // hooks must not be present at all.
         assert!(
             config.get("hooks").is_none(),
-            "hooks must not exist when disable_plugins=true"
+            "hooks must not exist when disable_hooks_and_plugins=true"
         );
 
         // Core fields must still be present.

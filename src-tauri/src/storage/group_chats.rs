@@ -218,6 +218,9 @@ pub fn detach_group_chat_run(room_id: &str, run_id: &str) -> Result<GroupChat, S
     let group_chat_lock = group_chat_lock(room_id);
     let _guard = group_chat_lock.lock().unwrap_or_else(|e| e.into_inner());
     let mut room = get_group_chat(room_id).ok_or_else(|| format!("GroupChat {} not found", room_id))?;
+    if room.participants.len() <= 1 {
+        return Err("Cannot remove the last participant. Delete the group chat instead.".to_string());
+    }
     let before = room.participants.len();
     room.participants.retain(|p| p.run_id != run_id);
     if room.participants.len() == before {
@@ -225,6 +228,9 @@ pub fn detach_group_chat_run(room_id: &str, run_id: &str) -> Result<GroupChat, S
     }
     room.updated_at = now_iso();
     save_group_chat(&room)?;
+    // Clean up orphaned participant meta file.
+    let meta_path = group_chat_dir(room_id).join("participants").join(format!("{}.meta.json", run_id));
+    let _ = std::fs::remove_file(meta_path);
     Ok(room)
 }
 

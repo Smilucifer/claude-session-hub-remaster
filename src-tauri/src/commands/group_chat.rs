@@ -565,13 +565,15 @@ pub async fn remove_group_chat_participant(
     );
 
     // Stop the session if it's running
-    let _ = crate::commands::session::stop_session_impl(
+    if let Err(e) = crate::commands::session::stop_session_impl(
         emitter.inner(),
         sessions.inner(),
         spawn_locks.inner(),
         run_id.clone(),
     )
-    .await;
+    .await {
+        log::warn!("[group-chat] failed to stop session for participant {}: {e}", run_id);
+    }
 
     storage::group_chats::detach_group_chat_run(&room_id, &run_id)?;
     group_chat_detail(&room_id)

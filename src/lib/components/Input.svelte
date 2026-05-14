@@ -5,6 +5,7 @@
     type = "text",
     disabled = false,
     label = "",
+    id = "",
     class: className = "",
     oninput,
     onblur,
@@ -15,17 +16,21 @@
     type?: string;
     disabled?: boolean;
     label?: string;
+    id?: string;
     class?: string;
     oninput?: (e: Event) => void;
     onblur?: (e: FocusEvent) => void;
     onpaste?: (e: ClipboardEvent) => void;
   } = $props();
+
+  const inputId = id || (label ? `input-${label.toLowerCase().replace(/\s+/g, '-')}` : '');
 </script>
 
 {#if label}
-  <label class="text-sm font-medium leading-none mb-1.5 block">{label}</label>
+  <label for={inputId} class="text-sm font-medium leading-none mb-1.5 block">{label}</label>
 {/if}
 <input
+  id={inputId}
   {type}
   {placeholder}
   {disabled}

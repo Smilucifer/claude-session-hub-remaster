@@ -903,7 +903,15 @@ fn build_role_system_prompt(
     let persona = personality.as_deref().unwrap_or("").trim();
 
     let base = if !custom.is_empty() {
-        custom.to_string()
+        let mut prompt = custom.to_string();
+        // Append role-type safety constraints even when custom instructions exist.
+        // This prevents character creators from accidentally removing critical guardrails.
+        match role_type {
+            "planner" => prompt.push_str("\n\n[Constraints] You can read files and search the web, but do NOT modify the filesystem or execute tools that change state."),
+            "executor" => {} // executors need full tool access — no extra constraints
+            _ => {}
+        }
+        prompt
     } else {
         match role_type {
             "planner" => "You are a planner. You can read files and search the web, but do not modify the filesystem or execute tools that change state. Analyze the task, create a concise numbered plan, and assign subtasks to executors via @mentions. Wait for the user's message before acting.".to_string(),

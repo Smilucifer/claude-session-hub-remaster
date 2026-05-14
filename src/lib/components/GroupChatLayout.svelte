@@ -86,12 +86,16 @@
         }
       } else if (ev.type === "session_init" && ev.model && detail) {
         // Update participant's model to match actual runtime model
-        const updated = { ...detail };
-        const participant = updated.participants.find(
+        const pIdx = detail.participants.findIndex(
           (p) => p.run?.id === ev.run_id,
         );
-        if (participant?.run) {
-          participant.run.model = ev.model;
+        if (pIdx >= 0 && detail.participants[pIdx].run) {
+          const updated = { ...detail };
+          updated.participants = [...detail.participants];
+          updated.participants[pIdx] = {
+            ...updated.participants[pIdx],
+            run: { ...updated.participants[pIdx].run!, model: ev.model },
+          };
           detail = updated;
         } else {
           participantModels.set(ev.run_id, ev.model);
@@ -710,7 +714,7 @@
             <!-- Thinking indicator for targeted participants with no response yet (last turn only) -->
             {#if turnIdx === detail.turns.length - 1}
             {#each turn.target_participant_ids.filter((tid) => !turn.responses.some((r) => r.participant_id === tid)) as tid (tid)}
-              {@const pinfo = getParticipantInfo(tid, tid)}
+              {@const pinfo = getParticipantInfo(tid)}
               <div class="flex justify-start">
                 <div class="max-w-[85%]">
                   <div class="rounded-2xl rounded-bl-sm border border-border/30 bg-muted/20 overflow-hidden">
