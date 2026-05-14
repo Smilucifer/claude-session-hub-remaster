@@ -142,7 +142,7 @@
       await api.updateEmbeddingConfig({
         enabled: embeddingEnabled,
         endpoint: embeddingEndpoint,
-        apiKey: embeddingApiKey || null,
+        api_key: embeddingApiKey || undefined,
         model: embeddingModel,
       });
     } catch (e: any) {

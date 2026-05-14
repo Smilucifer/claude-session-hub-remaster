@@ -14,6 +14,8 @@ The core product model is:
 
 **Current phase:** Phase 10 (2026-05-13). Group Chat refactor — Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt injection, Auto-chain routing.
 
+**Phase 10+:** Character Memory System (2026-05-14). LanceDB vector search, petgraph knowledge graph, memory CRUD, hybrid retrieval + injection, embedding config UI. Foundation complete (Tasks 0-15). Remaining: sigma.js graph viz, LLM auto-extraction, review queue, injection config UI. See `docs/superpowers/plans/2026-05-14-character-memory-system.md`.
+
 ## Standard workflow
 
 Every development cycle follows this pattern:

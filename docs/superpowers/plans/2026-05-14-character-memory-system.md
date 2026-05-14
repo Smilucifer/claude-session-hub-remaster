@@ -8,6 +8,39 @@
 
 **Tech Stack:** LanceDB (Rust, embedded vector DB), petgraph (Rust, graph compute), sigma.js + graphology (TS, viz), external OpenAI-compatible embedding API (user-configured), LLM CoT pipeline (auto-extraction), file-based JSON + JSONL persistence.
 
+## Status (2026-05-14)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 0 | Dependency verification | **Done** |
+| 1 | Rust type definitions | **Done** |
+| 2 | TypeScript type definitions | **Done** |
+| 3 | Character storage module | **Done** |
+| 4 | Embedding config — storage & commands | **Done** |
+| 5 | LanceDB vector store commands | **Done** |
+| 6 | Label→ID migration | **Done** |
+| 7 | Knowledge graph backend (petgraph) | **Done** |
+| 8 | Memory CRUD commands | **Done** |
+| 9 | Memory retrieval + injection (hybrid search) | **Done** |
+| 10 | Frontend API layer | **Done** |
+| 11 | Character memory store | **Done** |
+| 12 | Memory panel UI | **Partial** — panel framework & memory list done; sigma.js graph viz is SVG placeholder |
+| 13 | Auto-extraction pipeline | **Partial** — throttling/caps done; `auto_extract_memories()` is stub (returns empty vec) |
+| 14 | Character editor upgrade | **Done** |
+| 15 | Data lifecycle (compaction & retention) | **Done** |
+| 16 | npm install & build verification | **Done** |
+| 17 | Manual verification checklist | **Not started** |
+
+### Remaining work
+1. **sigma.js graph visualization** — replace SVG placeholder with interactive ForceAtlas2 graph
+2. **LLM CoT auto-extraction** — implement actual LLM call in `auto_extract_memories()`
+3. **Review queue** — add pending-review state + approve/reject UI for extracted memories
+4. **Injection config UI** — per-character retrieval params in group chat settings (max_retrieval_count, relevance_threshold, graph_hops)
+5. **Degradation indicator** — show "keyword fallback" banner in group chat when embedding API is down
+
+### v2.1.2 bugfix
+- Fixed: embedding config `apiKey` → `api_key` serialization mismatch (401 on save)
+
 ---
 
 ### Task 0: Dependency Spike — LanceDB Build Verification
