@@ -167,7 +167,7 @@ pub fn attach_group_chat_run(
 ) -> Result<GroupChatDetail, String> {
     let run = storage::runs::get_run(&run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
     validate_group_chat_participant_run(&run)?;
-    storage::group_chats::attach_group_chat_run(&room_id, &run_id, label, role)?;
+    storage::group_chats::attach_group_chat_run(&room_id, &run_id, label, role, None)?;
     group_chat_detail(&room_id)
 }
 
@@ -219,6 +219,7 @@ pub async fn create_group_chat_participant(
         connection_profile_id,
         label,
         role,
+        None, // character_id: not applicable for generic participant creation
     )
     .await
 }
@@ -238,6 +239,7 @@ pub async fn create_group_chat_claude_participant(
     connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
+    character_id: Option<String>,
 ) -> Result<GroupChatDetail, String> {
     create_group_chat_participant_impl(
         emitter.inner(),
@@ -253,6 +255,7 @@ pub async fn create_group_chat_claude_participant(
         connection_profile_id,
         label,
         role,
+        character_id,
     )
     .await
 }
@@ -272,6 +275,7 @@ async fn create_group_chat_participant_impl(
     connection_profile_id: Option<String>,
     label: Option<String>,
     role: Option<String>,
+    character_id: Option<String>,
 ) -> Result<GroupChatDetail, String> {
     let normalized_agent = normalize_agent(&agent)?;
     let run_id = create_group_chat_participant_run(
@@ -303,6 +307,7 @@ async fn create_group_chat_participant_impl(
             platform_id,
             permission_mode_override,
             true, // auto_approve_mcp: group chat participants auto-approve MCP tools
+            true, // is_group_chat: inject CLAWGO_SCENE=group_chat
         )
         .await
         {
@@ -324,6 +329,7 @@ async fn create_group_chat_participant_impl(
         &run_id,
         label.or_else(|| Some(default_participant_label(&normalized_agent))),
         role,
+        character_id,
     ) {
         if matches!(run.resolved_execution_path(), ExecutionPath::SessionActor) {
             cleanup_unattached_participant_run(
@@ -581,7 +587,7 @@ mod tests {
                 None,
             )
             .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-1", None, None).unwrap();
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-1", None, None, None).unwrap();
 
             let detail = super::group_chat_detail(&room.id).unwrap();
 
@@ -617,7 +623,7 @@ mod tests {
                 None,
             )
             .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-codex", Some("Codex".into()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-codex", Some("Codex".into()), None, None)
                 .unwrap();
 
             let detail = super::group_chat_detail(&room.id).unwrap();

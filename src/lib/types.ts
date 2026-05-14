@@ -76,7 +76,7 @@ export interface GroupChatParticipant {
   character_id: string;
 }
 
-export type GroupChatTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget";
+export type GroupChatTurnMode = "fanout" | "debate" | "summary" | "private" | "singletarget" | "multitarget";
 
 export type AgentKind = "claude" | "codex" | "unknown";
 export type ResumeCapability = "session_id" | "latest" | "none";
@@ -1696,12 +1696,13 @@ export interface MemoryNode {
   id: string;
   character_id: string;
   content: string;
-  type: "fact" | "experience" | "preference" | "rule" | "relationship";
+  type: "fact" | "experience" | "preference" | "rule" | "relationship" | "skill";
   confidence: number;
   source: MemorySource;
   tags: string[];
   created_at: string;
   updated_at: string;
+  status: MemoryStatus;
 }
 
 export interface MemoryEdge {
@@ -1738,6 +1739,10 @@ export interface EmbeddingConfig {
   endpoint: string;
   api_key?: string;
   model: string;
+  /** Explicit chat completions endpoint for memory extraction. Falls back to derivation from endpoint. */
+  chat_endpoint?: string;
+  /** Model name for chat completions. Falls back to embedding model. */
+  chat_model?: string;
 }
 
 export interface TestEmbeddingResult {
@@ -1756,4 +1761,9 @@ export interface VectorSearchResult {
 export interface MemoryConfig {
   auto_learn: boolean;
   retention_days?: number;
+  max_retrieval_count?: number;
+  relevance_threshold?: number;
+  graph_hops?: number;
 }
+
+export type MemoryStatus = "pending" | "approved" | "rejected";

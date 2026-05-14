@@ -2,6 +2,48 @@
 
 ## Phase 10 (2026-05-14)
 
+### v2.2.0 — 群聊体验优化 + Character Memory System 补全
+
+**P0 Bug 修复:**
+- Avatar 上传：Tauri v2 `file.path` 不可用回退到 `@tauri-apps/plugin-dialog`，新建角色支持即时上传
+- 角色人设注入：`character_id` 链路打通（前端 → Tauri 命令 → 后端 participant 存储），`resolve_participant_system_prompt` 基于 ID 查找
+- 多 @mention 解析：`MultiTarget` 变体支持同时 @mention 多个角色，全局扫描替代 `splitn(2)`
+- Embedding API Key 回显：`apiKey` → `api_key` snake_case 对齐，`null` → `undefined` 匹配 serde skip
+
+**P1 群聊核心体验:**
+- Markdown 渲染：群聊消息复用 `MarkdownContent` 组件，支持标题/列表/代码块/表格
+- 长文自动折叠：15 行阈值，`max-h-40` + mask-image 渐变，展开/折叠按钮
+- Executor 路由过滤：Fanout 模式下 `role_type == "executor"` 自动排除，空 targets 返回明确错误
+- 群聊上下文互相可见：最近 3 轮公开消息注入到 Fanout/SingleTarget/Private prompt，8000 字节 token 预算，CJK-aware 截断
+- Summary/Debate 跳过重复 context 注入
+- MultiTarget 可见性：对所有参与者可见（与 Fanout/Debate/Summary 一致）
+
+**P2 性能优化:**
+- `CLAWGO_SCENE=group_chat` 环境变量注入，superpowers 可跳过项目文件夹扫描
+
+**P3 Character Memory System 补全:**
+- `MemoryNode.status` 字段（pending/approved/rejected），serde default 向后兼容
+- Review Queue：待审核记忆列表，approve/reject 操作
+- LLM 自动提取：从 embedding config 派生 chat endpoint，OpenAI-compatible API 调用，结构化 JSON 输出
+- 提取节流：5 分钟 debounce + 每角色每天 10 次上限
+- 批量持久化：`append_memory_log_batch` 单锁写入
+- 知识图谱可视化：sigma.js + graphology + ForceAtlas2 布局（lazy-loaded）
+- Injection Config UI：`max_retrieval_count`(1-20)、`relevance_threshold`(0.0-1.0)、`graph_hops`(0-5) 可配置
+- Embedding 配置扩展：`chat_endpoint`、`chat_model` 可选字段
+- 前端 Embedding 状态指示：连接状态 + 快捷测试入口
+- `MemoryConfig` 字段：`max_retrieval_count`、`relevance_threshold`、`graph_hops`
+
+**代码质量（3 轮多路审查，12 路 provider）:**
+- Round 1: 3C + 6I + M/R 全部修复
+- Round 2: 1C（confidence 回归）+ 1I（字节切片 CJK panic）+ M 全部修复
+- Round 3: 4 个 Minor 全部修复（TS "skill" union、truncate_str off-by-one、skill tag、Summary 冗余 context）
+- `truncate_str` CJK 安全重写，`keyword_match_score` BM25-style 评分
+- 静态 `reqwest::Client` 连接池复用
+- Memory type validation: fact/experience/preference/rule/relationship/skill
+- Status validation: pending/approved/rejected
+- Config clamping: max_retrieval_count(1-20), relevance_threshold(0.0-1.0), graph_hops(0-5)
+- Toast z-index 统一为 `z-[60]`
+
 ### v2.0.3 — Character Memory System: Simplify Review 修复
 
 **三路并行审查 (Simplify):**

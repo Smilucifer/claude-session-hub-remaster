@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import * as api from "$lib/api";
   import type { AiCharacter } from "$lib/types";
   import Card from "$lib/components/Card.svelte";
@@ -31,8 +31,25 @@
   let expertiseInput = $state("");
   let formAutoLearn = $state(false);
   let formRetentionDays = $state<number | undefined>(undefined);
+  let formMaxRetrievalCount = $state<number>(5);
+  let formRelevanceThreshold = $state<number>(0.5);
+  let formGraphHops = $state<number>(1);
   let editingAvatar = $state<string | null>(null);
+  let pendingAvatarPath = $state<string | null>(null);
   let memoryPanelCharId = $state<string | null>(null);
+  let embeddingReady = $state(false);
+
+  // Toast
+  let toastMessage = $state<string | null>(null);
+  let toastType = $state<"success" | "error">("success");
+  let toastTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function showToast(message: string, type: "success" | "error") {
+    toastMessage = message;
+    toastType = type;
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => { toastMessage = null; }, 3000);
+  }
 
   const ROLE_TYPES = ["planner", "executor", "custom"] as const;
 
@@ -51,6 +68,17 @@
     } finally {
       loading = false;
     }
+    // Check embedding config for auto-learn readiness
+    try {
+      const cfg = await api.getEmbeddingConfig();
+      embeddingReady = !!cfg?.enabled && !!cfg?.api_key;
+    } catch {
+      embeddingReady = false;
+    }
+  });
+
+  onDestroy(() => {
+    if (toastTimeout) clearTimeout(toastTimeout);
   });
 
   // ── Form helpers ──
@@ -66,7 +94,11 @@
     expertiseInput = "";
     formAutoLearn = true;
     formRetentionDays = undefined;
+    formMaxRetrievalCount = 5;
+    formRelevanceThreshold = 0.5;
+    formGraphHops = 1;
     editingAvatar = null;
+    pendingAvatarPath = null;
     editingId = null;
   }
 
@@ -88,6 +120,9 @@
     expertiseInput = "";
     formAutoLearn = char.memory_config?.auto_learn ?? true;
     formRetentionDays = char.memory_config?.retention_days ?? undefined;
+    formMaxRetrievalCount = char.memory_config?.max_retrieval_count ?? 5;
+    formRelevanceThreshold = char.memory_config?.relevance_threshold ?? 0.5;
+    formGraphHops = char.memory_config?.graph_hops ?? 1;
     editingAvatar = char.avatar_path ?? null;
     showForm = true;
   }
@@ -95,6 +130,29 @@
   function cancelForm() {
     showForm = false;
     resetForm();
+  }
+
+  async function pickAvatar() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg"] }],
+      });
+      if (!selected) return;
+      const filePath = typeof selected === "string" ? selected : selected[0];
+      if (editingId) {
+        const path = await api.uploadCharacterAvatar(editingId, filePath);
+        editingAvatar = path;
+        showToast(t("settings_characters_avatar_updated"), "success");
+      } else {
+        pendingAvatarPath = filePath;
+        editingAvatar = filePath;
+      }
+    } catch (err) {
+      dbgWarn("settings/characters", "avatar upload failed", err);
+      showToast(t("settings_characters_avatar_upload_failed"), "error");
+    }
   }
 
   async function saveCharacter() {
@@ -120,7 +178,13 @@
           personality: formPersonality.trim() || null,
           expertise: formExpertise,
           memoryConfig: formAutoLearn
-            ? { auto_learn: true, retention_days: formRetentionDays ?? undefined }
+            ? {
+                auto_learn: true,
+                retention_days: formRetentionDays ?? undefined,
+                max_retrieval_count: formMaxRetrievalCount,
+                relevance_threshold: formRelevanceThreshold,
+                graph_hops: formGraphHops,
+              }
             : null,
         });
         characters = characters.map((c) => (c.id === editingId ? updated : c));
@@ -133,7 +197,19 @@
           defaultModel,
           icon,
         );
-        characters = [...characters, created];
+        if (pendingAvatarPath) {
+          try {
+            const avatarPath = await api.uploadCharacterAvatar(created.id, pendingAvatarPath);
+            const updated = await api.updateCharacter(created.id, { avatarPath });
+            characters = [...characters, updated];
+          } catch (avatarErr) {
+            dbgWarn("settings/characters", "avatar upload after create failed", avatarErr);
+            showToast(t("settings_characters_avatar_upload_failed_created"), "error");
+            characters = [...characters, created];
+          }
+        } else {
+          characters = [...characters, created];
+        }
       }
       showForm = false;
       resetForm();
@@ -408,7 +484,7 @@
 
       <!-- Avatar upload -->
       <div>
-        <label class="text-[10px] uppercase text-[#666] block mb-1">Avatar</label>
+        <label class="text-[10px] uppercase text-[#666] block mb-1">{t("settings_characters_avatar")}</label>
         <div class="flex gap-3 items-start">
           {#if editingAvatar}
             <img src={fileSrc(editingAvatar)} alt="" class="w-16 h-16 rounded-xl object-cover shrink-0" />
@@ -416,26 +492,16 @@
             <div class="w-16 h-16 rounded-xl bg-[#1a1a2e] flex items-center justify-center text-2xl shrink-0">?</div>
           {/if}
           <div class="flex flex-col gap-1">
-            <input
-              type="file"
-              accept="image/png,image/jpeg"
-              class="text-xs"
-              onchange={async (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (!file || !editingId) return;
-                try {
-                  const path = await api.uploadCharacterAvatar(editingId, (file as any).path ?? file.name);
-                  editingAvatar = path;
-                } catch (err) {
-                  dbgWarn("settings/characters", "avatar upload failed", err);
-                }
-              }}
-            />
+            <button
+              type="button"
+              class="text-xs px-2 py-1 rounded border border-[#333] hover:border-[#555] transition-colors"
+              onclick={pickAvatar}
+            >{t("settings_characters_pick_avatar")}</button>
             {#if editingAvatar}
               <button
                 class="text-[11px] text-destructive hover:underline text-left"
                 onclick={() => (editingAvatar = null)}
-              >移除头像</button>
+              >{t("settings_characters_remove_avatar")}</button>
             {/if}
           </div>
         </div>
@@ -502,6 +568,12 @@
       <!-- Memory config -->
       <div class="space-y-1.5">
         <label class="text-[10px] uppercase text-[#666] block mb-1">Memory Config</label>
+        {#if !embeddingReady}
+          <div class="flex items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+            <svg class="h-4 w-4 shrink-0 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span class="text-[11px] text-amber-300">自动学习需要先在 设置 → Embedding 中配置并启用 Embedding 服务</span>
+          </div>
+        {/if}
         <div class="flex items-center gap-2">
           <input type="checkbox" class="w-3 h-3" bind:checked={formAutoLearn} />
           <span class="text-xs">Auto-learn from conversations</span>
@@ -515,6 +587,39 @@
               max="365"
               bind:value={formRetentionDays}
               placeholder="30"
+              class="w-20 h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-[11px] text-muted-foreground">Max retrieval:</span>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              bind:value={formMaxRetrievalCount}
+              class="w-20 h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span class="text-[11px] text-muted-foreground">memories per turn</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-[11px] text-muted-foreground">Relevance threshold:</span>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.1"
+              bind:value={formRelevanceThreshold}
+              class="w-20 h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span class="text-[11px] text-muted-foreground">(0-1)</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="text-[11px] text-muted-foreground">Graph hops:</span>
+            <input
+              type="number"
+              min="0"
+              max="5"
+              bind:value={formGraphHops}
               class="w-20 h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
@@ -574,5 +679,17 @@
         </Button>
       </div>
     </div>
+  </div>
+{/if}
+
+<!-- Toast -->
+{#if toastMessage}
+  <div
+    class="fixed top-4 right-4 z-[60] rounded-lg border px-4 py-2 text-sm shadow-lg transition-opacity {toastType ===
+    'success'
+      ? 'border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400'
+      : 'border-destructive/30 bg-destructive/10 text-destructive'}"
+  >
+    {toastMessage}
   </div>
 {/if}

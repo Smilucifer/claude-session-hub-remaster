@@ -12,9 +12,7 @@ The core product model is:
 - `AiCharacter` is a reusable persona template with role_type, role_instruction, and default provider/model, stored in UserSettings.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 10 (2026-05-13). Group Chat refactor — Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt injection, Auto-chain routing.
-
-**Phase 10+:** Character Memory System (2026-05-14). LanceDB vector search, petgraph knowledge graph, memory CRUD, hybrid retrieval + injection, embedding config UI. Foundation complete (Tasks 0-15). Remaining: sigma.js graph viz, LLM auto-extraction, review queue, injection config UI. See `docs/superpowers/plans/2026-05-14-character-memory-system.md`.
+**Current phase:** Phase 10+ (v2.2.0, 2026-05-14). Group Chat refactor complete; Character Memory System fully implemented — LanceDB vector search, petgraph knowledge graph, LLM auto-extraction, hybrid retrieval + injection, sigma.js graph viz, review queue, injection config UI, context sharing, executor routing, Markdown rendering. See `docs/superpowers/plans/[done] 2026-05-14-character-memory-system.md`.
 
 ## Standard workflow
 
@@ -116,7 +114,7 @@ If narrowing Rust tests further, use the module path pattern accepted by `cargo 
 - `src/routes/`: route-level UI pages — chat, memory, explorer, plugins, usage, history, settings, settings/characters. (`/memo` redirects to `/chat`; memo is a global pop-out panel. Group chats are accessed from `/chat` with sidebar navigation.)
 - `src-tauri/src/commands/`: Tauri IPC command surface consumed by the frontend.
 - `src-tauri/src/agent/`: agent launch, session, stream, PTY (including native PTY for Codex), native transcript parsing, and Windows toolchain handling.
-- `src-tauri/src/room/`: room orchestration, room-specific execution adapters, and roundtable prompts.
+- `src-tauri/src/group_chat/`: group chat orchestration, memory system (injection, extraction, graph, context), and execution adapters.
 - `src-tauri/src/storage/`: local-first persistence for runs, rooms, memos, settings, artifacts, events, and indexes.
 - `messages/`: i18n resources. When adding UI text, update both `messages/en.json` and `messages/zh-CN.json`.
 - `scripts/`: repo validation, release, and i18n check scripts.
@@ -350,6 +348,8 @@ Key phases and their status:
 | 9.y | Provider presets cleanup, extra_env whitelist, tier model labels, collapsible config panel, old ID removal, label disambiguation | [done] |
 | 9.z | Custom Provider support, native config merge, managed MCP injection, SENSITIVE_KEYS centralization | [done] |
 | 10 | Group Chat refactor: Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt, Auto-chain | [done] |
+| 10+ | Character Memory System: LanceDB, petgraph, LLM auto-extraction, hybrid search, sigma.js viz, review queue, injection config UI | [done] |
+| 10+ (v2.2.0) | 群聊体验优化: Markdown 渲染, 长文折叠, Executor 过滤, 上下文共享, P0 bug 修复, 3 轮多路审查 | [done] |
 
 Detailed plans and review responses are in `docs/`.
 

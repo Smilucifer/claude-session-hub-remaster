@@ -11,6 +11,7 @@ use crate::group_chat::adapter::{
 };
 use crate::group_chat::context::{check_handoff, record_participant_turn, HandoffDecision};
 use crate::group_chat::memory_extraction::{auto_extract_memories, can_extract, record_extraction};
+use crate::group_chat::memory_graph::compute_relevance_edges;
 use crate::group_chat::memory_injection::{search_memories_for_injection, format_memory_injection};
 use crate::group_chat::models::{
     GroupChatParticipant, GroupChatResponseRef, GroupChatTurn, GroupChatTurnMode,
@@ -26,6 +27,13 @@ use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio_util::sync::CancellationToken;
+
+/// Number of recent public turns to include as context for each participant.
+const CONTEXT_TURN_WINDOW: usize = 3;
+/// Approximate byte budget for the context block (~2000 tokens worth of CJK text).
+const CONTEXT_TOKEN_CAP: usize = 8000;
+/// Maximum characters per single turn preview in the context block.
+const CONTEXT_PER_TURN_CHARS: usize = 2000;
 
 static GROUP_CHAT_ORCHESTRATION_LOCKS: Lazy<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -68,6 +76,7 @@ pub enum GroupChatCommand {
     Summary { target: String },
     Private { target: String, message: String },
     SingleTarget { target: String, message: String },
+    MultiTarget { targets: Vec<String>, message: String },
 }
 
 pub async fn run_group_chat_turn(
@@ -97,6 +106,12 @@ async fn execute_turn_inner(
     started_at: &str,
     is_private: bool,
 ) -> Result<GroupChatTurn, String> {
+    // Unified context injection: prepend recent public turn context
+    // so participants can see each other's views.
+    // Auto-chain hops bypass execute_turn_inner() entirely (calls execute_group_chat_target directly),
+    // so they naturally skip this injection.
+    let context_block = format_public_turn_context(public_turns, participants);
+
     let mut join_set = tokio::task::JoinSet::new();
     let user_msg = user_input.to_string();
     for target in targets {
@@ -104,12 +119,18 @@ async fn execute_turn_inner(
         let participant = target.participant.clone();
         let run = storage::runs::get_run(&participant.run_id)
             .ok_or_else(|| format!("Run {} not found", participant.run_id))?;
-        let target_prompt = match mode {
+        let base_prompt = match mode {
             GroupChatTurnMode::Fanout => build_fanout_prompt(turn_num, prompt, None),
             GroupChatTurnMode::Debate => {
                 build_debate_prompt(&participant, prompt, public_turns, participants)
             }
             _ => prompt.to_string(),
+        };
+        let target_prompt = if context_block.is_empty() || matches!(mode, GroupChatTurnMode::Debate | GroupChatTurnMode::Summary) {
+            // Debate/Summary already embed prior-turn context; skip to avoid duplication
+            base_prompt
+        } else {
+            format!("{context_block}\n\n{base_prompt}")
         };
         let pipe_runtime = pipe_runtime.clone();
 
@@ -190,7 +211,31 @@ pub async fn run_group_chat_turn_with_runtime(
 
     let (mode, user_input, prompt, targets, is_private) = match command {
         GroupChatCommand::Fanout { input } => {
-            let targets = active_targets(&room.participants, sessions).await;
+            let mut targets = active_targets(&room.participants, sessions).await;
+            // Hard intercept: exclude executor-role participants from fanout.
+            // Executors only respond when explicitly @mentioned (SingleTarget/auto-chain).
+            let user_settings = storage::settings::get_user_settings();
+            targets.retain(|t| {
+                let p = &t.participant;
+                if p.character_id.is_empty() || p.character_id == "__orphan__" {
+                    return true;
+                }
+                match user_settings
+                    .ai_characters
+                    .iter()
+                    .find(|c| c.id == p.character_id)
+                {
+                    Some(character) => character.role_type != "executor",
+                    None => true,
+                }
+            });
+            if targets.is_empty() {
+                return Err(
+                    "No eligible participants for fanout (all executors filtered). \
+                     Use @mention to target an executor directly."
+                        .to_string(),
+                );
+            }
             (GroupChatTurnMode::Fanout, input.clone(), input, targets, false)
         }
         GroupChatCommand::Debate { input } => {
@@ -247,6 +292,30 @@ pub async fn run_group_chat_turn_with_runtime(
                 message.trim().to_string(),
                 prompt,
                 vec![target_ref],
+                false,
+            )
+        }
+        GroupChatCommand::MultiTarget {
+            targets: target_names,
+            message: target_message,
+        } => {
+            let mut resolved_targets = Vec::new();
+            for name in &target_names {
+                let participant = find_participant_unique(&room.participants, name)?.clone();
+                let target_ref = active_target_for_participant(participant, sessions).await?;
+                resolved_targets.push(target_ref);
+            }
+            let other_names: Vec<&str> = target_names.iter().map(|s| s.as_str()).collect();
+            let prompt = build_multitarget_prompt(
+                public_turns.len() as u64 + 1,
+                &other_names,
+                &target_message,
+            );
+            (
+                GroupChatTurnMode::MultiTarget,
+                message.trim().to_string(),
+                prompt,
+                resolved_targets,
                 false,
             )
         }
@@ -340,6 +409,8 @@ pub async fn run_group_chat_turn_with_runtime(
             }
 
             // ── Auto-chain: after SingleTarget, scan response for @mentions ──
+            // MultiTarget is excluded: chained responses to multiple targets would create
+            // ambiguous fan-out, and the user's explicit multi-target intent is already fulfilled.
             if room.auto_chain && matches!(turn.mode, GroupChatTurnMode::SingleTarget) {
                 let mut chained_ids: HashSet<String> =
                     turn.target_participant_ids.iter().cloned().collect();
@@ -465,9 +536,40 @@ pub async fn run_group_chat_turn_with_runtime(
                         continue;
                     }
                     let memories = auto_extract_memories(cid, &turn_texts).await;
-                    if !memories.is_empty() {
-                        record_extraction(&gc_id, cid);
+                    if memories.is_empty() {
+                        continue;
                     }
+                    record_extraction(&gc_id, cid);
+
+                    // 1. Batch append to authoritative log (single lock acquisition)
+                    if let Err(e) = storage::characters::append_memory_log_batch(cid, &memories) {
+                        log::warn!("[memory-extraction] Failed to batch persist memories for {}: {}", cid, e);
+                        continue;
+                    }
+
+                    // 2. Batch update knowledge graph (single read + single save)
+                    let existing = storage::characters::read_all_memory_log_entries(cid).unwrap_or_default();
+                    let mut graph = storage::characters::load_memory_graph(cid).unwrap_or_default();
+                    for memory in &memories {
+                        graph.nodes.push(memory.clone());
+                        let new_edges = compute_relevance_edges(memory, &existing, &graph.edges);
+                        graph.edges.extend(new_edges);
+                    }
+                    if let Err(e) = storage::characters::save_memory_graph(cid, &graph) {
+                        log::warn!("[memory-extraction] save_memory_graph failed for {}: {}", cid, e);
+                    }
+
+                    // 3. LanceDB upsert (fire-and-forget, individual per memory)
+                    for memory in &memories {
+                        if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(&memory.content).await {
+                            let _ = crate::commands::vectorstore::vector_upsert(
+                                cid.clone(),
+                                memory.id.clone(),
+                                embedding_vec,
+                            ).await;
+                        }
+                    }
+                    log::info!("[memory-extraction] Persisted {} auto-extracted memories for {}", memories.len(), cid);
                 }
             });
 
@@ -552,8 +654,21 @@ async fn inject_memories(
     if !auto_learn || character_id.is_empty() || character_id == "__orphan__" {
         return;
     }
+    // Read injection config from character's MemoryConfig (with defaults)
+    let user_settings = storage::settings::get_user_settings();
+    let (top_k, threshold, graph_hops) = user_settings
+        .ai_characters
+        .iter()
+        .find(|c| c.id == character_id)
+        .and_then(|c| c.memory_config.as_ref())
+        .map(|mc| (
+            mc.max_retrieval_count.max(1).min(20),
+            mc.relevance_threshold.max(0.0).min(1.0),
+            mc.graph_hops.max(0).min(5),
+        ))
+        .unwrap_or((5, 0.5, 1));
     let (memories, tier) = search_memories_for_injection(
-        character_id, user_message, 5, 0.5, 1,
+        character_id, user_message, top_k, threshold, graph_hops,
     ).await;
     if tier != crate::group_chat::memory_injection::DegradationTier::Full {
         log::info!(
@@ -913,13 +1028,36 @@ pub fn parse_group_chat_command(input: &str) -> GroupChatCommand {
         }
     }
 
-    // @Name msg → SingleTarget public turn (only named participant answers)
-    if let Some(rest) = trimmed.strip_prefix('@') {
-        let mut parts = rest.splitn(2, char::is_whitespace);
-        let target = parts.next().unwrap_or_default().to_string();
-        let message = parts.next().unwrap_or_default().trim().to_string();
-        if !target.is_empty() && !message.is_empty() {
-            return GroupChatCommand::SingleTarget { target, message };
+    // @Name msg → SingleTarget or MultiTarget public turn
+    if trimmed.starts_with('@') {
+        let mut targets = Vec::new();
+        let mut remaining = trimmed;
+        while let Some(rest) = remaining.strip_prefix('@') {
+            let mut parts = rest.splitn(2, char::is_whitespace);
+            let name = parts.next().unwrap_or_default().to_string();
+            if name.is_empty() {
+                break;
+            }
+            targets.push(name);
+            remaining = parts.next().unwrap_or_default().trim_start();
+            if !remaining.starts_with('@') {
+                break;
+            }
+        }
+        targets.sort();
+        targets.dedup();
+        // Find the message: everything after the last consumed @Name
+        let message_start = trimmed.len() - remaining.len();
+        let message = trimmed[message_start..].trim().to_string();
+        if !targets.is_empty() && !message.is_empty() {
+            if targets.len() == 1 {
+                return GroupChatCommand::SingleTarget {
+                    target: targets.into_iter().next().unwrap(),
+                    message,
+                };
+            } else {
+                return GroupChatCommand::MultiTarget { targets, message };
+            }
         }
     }
 
@@ -1008,6 +1146,88 @@ pub fn build_debate_prompt(
     body
 }
 
+/// Format recent public turns as context for participants to see each other's views.
+/// Returns an empty string if there are no public turns to reference.
+fn format_public_turn_context(
+    public_turns: &[GroupChatTurn],
+    participants: &[GroupChatParticipant],
+) -> String {
+    if public_turns.is_empty() {
+        return String::new();
+    }
+
+    let label_map: HashMap<&str, &str> = participants
+        .iter()
+        .map(|p| (p.id.as_str(), p.label.as_str()))
+        .collect();
+
+    // Take the last CONTEXT_TURN_WINDOW public turns
+    let recent: Vec<_> = public_turns
+        .iter()
+        .rev()
+        .take(CONTEXT_TURN_WINDOW)
+        .collect();
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push("## 之前的讨论上下文（供参考，不要逐条复述）".to_string());
+
+    for turn in recent.into_iter().rev() {
+        let mode_label = match turn.mode {
+            GroupChatTurnMode::Fanout => "讨论",
+            GroupChatTurnMode::Debate => "辩论",
+            GroupChatTurnMode::SingleTarget => "指名回答",
+            GroupChatTurnMode::MultiTarget => "多人回答",
+            GroupChatTurnMode::Summary => "总结",
+            GroupChatTurnMode::Private => continue,
+        };
+        lines.push(format!("\n[第 {} 轮 · {}]", turn.idx, mode_label));
+
+        // User input preview
+        let user_preview = truncate_str(&turn.user_input, CONTEXT_PER_TURN_CHARS);
+        lines.push(format!("用户: {}", user_preview));
+
+        // Response previews
+        for resp in &turn.responses {
+            let pid = resp.participant_id.as_str();
+            let label = label_map.get(pid).copied().unwrap_or(pid);
+            if let Some(preview) = &resp.preview {
+                let preview_truncated = truncate_str(preview, CONTEXT_PER_TURN_CHARS);
+                lines.push(format!("{}: {}", label, preview_truncated));
+            }
+        }
+    }
+
+    let mut result = lines.join("\n");
+    // Cap total length in bytes (oldest-first eviction)
+    let byte_len = result.len();
+    if byte_len > CONTEXT_TOKEN_CAP {
+        // Truncate from the start, keeping the most recent context
+        let excess = byte_len - CONTEXT_TOKEN_CAP;
+        // Find a safe char boundary after the excess
+        let mut cut = 0;
+        for (i, _) in result.char_indices() {
+            if i >= excess {
+                cut = i;
+                break;
+            }
+        }
+        result = format!("[...]\n{}", &result[cut..]);
+    }
+    result
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut end = s.len();
+    for (i, _) in s.char_indices().skip(max_chars) {
+        end = i;
+        break;
+    }
+    format!("{}...", &s[..end])
+}
+
 pub fn build_fanout_prompt(
     turn_num: u64,
     user_input: &str,
@@ -1021,7 +1241,7 @@ pub fn build_fanout_prompt(
     }
     body.push_str("\n## 用户问题\n");
     body.push_str(user_input.trim());
-    body.push_str("\n\n请独立回答（你看不到另两家观点，本色发挥即可）。");
+    body.push_str("\n\n请参考上述上下文（如有），结合你自己的专业判断给出回答。");
     body
 }
 
@@ -1032,6 +1252,18 @@ pub fn build_singletarget_prompt(turn_num: u64, target_label: &str, user_message
          {}\n\n\
          你是本轮唯一被指名回答的参与者。请给出你的完整观点。",
         user_message.trim()
+    )
+}
+
+pub fn build_multitarget_prompt(turn_num: u64, target_labels: &[&str], user_message: &str) -> String {
+    let names = target_labels.join(", ");
+    format!(
+        "[通用圆桌 · 第 {turn_num} 轮 · @multi-target → {names}]\n\n\
+         ## 用户指名提问\n\
+         {}\n\n\
+         此消息同时发给了 {names}。请给出你的独立观点。",
+        user_message.trim(),
+        names = names
     )
 }
 
@@ -1809,9 +2041,9 @@ mod tests {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None, None)
                 .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None, None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1861,9 +2093,9 @@ mod tests {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
             create_run("run-b");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None, None)
                 .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-b", Some("Bob".to_string()), None, None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1907,7 +2139,7 @@ mod tests {
         with_temp_data_dir(|| {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None, None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1930,7 +2162,7 @@ mod tests {
         with_temp_data_dir(|| {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-a");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-a", Some("Alice".to_string()), None, None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2008,12 +2240,14 @@ mod tests {
                 "run-shared",
                 Some("Shared".to_string()),
                 None,
+                None,
             )
             .unwrap();
             crate::storage::group_chats::attach_group_chat_run(
                 &room_b.id,
                 "run-shared",
                 Some("Shared".to_string()),
+                None,
                 None,
             )
             .unwrap();
@@ -2072,9 +2306,9 @@ mod tests {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None, None)
                 .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None, None)
                 .unwrap();
             let room = crate::storage::group_chats::get_group_chat(&room.id).unwrap();
             let alice_id = room.participants[0].id.clone();
@@ -2233,9 +2467,9 @@ mod tests {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None, None)
                 .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None, None)
                 .unwrap();
             crate::storage::group_chats::append_group_chat_public_turn(&room.id, &public_turn()).unwrap();
 
@@ -2267,9 +2501,9 @@ mod tests {
             let room = crate::storage::group_chats::create_group_chat("Room".into(), None).unwrap();
             create_run("run-p1");
             create_run("run-p2");
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p1", Some("Alice".to_string()), None, None)
                 .unwrap();
-            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None)
+            crate::storage::group_chats::attach_group_chat_run(&room.id, "run-p2", Some("Bob".to_string()), None, None)
                 .unwrap();
 
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2303,4 +2537,74 @@ mod tests {
         });
     }
 
+    // ── MultiTarget parsing tests ──
+
+    #[test]
+    fn parse_single_at_mention() {
+        let cmd = parse_group_chat_command("@Alice hello");
+        match cmd {
+            GroupChatCommand::SingleTarget { target, message } => {
+                assert_eq!(target, "Alice");
+                assert_eq!(message, "hello");
+            }
+            _ => panic!("expected SingleTarget"),
+        }
+    }
+
+    #[test]
+    fn parse_multi_at_mention() {
+        let cmd = parse_group_chat_command("@Alice @Bob discuss this");
+        match cmd {
+            GroupChatCommand::MultiTarget { targets, message } => {
+                assert_eq!(targets, vec!["Alice", "Bob"]);
+                assert_eq!(message, "discuss this");
+            }
+            _ => panic!("expected MultiTarget"),
+        }
+    }
+
+    #[test]
+    fn parse_three_at_mentions() {
+        let cmd = parse_group_chat_command("@Alice @Bob @Charlie what do you think");
+        match cmd {
+            GroupChatCommand::MultiTarget { targets, message } => {
+                assert_eq!(targets, vec!["Alice", "Bob", "Charlie"]);
+                assert_eq!(message, "what do you think");
+            }
+            _ => panic!("expected MultiTarget"),
+        }
+    }
+
+    #[test]
+    fn parse_duplicate_at_mentions_deduped() {
+        let cmd = parse_group_chat_command("@Alice @Alice hello");
+        match cmd {
+            GroupChatCommand::SingleTarget { target, message } => {
+                assert_eq!(target, "Alice");
+                assert_eq!(message, "hello");
+            }
+            _ => panic!("expected SingleTarget after dedup"),
+        }
+    }
+
+    #[test]
+    fn parse_at_mention_no_message_falls_through() {
+        let cmd = parse_group_chat_command("@Alice");
+        assert!(matches!(cmd, GroupChatCommand::Fanout { .. }));
+    }
+
+    #[test]
+    fn parse_fanout_when_no_at_prefix() {
+        let cmd = parse_group_chat_command("hello everyone");
+        assert!(matches!(cmd, GroupChatCommand::Fanout { .. }));
+    }
+
+    #[test]
+    fn build_multitarget_prompt_format() {
+        let prompt = build_multitarget_prompt(3, &["Alice", "Bob"], "What's your take?");
+        assert!(prompt.contains("第 3 轮"));
+        assert!(prompt.contains("@multi-target → Alice, Bob"));
+        assert!(prompt.contains("What's your take?"));
+        assert!(prompt.contains("Alice, Bob"));
+    }
 }

@@ -35,6 +35,7 @@ pub enum GroupChatTurnMode {
     Summary,
     Private,
     SingleTarget,
+    MultiTarget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -248,7 +248,7 @@
 <!-- Toast -->
 {#if toastMessage}
   <div
-    class="fixed top-4 right-4 z-50 rounded-lg border px-4 py-2 text-sm shadow-lg transition-opacity {toastType ===
+    class="fixed top-4 right-4 z-[60] rounded-lg border px-4 py-2 text-sm shadow-lg transition-opacity {toastType ===
     'success'
       ? 'border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400'
       : 'border-destructive/30 bg-destructive/10 text-destructive'}"

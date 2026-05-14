@@ -9,6 +9,7 @@
   import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
   import { t } from "$lib/i18n/index.svelte";
   import { dbg, dbgWarn } from "$lib/utils/debug";
+  import MarkdownContent from "./MarkdownContent.svelte";
   import { getTransport } from "$lib/transport";
   import type { BusEvent } from "$lib/types";
 
@@ -49,6 +50,7 @@
   let pendingPermissions = $state<Map<string, PendingPermission>>(new Map()); // keyed by run_id
   let thinkingTexts = $state<Map<string, string>>(new Map()); // keyed by run_id, accumulated thinking
   let thinkingCollapsed = $state<Map<string, boolean>>(new Map()); // keyed by run_id
+  let collapsedResponses = $state<Map<string, boolean>>(new Map()); // keyed by turn.id + participant_id
   let unlistenBus: (() => void) | undefined;
 
   function startBusListener() {
@@ -186,6 +188,7 @@
         undefined, // connectionProfileId
         char.label,
         char.role_type,
+        char.id,
       );
       detail = updated;
       closePicker();
@@ -611,19 +614,44 @@
                     {/if}
 
                     <!-- Message body -->
-                    <div class="px-3 py-2 text-xs">
-                      {#if resp.preview}
-                        <p>{resp.preview}</p>
-                      {:else if resp.error}
+                    {#if resp.preview}
+                      {@const collapseKey = turn.id + "-" + resp.participant_id}
+                      {@const lineCount = resp.preview.split("\n").length}
+                      {@const isLong = lineCount > 15}
+                      {@const isCollapsed = collapsedResponses.get(collapseKey) !== false && isLong}
+                      <div class="px-3 py-2 text-xs">
+                        <div
+                          class="{isCollapsed ? 'max-h-40 overflow-hidden' : ''}"
+                          style={isCollapsed ? "mask-image: linear-gradient(to bottom, black 70%, transparent);" : ""}
+                        >
+                          <MarkdownContent text={resp.preview} />
+                        </div>
+                        {#if isLong}
+                          <button
+                            class="mt-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            onclick={() => {
+                              collapsedResponses = new Map(collapsedResponses).set(collapseKey, (collapsedResponses.get(collapseKey) ?? true) ? false : true);
+                            }}
+                          >
+                            {collapsedResponses.get(collapseKey) !== false
+                              ? t("common_showAllLines", { count: String(lineCount) })
+                              : t("common_collapse")}
+                          </button>
+                        {/if}
+                      </div>
+                    {:else if resp.error}
+                      <div class="px-3 py-2 text-xs">
                         <p class="text-red-400/80">{resp.error}</p>
-                      {:else}
+                      </div>
+                    {:else}
+                      <div class="px-3 py-2 text-xs">
                         <div class="flex items-center gap-1 py-1">
                           <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/30 animate-bounce" style="animation-delay: 0s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/30 animate-bounce" style="animation-delay: 0.15s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-muted-foreground/30 animate-bounce" style="animation-delay: 0.3s"></span>
                         </div>
-                      {/if}
-                    </div>
+                      </div>
+                    {/if}
                   </div>
                 </div>
               </div>

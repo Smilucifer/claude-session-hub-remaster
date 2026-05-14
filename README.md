@@ -20,7 +20,7 @@ Claude Session Hub Remaster is not a rewrite of Claw GO and not a direct port of
 - `Run` 继续作为最小执行单元。
 - `GroupChat`（原 Room）作为协作编排层，建立在 `Run` 之上。
 - `AiCharacter` 作为可复用的角色模板，支持 role_type / role_instruction / 默认 provider 配置。
-- Memo、Group Chat、Roundtable、Character Library、Plan 机制、上下文管理已落地；Arena Memory 候选提升仍在后续阶段。
+- Memo、Group Chat、Roundtable、Character Library、Character Memory System（LanceDB 向量搜索 + 知识图谱 + LLM 自动提取 + 混合检索注入）、上下文管理已全部落地。
 - 现有 `/chat` 路径保持稳定。
 
 Current architecture principles:
@@ -28,7 +28,7 @@ Current architecture principles:
 - `Run` remains the smallest execution unit.
 - `GroupChat` (formerly Room) serves as the orchestration layer above `Run`.
 - `AiCharacter` is a reusable persona template with role_type, role_instruction, and default provider config.
-- Memo, Group Chat, Roundtable, Character Library, Plan mechanism, and Context Management are implemented; Arena Memory promotion is planned.
+- Memo, Group Chat, Roundtable, Character Library, Character Memory System (LanceDB vector search + knowledge graph + LLM auto-extraction + hybrid retrieval injection), and Context Management are fully implemented.
 - The existing `/chat` path remains stable.
 
 ## 当前功能 / Current Features
@@ -104,6 +104,32 @@ AiCharacter is a reusable agent persona template defining a label, role type (pl
 Each group chat can link to a plan (PlanArtifact) containing a title, task checklist, status (draft / active / completed), and user notes. The plan panel is displayed as an interactive task checklist in the group chat UI, supporting task status cycling (Todo → InProgress → Done / Blocked), approve / complete operations, and user notes editing. Plan context is automatically injected into the Bootstrap Context, ensuring new sessions understand current progress after session handoff.
 
 ### Providers and CLI Authentication
+
+### Character Memory System (角色记忆系统)
+
+每个 AiCharacter 拥有独立的持久化记忆系统。角色从群聊对话中自动学习事实、经验、偏好、规则和关系，通过 LanceDB 向量搜索和 petgraph 知识图谱进行混合检索，在群聊编排时注入相关记忆到系统提示中。
+
+Each AiCharacter has an independent persistent memory system. Characters automatically learn facts, experiences, preferences, rules, and relationships from group chat conversations, retrieve relevant memories via LanceDB vector search and petgraph knowledge graph hybrid search, and inject them into system prompts during orchestration.
+
+支持：
+
+- **自动提取**：群聊回合完成后，LLM 自动从对话中提取有价值的记忆，5 分钟 debounce + 每角色每天 10 次上限。
+- **混合检索**：向量搜索 + 图谱扩展 + 关键词评分，4 级降级策略（Full → Degraded → Minimal → Skip）。
+- **知识图谱**：sigma.js + ForceAtlas2 交互式可视化，社区检测、知识缺口分析。
+- **Review Queue**：自动提取的记忆先进入待审核队列，用户可审批或拒绝。
+- **Injection Config**：每个角色可独立配置 `max_retrieval_count`(1-20)、`relevance_threshold`(0.0-1.0)、`graph_hops`(0-5)。
+- **Embedding 配置**：支持 OpenAI-compatible 端点，可选 `chat_endpoint` 和 `chat_model` 用于自动提取。
+- **数据生命周期**：日志压缩（10K 条目阈值）、保留期策略、启动时自动维护。
+
+Supported:
+
+- **Auto-extraction**: After group chat turns, LLM automatically extracts valuable memories with 5-min debounce + 10/day per character cap.
+- **Hybrid retrieval**: Vector search + graph expansion + keyword scoring, 4-tier degradation (Full → Degraded → Minimal → Skip).
+- **Knowledge graph**: sigma.js + ForceAtlas2 interactive visualization, community detection, knowledge gap analysis.
+- **Review queue**: Auto-extracted memories enter a pending review queue; users can approve or reject.
+- **Injection config**: Per-character `max_retrieval_count`(1-20), `relevance_threshold`(0.0-1.0), `graph_hops`(0-5).
+- **Embedding config**: OpenAI-compatible endpoint, optional `chat_endpoint` and `chat_model` for auto-extraction.
+- **Data lifecycle**: Log compaction (10K entry threshold), retention policy, startup maintenance.
 
 当前主力 provider：Claude、Codex、DeepSeek、GLM、QWEN、KIMI、Xiaomi Plan、Xiaomi API、Packy CX2CC。Codex 通过 PTY 原生 CLI 执行，默认带 `--dangerously-bypass-approvals-and-sandbox`；DeepSeek、GLM、QWEN、KIMI、Xiaomi、Packy CX2CC 作为一等 provider 显示，执行层复用 Claude Code compatible session，并通过 `platform_id` 注入对应 API 配置。你还可以在设置页添加任意数量的 **Custom Provider**——填写 Name、Base URL、API Key 和 Model 即可，使用与内置 API provider 相同的启动路径。
 
@@ -219,6 +245,7 @@ You can switch the mode in Settings and view the MSVC environment status for the
 - Driver/Copilot 目前是 MVP：Copilot 只读行为通过 review prompt 约束，危险操作审批和硬权限限制仍在后续阶段。
 - 余额查询仅覆盖 DeepSeek（API key 认证）和 MiMo（cookie 认证），其余 provider 暂无余额检查。
 - Rust 单元测试受限于本地 VCRUNTIME140.dll 版本不匹配（VS 18 BuildTools vs System32），需用 `cargo check` 替代 `cargo test`。
+- Lock map 驱逐、LLM 摘要、Driver/Copilot 硬权限、社区检测 Louvain 移植——这些在后续版本改进。
 
 Current limitations:
 
@@ -228,10 +255,11 @@ Current limitations:
 - Driver/Copilot is currently an MVP: copilot read-only behavior is guided by the review prompt, while dangerous-operation review and hard permission enforcement remain later work.
 - Balance queries only cover DeepSeek (API key auth) and MiMo (cookie auth); other providers lack balance checking.
 - Rust unit tests are blocked by a local VCRUNTIME140.dll version mismatch (VS 18 BuildTools vs System32); use `cargo check` instead of `cargo test`.
+- Lock map eviction, LLM summarization, Driver/Copilot hard permissions, Louvain community detection port — planned for future releases.
 
 ## 开发 / Development
 
-当前版本：**v2.0.0** · Current version: **v2.0.0**
+当前版本：**v2.2.0** · Current version: **v2.2.0**
 
 ```bash
 npm install

@@ -2089,6 +2089,12 @@ pub struct MemoryNode {
     pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default = "default_memory_status")]
+    pub status: String,
+}
+
+fn default_memory_status() -> String {
+    "approved".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2140,6 +2146,14 @@ pub struct EmbeddingConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     pub model: String,
+    /// Optional: explicit chat completions endpoint for memory extraction.
+    /// If None, derived from `endpoint` by replacing /embeddings with /chat/completions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_endpoint: Option<String>,
+    /// Optional: model name for chat completions (memory extraction).
+    /// If None, falls back to `model` (the embedding model name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2164,6 +2178,15 @@ pub struct MemoryConfig {
     pub auto_learn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,
+    #[serde(default = "default_max_retrieval_count")]
+    pub max_retrieval_count: usize,
+    #[serde(default = "default_relevance_threshold")]
+    pub relevance_threshold: f64,
+    #[serde(default = "default_graph_hops")]
+    pub graph_hops: usize,
 }
 
 fn default_auto_learn() -> bool { true }
+fn default_max_retrieval_count() -> usize { 5 }
+fn default_relevance_threshold() -> f64 { 0.5 }
+fn default_graph_hops() -> usize { 1 }

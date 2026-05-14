@@ -547,6 +547,7 @@ pub(crate) async fn start_session_impl(
     platform_id: Option<String>,
     permission_mode_override: Option<String>,
     auto_approve_mcp: bool,
+    is_group_chat: bool,
 ) -> Result<(), String> {
     let _guard = spawn_locks.acquire(&run_id).await;
     let session_mode = mode.unwrap_or_default();
@@ -803,6 +804,13 @@ pub(crate) async fn start_session_impl(
     }
 
     // 6. Spawn CLI process (no initial stdin write — actor handles it)
+    // Inject scene marker for group chat sessions so superpowers can skip project scan.
+    if is_group_chat {
+        resolved
+            .extra_env
+            .get_or_insert_with(std::collections::HashMap::new)
+            .insert("CLAWGO_SCENE".to_string(), "group_chat".to_string());
+    }
     let effective_cwd = meta.remote_cwd.as_deref().unwrap_or(&meta.cwd);
     let spawn_result = spawn_cli_process(
         effective_cwd,
@@ -952,6 +960,7 @@ pub async fn start_session(
         platform_id,
         permission_mode_override,
         false, // auto_approve_mcp: regular chat sessions don't auto-approve
+        false, // is_group_chat
     )
     .await
 }

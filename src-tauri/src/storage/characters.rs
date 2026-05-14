@@ -78,6 +78,26 @@ pub fn append_memory_log(character_id: &str, node: &MemoryNode) -> Result<(), St
     Ok(())
 }
 
+/// Append multiple memory nodes to the log in a single lock acquisition.
+pub fn append_memory_log_batch(character_id: &str, nodes: &[MemoryNode]) -> Result<(), String> {
+    validate_character_id(character_id)?;
+    let lock = char_lock(character_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    ensure_char_dir(character_id)?;
+    let path = memory_log_path(character_id);
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("open log: {e}"))?;
+    for node in nodes {
+        let line = serde_json::to_string(node).map_err(|e| e.to_string())? + "\n";
+        file.write_all(line.as_bytes())
+            .map_err(|e| format!("write log: {e}"))?;
+    }
+    Ok(())
+}
+
 fn read_log_entries_unlocked(character_id: &str) -> Result<Vec<MemoryNode>, String> {
     let path = memory_log_path(character_id);
     if !path.exists() {
@@ -280,6 +300,7 @@ pub fn update_memory_in_log(
     memory_type: Option<String>,
     confidence: Option<f64>,
     tags: Option<Vec<String>>,
+    status: Option<String>,
 ) -> Result<MemoryNode, String> {
     validate_character_id(character_id)?;
     let lock = char_lock(character_id);
@@ -296,6 +317,10 @@ pub fn update_memory_in_log(
         entries[idx].content = c;
     }
     if let Some(t) = memory_type {
+        const VALID_TYPES: &[&str] = &["fact", "experience", "preference", "rule", "relationship", "skill"];
+        if !VALID_TYPES.contains(&t.as_str()) {
+            return Err(format!("Invalid memory type: '{}'. Must be one of: {:?}", t, VALID_TYPES));
+        }
         entries[idx].memory_type = t;
     }
     if let Some(c) = confidence {
@@ -303,6 +328,12 @@ pub fn update_memory_in_log(
     }
     if let Some(t) = tags {
         entries[idx].tags = t;
+    }
+    if let Some(s) = status {
+        if !["pending", "approved", "rejected"].contains(&s.as_str()) {
+            return Err(format!("Invalid memory status: '{}'. Must be one of: pending, approved, rejected", s));
+        }
+        entries[idx].status = s;
     }
     entries[idx].updated_at = now;
 

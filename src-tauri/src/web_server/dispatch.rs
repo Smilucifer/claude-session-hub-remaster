@@ -858,6 +858,7 @@ pub async fn dispatch_command(
                 platform_id,
                 permission_mode_override,
                 false, // auto_approve_mcp: web server sessions don't auto-approve
+                false, // is_group_chat
             )
             .await?;
             Ok(json!(true))

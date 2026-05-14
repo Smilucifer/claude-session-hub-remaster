@@ -168,6 +168,7 @@ pub async fn create_character_memory(
         tags: tags.clone(),
         created_at: now.clone(),
         updated_at: now,
+        status: "approved".to_string(),
     };
 
     // 1. Append to authoritative log
@@ -212,6 +213,7 @@ pub async fn update_character_memory(
         memory_type.clone(),
         confidence,
         tags.clone(),
+        None, // status unchanged — use approve/reject commands
     )?;
 
     // Update vector if content changed
@@ -306,6 +308,40 @@ pub async fn search_character_memories(
         graph_hops.unwrap_or(1),
     ).await;
     Ok(results)
+}
+
+#[tauri::command]
+pub async fn list_pending_memories(
+    character_id: String,
+) -> Result<Vec<MemoryNode>, String> {
+    let entries = storage::characters::read_all_memory_log_entries(&character_id)?;
+    Ok(entries.into_iter().filter(|n| n.status == "pending").collect())
+}
+
+#[tauri::command]
+pub async fn approve_memory(
+    character_id: String,
+    memory_id: String,
+) -> Result<MemoryNode, String> {
+    storage::characters::update_memory_in_log(
+        &character_id,
+        &memory_id,
+        None, None, None, None,
+        Some("approved".to_string()),
+    )
+}
+
+#[tauri::command]
+pub async fn reject_memory(
+    character_id: String,
+    memory_id: String,
+) -> Result<MemoryNode, String> {
+    storage::characters::update_memory_in_log(
+        &character_id,
+        &memory_id,
+        None, None, None, None,
+        Some("rejected".to_string()),
+    )
 }
 
 fn load_all() -> Result<AllSettings, String> {

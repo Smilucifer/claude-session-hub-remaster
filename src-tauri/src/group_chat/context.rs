@@ -114,7 +114,8 @@ pub fn filter_visible_messages(
         .filter(|turn| match turn.mode {
             GroupChatTurnMode::Fanout
             | GroupChatTurnMode::Debate
-            | GroupChatTurnMode::Summary => true,
+            | GroupChatTurnMode::Summary
+            | GroupChatTurnMode::MultiTarget => true,
             GroupChatTurnMode::Private | GroupChatTurnMode::SingleTarget => {
                 let is_sender = turn.responses.iter().any(|r| r.participant_id == participant_id);
                 let is_target = turn.target_participant_ids.iter().any(|id| id == participant_id);

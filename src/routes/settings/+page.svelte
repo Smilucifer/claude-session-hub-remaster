@@ -111,6 +111,8 @@
   let embeddingEndpoint = $state("https://api.openai.com/v1/embeddings");
   let embeddingApiKey = $state("");
   let embeddingModel = $state("text-embedding-3-small");
+  let embeddingChatEndpoint = $state("");
+  let embeddingChatModel = $state("");
   let embeddingShowKey = $state(false);
   let embeddingLoading = $state(false);
   let embeddingSaveError = $state<string | null>(null);
@@ -128,8 +130,10 @@
       if (cfg) {
         embeddingEnabled = cfg.enabled;
         embeddingEndpoint = cfg.endpoint;
-        embeddingApiKey = cfg.apiKey ?? "";
+        embeddingApiKey = cfg.api_key ?? "";
         embeddingModel = cfg.model;
+        embeddingChatEndpoint = cfg.chat_endpoint ?? "";
+        embeddingChatModel = cfg.chat_model ?? "";
       }
     } catch {
       // defaults are fine
@@ -144,6 +148,8 @@
         endpoint: embeddingEndpoint,
         api_key: embeddingApiKey || undefined,
         model: embeddingModel,
+        chat_endpoint: embeddingChatEndpoint || undefined,
+        chat_model: embeddingChatModel || undefined,
       });
     } catch (e: any) {
       embeddingSaveError = e?.toString?.() ?? "保存失败";
@@ -3630,6 +3636,24 @@
             type="text"
             bind:value={embeddingModel}
             placeholder="text-embedding-3-small"
+            onblur={debouncedSaveEmbeddingConfig}
+          />
+
+          <!-- Chat Endpoint (optional, for memory extraction) -->
+          <Input
+            label={t("settings_embedding_chat_endpoint")}
+            type="text"
+            bind:value={embeddingChatEndpoint}
+            placeholder={t("settings_embedding_chat_endpoint_placeholder")}
+            onblur={debouncedSaveEmbeddingConfig}
+          />
+
+          <!-- Chat Model (optional, for memory extraction) -->
+          <Input
+            label={t("settings_embedding_chat_model")}
+            type="text"
+            bind:value={embeddingChatModel}
+            placeholder={t("settings_embedding_chat_model_placeholder")}
             onblur={debouncedSaveEmbeddingConfig}
           />
 

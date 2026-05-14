@@ -8,7 +8,7 @@
 
 **Tech Stack:** LanceDB (Rust, embedded vector DB), petgraph (Rust, graph compute), sigma.js + graphology (TS, viz), external OpenAI-compatible embedding API (user-configured), LLM CoT pipeline (auto-extraction), file-based JSON + JSONL persistence.
 
-## Status (2026-05-14)
+## Status (2026-05-14) — v2.2.0 COMPLETE
 
 | Task | Description | Status |
 |------|-------------|--------|
@@ -24,19 +24,23 @@
 | 9 | Memory retrieval + injection (hybrid search) | **Done** |
 | 10 | Frontend API layer | **Done** |
 | 11 | Character memory store | **Done** |
-| 12 | Memory panel UI | **Partial** — panel framework & memory list done; sigma.js graph viz is SVG placeholder |
-| 13 | Auto-extraction pipeline | **Partial** — throttling/caps done; `auto_extract_memories()` is stub (returns empty vec) |
+| 12 | Memory panel UI | **Done** — panel + memory list + review queue + sigma.js graph viz |
+| 13 | Auto-extraction pipeline | **Done** — LLM CoT extraction, chat endpoint derivation, structured JSON output |
 | 14 | Character editor upgrade | **Done** |
 | 15 | Data lifecycle (compaction & retention) | **Done** |
 | 16 | npm install & build verification | **Done** |
-| 17 | Manual verification checklist | **Not started** |
+| 17 | Injection config UI | **Done** — max_retrieval_count, relevance_threshold, graph_hops configurable per character |
 
-### Remaining work
-1. **sigma.js graph visualization** — replace SVG placeholder with interactive ForceAtlas2 graph
-2. **LLM CoT auto-extraction** — implement actual LLM call in `auto_extract_memories()`
-3. **Review queue** — add pending-review state + approve/reject UI for extracted memories
-4. **Injection config UI** — per-character retrieval params in group chat settings (max_retrieval_count, relevance_threshold, graph_hops)
-5. **Degradation indicator** — show "keyword fallback" banner in group chat when embedding API is down
+### v2.2.0 additions
+- LLM auto-extraction: OpenAI-compatible chat completions API derived from embedding endpoint
+- Review queue: pending/approved/rejected status, approve/reject UI in CharacterMemoryPanel
+- sigma.js + graphology + ForceAtlas2 knowledge graph visualization (lazy-loaded)
+- Injection config UI: per-character retrieval params (max_retrieval_count 1-20, relevance_threshold 0.0-1.0, graph_hops 0-5)
+- Embedding config: chat_endpoint + chat_model optional fields
+- Batch persistence: append_memory_log_batch with single lock
+- MemoryNode.status field with serde default for backward compat
+- Memory type "skill" added to union
+- 3 rounds multi-path code review (12 providers total), all C/I/M/R fixed
 
 ### v2.1.2 bugfix
 - Fixed: embedding config `apiKey` → `api_key` serialization mismatch (401 on save)

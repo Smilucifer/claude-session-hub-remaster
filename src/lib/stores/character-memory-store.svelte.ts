@@ -8,7 +8,7 @@ export class CharacterMemoryStore {
   communities = $state<CommunityInfo[]>([]);
   gaps = $state<KnowledgeGapInfo[]>([]);
   loading = $state(false);
-  activeTab = $state<"memories" | "graph" | "gaps" | "communities">("memories");
+  activeTab = $state<"memories" | "graph" | "gaps" | "communities" | "review">("memories");
   searchQuery = $state("");
   sortBy = $state<"newest" | "confidence">("newest");
 

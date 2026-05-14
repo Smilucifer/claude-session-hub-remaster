@@ -94,9 +94,9 @@ pub async fn search_memories_for_injection(
     threshold: f64,
     graph_hops: usize,
 ) -> (Vec<MemoryNode>, DegradationTier) {
-    // Load log entries
-    let entries = match characters::read_all_memory_log_entries(character_id) {
-        Ok(e) => e,
+    // Load log entries (only approved memories are eligible for injection)
+    let entries: Vec<_> = match characters::read_all_memory_log_entries(character_id) {
+        Ok(e) => e.into_iter().filter(|n| n.status == "approved").collect(),
         Err(_) => return (Vec::new(), DegradationTier::Skip),
     };
     if entries.is_empty() {
@@ -256,13 +256,14 @@ pub fn format_memory_injection(
             "preference" => "Preference",
             "rule" => "Rule",
             "relationship" => "Relationship",
+            "skill" => "Skill",
             _ => "Memory",
         };
         let line = format!(
             "{}. [{} · 置信度 {}%] {}",
             i + 1,
             tag,
-            (mem.confidence * 100.0) as u32,
+            mem.confidence as u32,
             truncated
         );
         let line_tokens = approx_tokens(&line);

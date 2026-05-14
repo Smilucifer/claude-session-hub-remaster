@@ -138,6 +138,7 @@ pub fn attach_group_chat_run(
     run_id: &str,
     label: Option<String>,
     role: Option<String>,
+    character_id: Option<String>,
 ) -> Result<GroupChat, String> {
     validate_group_chat_id(room_id)?;
     let run = super::runs::get_run(run_id).ok_or_else(|| format!("Run {} not found", run_id))?;
@@ -176,6 +177,12 @@ pub fn attach_group_chat_run(
                 changed = true;
             }
         }
+        if let Some(cid) = character_id {
+            if participant.character_id != cid {
+                participant.character_id = cid;
+                changed = true;
+            }
+        }
         if changed {
             room.updated_at = now_iso();
             save_group_chat(&room)?;
@@ -189,7 +196,7 @@ pub fn attach_group_chat_run(
         agent: run.agent,
         label: label.unwrap_or_else(|| "Claude".to_string()),
         role: role.unwrap_or_else(|| "participant".to_string()),
-        character_id: String::new(),
+        character_id: character_id.unwrap_or_default(),
         joined_at: now_iso(),
     };
     room.participants.push(participant);
@@ -412,6 +419,7 @@ mod tests {
                 &run.id,
                 Some("Reviewer".to_string()),
                 Some("reviewer".to_string()),
+                None,
             )
             .unwrap();
 
@@ -445,12 +453,13 @@ mod tests {
             )
             .unwrap();
 
-            attach_group_chat_run(&room.id, &run.id, Some("Old".to_string()), None).unwrap();
+            attach_group_chat_run(&room.id, &run.id, Some("Old".to_string()), None, None).unwrap();
             let updated = attach_group_chat_run(
                 &room.id,
                 &run.id,
                 Some("Reviewer".to_string()),
                 Some("reviewer".to_string()),
+                None,
             )
             .unwrap();
 
@@ -478,7 +487,7 @@ mod tests {
                 None,
             )
             .unwrap();
-            attach_group_chat_run(&room.id, "run-1", None, None).unwrap();
+            attach_group_chat_run(&room.id, "run-1", None, None, None).unwrap();
 
             delete_group_chat(&room.id).unwrap();
 

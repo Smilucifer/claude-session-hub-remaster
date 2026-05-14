@@ -1,8 +1,8 @@
 # Character Memory System — Design Spec
 
 **Date:** 2026-05-14
-**Status:** Foundation complete — Tasks 0-15 done. Remaining: sigma.js graph viz (placeholder), LLM CoT auto-extraction (stub), review queue (not started), injection config UI (not started).
-**Review:** 3 rounds complete (R6 multi-review, R7 multi-review, Simplify 3-way)
+**Status:** ✅ Complete (v2.2.0) — All tasks done including sigma.js graph viz, LLM auto-extraction, review queue, injection config UI.
+**Review:** 6 rounds complete (R6-R7 multi-review, Simplify 3-way, R8-R10 post-implementation multi-review)
 
 ## Overview
 

@@ -198,6 +198,7 @@ export async function createGroupChatClaudeParticipant(
   connectionProfileId?: string,
   label?: string,
   role?: string,
+  characterId?: string,
 ): Promise<GroupChatDetail> {
   dbg("api", "createGroupChatClaudeParticipant", { roomId, cwd });
   return invoke<GroupChatDetail>("create_group_chat_claude_participant", {
@@ -209,6 +210,7 @@ export async function createGroupChatClaudeParticipant(
     connectionProfileId: connectionProfileId ?? null,
     label: label ?? null,
     role: role ?? null,
+    characterId: characterId ?? null,
   });
 }
 
@@ -1669,4 +1671,19 @@ export async function searchCharacterMemories(
 ): Promise<MemoryNode[]> {
   dbg("api", "searchCharacterMemories", { characterId, query });
   return invoke<MemoryNode[]>("search_character_memories", { characterId, query, topK, threshold, graphHops });
+}
+
+export async function listPendingMemories(characterId: string): Promise<MemoryNode[]> {
+  dbg("api", "listPendingMemories", { characterId });
+  return invoke<MemoryNode[]>("list_pending_memories", { characterId });
+}
+
+export async function approveMemory(characterId: string, memoryId: string): Promise<MemoryNode> {
+  dbg("api", "approveMemory", { characterId, memoryId });
+  return invoke<MemoryNode>("approve_memory", { characterId, memoryId });
+}
+
+export async function rejectMemory(characterId: string, memoryId: string): Promise<MemoryNode> {
+  dbg("api", "rejectMemory", { characterId, memoryId });
+  return invoke<MemoryNode>("reject_memory", { characterId, memoryId });
 }

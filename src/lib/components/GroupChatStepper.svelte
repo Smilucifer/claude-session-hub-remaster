@@ -9,6 +9,7 @@
     summary: "groupChat_turnSummary",
     private: "groupChat_turnPrivate",
     singletarget: "groupChat_turnSingleTarget",
+    multitarget: "groupChat_turnMultiTarget",
   };
 
   function groupChatTurnModeKey(mode: string): string {

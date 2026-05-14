@@ -46,10 +46,15 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
 
+      - name: Install protoc (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc --no-progress
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTFLAGS: ${{ matrix.target == 'universal-apple-darwin' && '-C target-feature=-avx512f' || '' }}
         with:
           args: --target ${{ matrix.target }}
 

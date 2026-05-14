@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MemoryNode } from "$lib/types";
   import { characterMemoryStore } from "$lib/stores/character-memory-store.svelte";
+  import * as api from "$lib/api";
   import MemoryAddModal from "./MemoryAddModal.svelte";
 
   let {
@@ -22,9 +23,25 @@
   let deletingId = $state<string | null>(null);
   let clearing = $state(false);
 
+  // Review queue state
+  let pendingMemories = $state<MemoryNode[]>([]);
+  let pendingLoading = $state(false);
+  let reviewingId = $state<string | null>(null);
+
+  // Embedding status
+  let embeddingReady = $state<boolean | null>(null);
+
   $effect(() => {
     if (open) {
       store.load(characterId);
+      // Check embedding config status
+      api.getEmbeddingConfig().then((cfg) => {
+        embeddingReady = !!cfg?.enabled && !!cfg?.api_key;
+      }).catch(() => {
+        embeddingReady = false;
+      });
+      // Eagerly load pending count so the badge shows on panel open
+      loadPending();
       function onKey(e: KeyboardEvent) {
         if (e.key === "Escape") onclose();
       }
@@ -62,6 +79,7 @@
     preference: "偏好",
     rule: "规则",
     relationship: "关系",
+    skill: "技能",
   };
 
   const typeColors: Record<string, string> = {
@@ -70,6 +88,7 @@
     preference: "bg-purple-500/10 text-purple-400 border-purple-500/20",
     rule: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     relationship: "bg-pink-500/10 text-pink-400 border-pink-500/20",
+    skill: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
   };
 
   const sourceLabels: Record<string, string> = {
@@ -77,6 +96,42 @@
     manual: "手动",
     inference: "推断",
   };
+
+  async function loadPending() {
+    pendingLoading = true;
+    try {
+      pendingMemories = await api.listPendingMemories(characterId);
+    } catch {
+      pendingMemories = [];
+    } finally {
+      pendingLoading = false;
+    }
+  }
+
+  async function handleApprove(memoryId: string) {
+    reviewingId = memoryId;
+    try {
+      await api.approveMemory(characterId, memoryId);
+      pendingMemories = pendingMemories.filter((m) => m.id !== memoryId);
+      store.load(characterId); // refresh main list
+    } catch {
+      // fail silent
+    } finally {
+      reviewingId = null;
+    }
+  }
+
+  async function handleReject(memoryId: string) {
+    reviewingId = memoryId;
+    try {
+      await api.rejectMemory(characterId, memoryId);
+      pendingMemories = pendingMemories.filter((m) => m.id !== memoryId);
+    } catch {
+      // fail silent
+    } finally {
+      reviewingId = null;
+    }
+  }
 
   function confidenceColor(c: number): string {
     if (c >= 90) return "bg-emerald-500";
@@ -120,6 +175,18 @@
 
         <span class="text-sm font-semibold text-foreground">{characterLabel}</span>
         <span class="text-xs text-muted-foreground">{store.memories.length} 条记忆</span>
+
+        {#if embeddingReady === true}
+          <span class="flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            Embedding
+          </span>
+        {:else if embeddingReady === false}
+          <span class="flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400" title="Embedding 服务未配置，自动学习不可用">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            Embedding 未配置
+          </span>
+        {/if}
 
         <div class="flex-1"></div>
 
@@ -211,6 +278,17 @@
             : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
           onclick={() => (store.activeTab = 'communities')}
         >社区 Community</button>
+        <button
+          class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors {store.activeTab === 'review'
+            ? 'bg-accent text-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
+          onclick={() => (store.activeTab = 'review')}
+        >
+          待审核
+          {#if pendingMemories.length > 0}
+            <span class="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-400">{pendingMemories.length}</span>
+          {/if}
+        </button>
       </div>
 
       <!-- ── Content ── -->
@@ -240,32 +318,41 @@
                 {/if}
               </div>
             {:else if store.activeTab === 'graph'}
-              <div class="flex h-full flex-col items-center justify-center gap-4">
-                <svg
-                  class="h-32 w-32 text-muted-foreground/30"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <circle cx="6" cy="6" r="2" />
-                  <circle cx="18" cy="6" r="2" />
-                  <circle cx="12" cy="18" r="2" />
-                  <path d="M6 6l12 0" />
-                  <path d="M6 6l4 10" />
-                  <path d="M18 6l-4 10" />
-                </svg>
-                <p class="text-sm text-muted-foreground">知识图谱可视化</p>
-                {#if store.graph}
-                  <p class="text-xs text-muted-foreground">
+              {#if store.graph && store.graph.nodes.length > 0}
+                <div class="space-y-2">
+                  <h3 class="text-sm font-semibold text-foreground">知识图谱</h3>
+                  <p class="text-[11px] text-muted-foreground">
                     {store.graph.nodes.length} 节点 &middot; {store.graph.edges.length} 关系边
                   </p>
-                {:else}
-                  <p class="text-xs text-muted-foreground">暂无图谱数据</p>
-                {/if}
-              </div>
+                  {#await import('./KnowledgeGraph.svelte')}
+                    <div class="flex h-64 items-center justify-center">
+                      <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"></div>
+                    </div>
+                  {:then mod}
+                    <mod.default graph={store.graph} width={560} height={360} />
+                  {/await}
+                </div>
+              {:else}
+                <div class="flex h-full flex-col items-center justify-center gap-4">
+                  <svg
+                    class="h-32 w-32 text-muted-foreground/30"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <circle cx="6" cy="6" r="2" />
+                    <circle cx="18" cy="6" r="2" />
+                    <circle cx="12" cy="18" r="2" />
+                    <path d="M6 6l12 0" />
+                    <path d="M6 6l4 10" />
+                    <path d="M18 6l-4 10" />
+                  </svg>
+                  <p class="text-sm text-muted-foreground">暂无图谱数据</p>
+                </div>
+              {/if}
             {:else if store.activeTab === 'gaps'}
               <div class="space-y-2">
                 <h3 class="text-sm font-semibold text-foreground">知识缺口</h3>
@@ -314,6 +401,62 @@
                           ></div>
                         </div>
                         <span class="text-[11px] text-muted-foreground">{(community.cohesion * 100).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+            {:else if store.activeTab === 'review'}
+              <div class="space-y-2">
+                <h3 class="text-sm font-semibold text-foreground">待审核记忆</h3>
+                <p class="text-[11px] text-muted-foreground">自动提取的记忆需要审核后才会被注入到对话中。</p>
+                {#if pendingLoading}
+                  <div class="flex items-center justify-center py-8">
+                    <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary"></div>
+                  </div>
+                {:else if pendingMemories.length === 0}
+                  <div class="py-12 text-center text-sm text-muted-foreground">没有待审核的记忆</div>
+                {:else}
+                  {#each pendingMemories as memory (memory.id)}
+                    <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                      <p class="text-xs leading-5 text-foreground">{memory.content}</p>
+                      <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span class="rounded border px-1.5 py-0.5 text-[10px] font-medium {typeColors[memory.type] || 'bg-gray-500/10 text-gray-400 border-gray-500/20'}">
+                          {typeLabels[memory.type] || memory.type}
+                        </span>
+                        <span class="rounded bg-border/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          置信度 {memory.confidence}%
+                        </span>
+                        {#each memory.tags as tag}
+                          <span class="rounded bg-primary/5 px-1 py-0.5 text-[9px] text-primary">{tag}</span>
+                        {/each}
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <button
+                          class="flex h-7 items-center gap-1 rounded-md bg-emerald-500/10 px-2.5 text-[11px] font-medium text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+                          onclick={() => handleApprove(memory.id)}
+                          disabled={reviewingId === memory.id}
+                        >
+                          {#if reviewingId === memory.id}
+                            <span class="block h-3 w-3 animate-spin rounded-full border border-current/30 border-t-current"></span>
+                          {:else}
+                            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                          {/if}
+                          通过
+                        </button>
+                        <button
+                          class="flex h-7 items-center gap-1 rounded-md bg-destructive/10 px-2.5 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
+                          onclick={() => handleReject(memory.id)}
+                          disabled={reviewingId === memory.id}
+                        >
+                          {#if reviewingId === memory.id}
+                            <span class="block h-3 w-3 animate-spin rounded-full border border-current/30 border-t-current"></span>
+                          {:else}
+                            <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                          {/if}
+                          拒绝
+                        </button>
+                        <span class="ml-auto text-[10px] text-muted-foreground">{formatDate(memory.created_at)}</span>
                       </div>
                     </div>
                   {/each}
