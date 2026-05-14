@@ -12,7 +12,7 @@ The core product model is:
 - `AiCharacter` is a reusable persona template with role_type, role_instruction, and default provider/model, stored in UserSettings.
 - Providers shown in the UI are not always the same as execution agents under the hood.
 
-**Current phase:** Phase 10+ (v2.2.0, 2026-05-14). Group Chat refactor complete; Character Memory System fully implemented — LanceDB vector search, petgraph knowledge graph, LLM auto-extraction, hybrid retrieval + injection, sigma.js graph viz, review queue, injection config UI, context sharing, executor routing, Markdown rendering. See `docs/superpowers/plans/[done] 2026-05-14-character-memory-system.md`.
+**Current phase:** Phase 10+ (v2.3.0, 2026-05-15). Group Chat refactor complete; Character Memory System fully implemented — LanceDB vector search, petgraph knowledge graph, LLM auto-extraction, hybrid retrieval + injection, sigma.js graph viz, review queue, injection config UI, context sharing, executor routing, Markdown rendering. Memory extraction now supports a separate `chat_api_key` in `EmbeddingConfig` for cross-provider setups (e.g. DashScope embeddings + DeepSeek chat). See `docs/superpowers/plans/[done] 2026-05-14-character-memory-system.md`.
 
 ## Standard workflow
 
@@ -350,6 +350,7 @@ Key phases and their status:
 | 10 | Group Chat refactor: Room→GroupChat rename, Character Library, Plan mechanism, Context Management MVP, Role System Prompt, Auto-chain | [done] |
 | 10+ | Character Memory System: LanceDB, petgraph, LLM auto-extraction, hybrid search, sigma.js viz, review queue, injection config UI | [done] |
 | 10+ (v2.2.0) | 群聊体验优化: Markdown 渲染, 长文折叠, Executor 过滤, 上下文共享, P0 bug 修复, 3 轮多路审查 | [done] |
+| 10+ (v2.3.0) | Memory extraction chat_api_key 分离: EmbeddingConfig 独立 chat 凭据, 设置 UI, 4 路审查, 安全修复 | [done] |
 
 Detailed plans and review responses are in `docs/`.
 
