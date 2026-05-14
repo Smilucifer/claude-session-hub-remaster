@@ -70,7 +70,7 @@ pub async fn auto_extract_memories(
     turns: &[String],
 ) -> Vec<MemoryNode> {
     let config = match settings::get_embedding_config() {
-        Some(c) if c.enabled && c.api_key.is_some() => c,
+        Some(c) if c.enabled && (c.chat_api_key.is_some() || c.api_key.is_some()) => c,
         _ => return Vec::new(),
     };
 
@@ -79,7 +79,10 @@ pub async fn auto_extract_memories(
         .unwrap_or_else(|| derive_chat_endpoint(&config.endpoint));
     let chat_model = config.chat_model.clone()
         .unwrap_or_else(|| config.model.clone());
-    let api_key = config.api_key.unwrap();
+    // Prefer dedicated chat_api_key, fall back to embedding api_key
+    let Some(api_key) = config.chat_api_key.or(config.api_key) else {
+        return Vec::new();
+    };
 
     // Build conversation text
     let conversation: String = turns

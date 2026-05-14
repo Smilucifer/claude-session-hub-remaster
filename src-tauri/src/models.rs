@@ -2154,6 +2154,10 @@ pub struct EmbeddingConfig {
     /// If None, falls back to `model` (the embedding model name).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_model: Option<String>,
+    /// Optional: separate API key for chat completions (memory extraction).
+    /// If None, falls back to `api_key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

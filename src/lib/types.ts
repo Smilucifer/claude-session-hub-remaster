@@ -1743,6 +1743,8 @@ export interface EmbeddingConfig {
   chat_endpoint?: string;
   /** Model name for chat completions. Falls back to embedding model. */
   chat_model?: string;
+  /** Separate API key for chat completions (memory extraction). Falls back to embedding api_key. */
+  chat_api_key?: string;
 }
 
 export interface TestEmbeddingResult {

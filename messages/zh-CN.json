@@ -1721,6 +1721,8 @@
   "settings_embedding_chat_endpoint_placeholder": "留空则自动从 embedding endpoint 推导",
   "settings_embedding_chat_model": "Chat Model（可选）",
   "settings_embedding_chat_model_placeholder": "留空则使用 embedding 模型名称",
+  "settings_embedding_chat_api_key": "Chat API Key（可选）",
+  "settings_embedding_chat_api_key_placeholder": "留空则复用 Embedding API Key",
   "settings_embedding_test": "测试连接",
   "settings_embedding_testing": "测试中...",
   "settings_embedding_test_success": "连接成功 · ",

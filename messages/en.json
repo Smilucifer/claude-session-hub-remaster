@@ -1721,6 +1721,8 @@
   "settings_embedding_chat_endpoint_placeholder": "Auto-derived from embedding endpoint if empty",
   "settings_embedding_chat_model": "Chat Model (optional)",
   "settings_embedding_chat_model_placeholder": "Falls back to embedding model if empty",
+  "settings_embedding_chat_api_key": "Chat API Key (optional)",
+  "settings_embedding_chat_api_key_placeholder": "Uses Embedding API Key if empty",
   "settings_embedding_test": "Test Connection",
   "settings_embedding_testing": "Testing...",
   "settings_embedding_test_success": "Connection OK · ",

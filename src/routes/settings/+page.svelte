@@ -113,7 +113,9 @@
   let embeddingModel = $state("text-embedding-3-small");
   let embeddingChatEndpoint = $state("");
   let embeddingChatModel = $state("");
+  let embeddingChatApiKey = $state("");
   let embeddingShowKey = $state(false);
+  let embeddingShowChatKey = $state(false);
   let embeddingLoading = $state(false);
   let embeddingSaveError = $state<string | null>(null);
   let embeddingTestResult = $state<{
@@ -134,6 +136,7 @@
         embeddingModel = cfg.model;
         embeddingChatEndpoint = cfg.chat_endpoint ?? "";
         embeddingChatModel = cfg.chat_model ?? "";
+        embeddingChatApiKey = cfg.chat_api_key ?? "";
       }
     } catch {
       // defaults are fine
@@ -146,10 +149,11 @@
       await api.updateEmbeddingConfig({
         enabled: embeddingEnabled,
         endpoint: embeddingEndpoint,
-        api_key: embeddingApiKey || undefined,
+        api_key: embeddingApiKey.trim() || undefined,
         model: embeddingModel,
-        chat_endpoint: embeddingChatEndpoint || undefined,
-        chat_model: embeddingChatModel || undefined,
+        chat_endpoint: embeddingChatEndpoint.trim() || undefined,
+        chat_model: embeddingChatModel.trim() || undefined,
+        chat_api_key: embeddingChatApiKey.trim() || undefined,
       });
     } catch (e: any) {
       embeddingSaveError = e?.toString?.() ?? "保存失败";
@@ -3647,6 +3651,23 @@
             placeholder={t("settings_embedding_chat_endpoint_placeholder")}
             onblur={debouncedSaveEmbeddingConfig}
           />
+
+          <!-- Chat API Key (optional, for memory extraction) -->
+          <div class="relative">
+            <Input
+              label={t("settings_embedding_chat_api_key")}
+              type={embeddingShowChatKey ? "text" : "password"}
+              bind:value={embeddingChatApiKey}
+              placeholder={t("settings_embedding_chat_api_key_placeholder")}
+              onblur={debouncedSaveEmbeddingConfig}
+            />
+            <button
+              class="absolute right-2 top-8 text-xs text-muted-foreground hover:text-foreground"
+              onclick={() => (embeddingShowChatKey = !embeddingShowChatKey)}
+            >
+              {embeddingShowChatKey ? t("settings_embedding_hide") : t("settings_embedding_show")}
+            </button>
+          </div>
 
           <!-- Chat Model (optional, for memory extraction) -->
           <Input
