@@ -511,31 +511,38 @@ pub async fn run_group_chat_turn_with_runtime(
 
             // ── Auto-extraction: fire-and-forget memory extraction ──
             // Only spawn for characters with auto_learn enabled.
-            // Pass real turn response texts so the extraction prompt has context.
+            // Pass real turn response texts with speaker labels so extraction can attribute correctly.
             let gc_id = room_id.to_string();
             let turn_texts: Vec<String> = turn
                 .responses
                 .iter()
-                .filter_map(|r| r.preview.clone())
+                .filter_map(|r| {
+                    let text = r.preview.as_deref()?;
+                    let speaker = room.participants.iter()
+                        .find(|p| p.id == r.participant_id)
+                        .map(|p| p.label.as_str())
+                        .unwrap_or("?");
+                    Some(format!("[{}]: {}", speaker, text))
+                })
                 .collect();
             let user_settings = storage::settings::get_user_settings();
-            let participants_snapshot: Vec<(String, bool)> = room
+            let participants_snapshot: Vec<(String, String, bool)> = room
                 .participants
                 .iter()
                 .map(|p| {
                     let auto_learn = is_auto_learn(&p.character_id, &user_settings.ai_characters);
-                    (p.character_id.clone(), auto_learn)
+                    (p.character_id.clone(), p.label.clone(), auto_learn)
                 })
                 .collect();
             tokio::spawn(async move {
-                for (cid, auto_learn) in &participants_snapshot {
+                for (cid, cname, auto_learn) in &participants_snapshot {
                     if !auto_learn {
                         continue;
                     }
                     if !can_extract(&gc_id, cid) {
                         continue;
                     }
-                    let memory_pairs = auto_extract_memories(cid, &turn_texts).await;
+                    let memory_pairs = auto_extract_memories(cid, cname, &turn_texts).await;
                     log_to_file(&format!("[memory-extraction] RETURN cid={} gc={} count={}", cid, gc_id, memory_pairs.len()));
                     if memory_pairs.is_empty() {
                         continue;

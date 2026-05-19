@@ -95,6 +95,7 @@ pub fn record_extraction(group_chat_id: &str, character_id: &str) {
 /// during dedup and reused for vector upsert, avoiding a redundant API call.
 pub async fn auto_extract_memories(
     character_id: &str,
+    character_name: &str,
     turns: &[String],
 ) -> Vec<(MemoryNode, Vec<f32>)> {
     log_to_file(&format!("[memory-extraction] ENTER auto_extract_memories cid={} turns={}", character_id, turns.len()));
@@ -127,12 +128,14 @@ pub async fn auto_extract_memories(
 
     let truncated_conv: String = conversation.chars().take(4000).collect();
     let prompt = format!(
-        r#"分析以下群聊对话，提取关于参与者的关键事实、偏好或知识，这些信息对未来对话有用。
+        r#"分析以下群聊对话，只提取关于 "{character}" 这个角色的事实、偏好或知识。
+每条对话前标注了 [说话人]，只有 "{character}" 本人表达的内容才算作其记忆，其他角色说的话不要归到 "{character}" 名下。
 
 返回一个 JSON 数组。每个对象包含：
-- "content"：提取的事实/偏好（简洁，一句话）
+- "content"：提取的事实/偏好（简洁，一句话，必须是 {character} 本人表达的）
 - "type"：以下之一 "fact"、"preference"、"relationship"、"skill"
 - "tags"：相关关键词数组
+- "confidence"：0-100 的整数，表示这条记忆确实属于 {character} 的置信度。如果是 {character} 本人明确说的给 90+，如果是从上下文推断的给 60-80，如果不确定是否属于 {character} 给 50 以下
 
 要求：
 - 内容必须使用与对话相同的语言
@@ -140,6 +143,7 @@ pub async fn auto_extract_memories(
 
 对话：
 {text}"#,
+        character = character_name,
         text = truncated_conv
     );
 
@@ -233,6 +237,8 @@ pub async fn auto_extract_memories(
             _ => "fact".to_string(),
         };
 
+        let confidence = item["confidence"].as_f64().unwrap_or(70.0).clamp(0.0, 100.0);
+
         let tags: Vec<String> = item["tags"]
             .as_array()
             .map(|arr| {
@@ -262,7 +268,7 @@ pub async fn auto_extract_memories(
             character_id: character_id.to_string(),
             content: content_text,
             memory_type,
-            confidence: 70.0,
+            confidence,
             source: MemorySource {
                 kind: "auto_extract".to_string(),
                 run_id: None,
