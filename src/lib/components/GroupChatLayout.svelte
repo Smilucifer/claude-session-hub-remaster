@@ -7,6 +7,7 @@
     RunStatus,
   } from "$lib/types";
   import { getPhase7Provider, providerIdForRun } from "$lib/utils/provider-catalog";
+  import { tick } from "svelte";
   import { t } from "$lib/i18n/index.svelte";
   import { dbg, dbgWarn } from "$lib/utils/debug";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -38,6 +39,7 @@
   let mentionIndex = $state(0);
 
   let textareaEl: HTMLTextAreaElement | undefined = $state();
+  let timelineRef: HTMLDivElement | undefined = $state();
 
   // ── Derived ──
   let participants = $derived(detail?.participants ?? []);
@@ -61,7 +63,7 @@
     if (unlistenBus) return;
     const transport = getTransport();
     transport.listen<BusEvent>("bus-event", (ev) => {
-      const pid = participantRunIds().find((p) => p.runId === ev.run_id);
+      const pid = participantRunIds.find((p) => p.runId === ev.run_id);
       if (!pid) return;
       if (ev.type === "permission_prompt") {
         const p = pendingPermissions;
@@ -113,13 +115,13 @@
   }
 
   // Map of run_id -> { label, role } for quick lookups
-  function participantRunIds(): Array<{ label: string; role: string; runId: string }> {
-    return participants.map((p) => ({
+  let participantRunIds = $derived(
+    participants.map((p) => ({
       label: p.participant.label,
       role: p.participant.role ?? "custom",
       runId: p.participant.run_id,
-    }));
-  }
+    }))
+  );
 
   async function respondPermission(runId: string, requestId: string, behavior: "allow" | "deny") {
     try {
@@ -161,6 +163,20 @@
   $effect(() => {
     const roomId = groupChat?.room_id;
     if (roomId) loadDetail();
+  });
+
+  // Scroll to bottom when timeline loads or updates
+  let scrollGen = 0;
+  $effect(() => {
+    const turns = detail?.turns;
+    if (!turns || turns.length === 0) return;
+    const gen = ++scrollGen;
+    tick().then(() => {
+      if (gen !== scrollGen) return;
+      requestAnimationFrame(() => {
+        if (timelineRef) timelineRef.scrollTop = timelineRef.scrollHeight;
+      });
+    });
   });
 
   // Bus event lifecycle: start listener when participants exist, stop on cleanup
@@ -592,7 +608,7 @@
       {/each}
 
       <!-- Message timeline -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-6">
+      <div class="flex-1 overflow-y-auto p-4 space-y-6" bind:this={timelineRef}>
         {#if detail.turns.length === 0}
           <div class="flex items-center justify-center h-full">
             <div class="text-center text-muted-foreground max-w-sm">

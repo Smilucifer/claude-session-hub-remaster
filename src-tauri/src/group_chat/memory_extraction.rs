@@ -5,8 +5,30 @@ use crate::storage::settings;
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::sync::Mutex;
 use std::time::Instant;
+
+static LOG_WRITER: Lazy<Mutex<Option<BufWriter<File>>>> = Lazy::new(|| Mutex::new(None));
+
+pub fn log_to_file(msg: &str) {
+    let mut guard = LOG_WRITER.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        let data_dir = crate::storage::data_dir();
+        let log_dir = data_dir.join("logs");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("memory-extraction.log");
+        match std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            Ok(f) => *guard = Some(BufWriter::new(f)),
+            Err(_) => return,
+        }
+    }
+    if let Some(ref mut w) = *guard {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = writeln!(w, "[{ts}] {msg}");
+    }
+}
 
 // Shared HTTP client for memory extraction (avoids creating a new connection pool per call)
 static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
@@ -19,11 +41,16 @@ static LAST_EXTRACTION: Lazy<Mutex<HashMap<String, Instant>>> =
 static DAILY_EXTRACTION_COUNT: Lazy<Mutex<HashMap<String, (String, u32)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+fn debounce_key(group_chat_id: &str, character_id: &str) -> String {
+    format!("{}:{}", group_chat_id, character_id)
+}
+
 pub fn can_extract(group_chat_id: &str, character_id: &str) -> bool {
-    // Debounce: 5 min per group chat
+    // Debounce: 5 min per (group_chat, character) pair
     {
+        let key = debounce_key(group_chat_id, character_id);
         let map = LAST_EXTRACTION.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(last) = map.get(group_chat_id) {
+        if let Some(last) = map.get(&key) {
             if last.elapsed().as_secs() < 300 {
                 return false;
             }
@@ -51,8 +78,9 @@ pub fn can_extract(group_chat_id: &str, character_id: &str) -> bool {
 
 pub fn record_extraction(group_chat_id: &str, character_id: &str) {
     {
+        let key = debounce_key(group_chat_id, character_id);
         let mut map = LAST_EXTRACTION.lock().unwrap_or_else(|e| e.into_inner());
-        map.insert(group_chat_id.to_string(), Instant::now());
+        map.insert(key, Instant::now());
     }
     {
         let mut map = DAILY_EXTRACTION_COUNT.lock().unwrap_or_else(|e| e.into_inner());
@@ -63,16 +91,21 @@ pub fn record_extraction(group_chat_id: &str, character_id: &str) {
 }
 
 /// Auto-extract memories from group chat turns via LLM.
-/// Uses the embedding config's endpoint to derive a chat completions URL.
-/// Returns extracted MemoryNodes after dedup check. Errors are silently ignored.
+/// Returns (MemoryNode, embedding_vec) pairs — the embedding is computed once
+/// during dedup and reused for vector upsert, avoiding a redundant API call.
 pub async fn auto_extract_memories(
     character_id: &str,
     turns: &[String],
-) -> Vec<MemoryNode> {
-    let config = match settings::get_embedding_config() {
-        Some(c) if c.enabled && (c.chat_api_key.is_some() || c.api_key.is_some()) => c,
-        _ => return Vec::new(),
+) -> Vec<(MemoryNode, Vec<f32>)> {
+    log_to_file(&format!("[memory-extraction] ENTER auto_extract_memories cid={} turns={}", character_id, turns.len()));
+    let Some(config) = settings::get_embedding_config() else {
+        log_to_file("[memory-extraction] SKIP no embedding config");
+        return Vec::new();
     };
+    if !config.enabled || (config.chat_api_key.is_none() && config.api_key.is_none()) {
+        log_to_file(&format!("[memory-extraction] SKIP config disabled or no api_key: enabled={} chat_key={} embed_key={}", config.enabled, config.chat_api_key.is_some(), config.api_key.is_some()));
+        return Vec::new();
+    }
 
     // Derive chat completions endpoint: prefer explicit config, fallback to derivation
     let chat_endpoint = config.chat_endpoint.clone()
@@ -92,19 +125,22 @@ pub async fn auto_extract_memories(
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let truncated_conv: String = conversation.chars().take(4000).collect();
     let prompt = format!(
-        r#"Analyze the following group chat conversation and extract key facts, preferences, or knowledge about the participants that would be useful for future conversations.
+        r#"分析以下群聊对话，提取关于参与者的关键事实、偏好或知识，这些信息对未来对话有用。
 
-Return a JSON array of objects. Each object has:
-- "content": the extracted fact/preference (concise, one sentence)
-- "type": one of "fact", "preference", "relationship", "skill"
-- "tags": array of relevant keywords
+返回一个 JSON 数组。每个对象包含：
+- "content"：提取的事实/偏好（简洁，一句话）
+- "type"：以下之一 "fact"、"preference"、"relationship"、"skill"
+- "tags"：相关关键词数组
 
-Return ONLY the JSON array, no other text. If nothing worth extracting, return [].
+要求：
+- 内容必须使用与对话相同的语言
+- 只返回 JSON 数组，不要其他文本。如果没有值得提取的内容，返回 []
 
-Conversation:
+对话：
 {text}"#,
-        text = conversation.chars().take(4000).collect::<String>()
+        text = truncated_conv
     );
 
     let body = serde_json::json!({
@@ -113,9 +149,10 @@ Conversation:
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.1,
-        "max_tokens": 1000,
+        "max_tokens": 2000,
     });
 
+    log_to_file(&format!("[memory-extraction] LLM request: endpoint={} model={} conv_chars={} (truncated from {})", chat_endpoint, chat_model, truncated_conv.len(), conversation.len()));
     let resp = match HTTP_CLIENT
         .post(&chat_endpoint)
         .timeout(std::time::Duration::from_secs(30))
@@ -127,35 +164,41 @@ Conversation:
     {
         Ok(r) => r,
         Err(e) => {
-            log::debug!("[memory-extraction] LLM call failed: {e}");
+            log_to_file(&format!("[memory-extraction] LLM_HTTP_ERROR cid={} err={}", character_id, e));
             return Vec::new();
         }
     };
 
-    if !resp.status().is_success() {
-        log::debug!(
-            "[memory-extraction] LLM returned HTTP {}",
-            resp.status()
-        );
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().await.unwrap_or_default();
+        log_to_file(&format!("[memory-extraction] LLM_HTTP_ERROR cid={} status={} body={}", character_id, status, body_text.chars().take(500).collect::<String>()));
         return Vec::new();
     }
 
-    let json: Value = match resp.json().await {
+    let resp_text = resp.text().await.unwrap_or_default();
+    log_to_file(&format!("[memory-extraction] LLM_RAW_RESPONSE cid={} body={}", character_id, resp_text.chars().take(500).collect::<String>()));
+
+    let json: Value = match serde_json::from_str(&resp_text) {
         Ok(v) => v,
         Err(e) => {
-            log::debug!("[memory-extraction] Failed to parse LLM response: {e}");
+            log_to_file(&format!("[memory-extraction] LLM_JSON_PARSE_ERROR cid={} err={}", character_id, e));
             return Vec::new();
         }
     };
 
     // Extract content from OpenAI-compatible response format
-    let content = match json["choices"][0]["message"]["content"].as_str() {
-        Some(c) => c,
-        None => {
-            log::debug!("[memory-extraction] No content in LLM response");
-            return Vec::new();
-        }
+    // Note: DeepSeek V4 has "reasoning_content" (model thinking) and "content" (actual output).
+    // Only "content" contains the structured JSON we need — reasoning_content is internal chain-of-thought.
+    let message = &json["choices"][0]["message"];
+    let finish_reason = json["choices"][0]["finish_reason"].as_str().unwrap_or("");
+    let content = message["content"].as_str().filter(|c| !c.trim().is_empty());
+    let Some(content) = content else {
+        let reasoning_len = message["reasoning_content"].as_str().map(|s| s.len()).unwrap_or(0);
+        log_to_file(&format!("[memory-extraction] LLM_NO_CONTENT cid={} finish_reason={} reasoning_len={}", character_id, finish_reason, reasoning_len));
+        return Vec::new();
     };
+    log_to_file(&format!("[memory-extraction] LLM_GOT_CONTENT cid={} len={}", character_id, content.len()));
 
     // Parse JSON array from the response (strip markdown code fences if present)
     let json_str = content.trim();
@@ -169,10 +212,11 @@ Conversation:
     let items: Vec<Value> = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => {
-            log::debug!("[memory-extraction] Failed to parse extracted items: {e}");
+            log_to_file(&format!("[memory-extraction] JSON_PARSE_ERROR cid={} err={} json_str={}", character_id, e, json_str.chars().take(300).collect::<String>()));
             return Vec::new();
         }
     };
+    log_to_file(&format!("[memory-extraction] PARSED_ITEMS cid={} count={}", character_id, items.len()));
 
     let now = crate::models::now_iso();
     let mut results = Vec::new();
@@ -198,14 +242,22 @@ Conversation:
             })
             .unwrap_or_default();
 
+        // Compute embedding once — used for both dedup check and later vector upsert
+        let embedding_vec = match embedding::fetch_embedding(&content_text).await {
+            Ok(v) => v,
+            Err(e) => {
+                log_to_file(&format!("[memory-extraction] EMBED_ERROR cid={} err={}", character_id, e));
+                continue;
+            }
+        };
+
         // Dedup check: skip if a very similar memory already exists
-        if dedup_check(character_id, &content_text).await {
-            let preview: String = content_text.chars().take(50).collect();
-            log::debug!("[memory-extraction] Skipping duplicate: {}", preview);
+        if is_duplicate(character_id, &embedding_vec).await {
+            log_to_file(&format!("[memory-extraction] SKIP duplicate cid={} preview={}", character_id, &content_text.chars().take(50).collect::<String>()));
             continue;
         }
 
-        results.push(MemoryNode {
+        let memory = MemoryNode {
             id: uuid::Uuid::new_v4().to_string(),
             character_id: character_id.to_string(),
             content: content_text,
@@ -220,9 +272,11 @@ Conversation:
             created_at: now.clone(),
             updated_at: now.clone(),
             status: "pending".to_string(),
-        });
+        };
+        results.push((memory, embedding_vec));
     }
 
+    log_to_file(&format!("[memory-extraction] RESULT cid={} extracted={} after_dedup={}", character_id, items.len(), results.len()));
     results
 }
 
@@ -245,16 +299,11 @@ fn derive_chat_endpoint(embedding_endpoint: &str) -> String {
 }
 
 /// Semantic dedup: check cosine similarity against existing memory vectors.
-pub async fn dedup_check(
+pub async fn is_duplicate(
     character_id: &str,
-    candidate_text: &str,
+    candidate_vec: &[f32],
 ) -> bool {
-    let candidate_vec = match embedding::fetch_embedding(candidate_text).await {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-
-    let results = match vectorstore::vector_search(character_id.to_string(), candidate_vec, 5).await
+    let results = match vectorstore::vector_search(character_id.to_string(), candidate_vec.to_vec(), 5).await
     {
         Ok(r) => r,
         Err(_) => return false,

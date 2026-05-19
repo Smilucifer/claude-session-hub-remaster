@@ -10,7 +10,7 @@ use crate::group_chat::adapter::{
     adapter_for_run, can_use_group_chat_actor_run, AgentAdapter, AgentCapabilities, TurnOutcomeStatus,
 };
 use crate::group_chat::context::{check_handoff, record_participant_turn, HandoffDecision};
-use crate::group_chat::memory_extraction::{auto_extract_memories, can_extract, record_extraction};
+use crate::group_chat::memory_extraction::{auto_extract_memories, can_extract, log_to_file, record_extraction};
 use crate::group_chat::memory_graph::compute_relevance_edges;
 use crate::group_chat::memory_injection::{search_memories_for_injection, format_memory_injection};
 use crate::group_chat::models::{
@@ -529,23 +529,29 @@ pub async fn run_group_chat_turn_with_runtime(
                 .collect();
             tokio::spawn(async move {
                 for (cid, auto_learn) in &participants_snapshot {
-                    if !auto_learn || cid.is_empty() || cid == "__orphan__" {
+                    if !auto_learn {
                         continue;
                     }
                     if !can_extract(&gc_id, cid) {
                         continue;
                     }
-                    let memories = auto_extract_memories(cid, &turn_texts).await;
-                    if memories.is_empty() {
+                    let memory_pairs = auto_extract_memories(cid, &turn_texts).await;
+                    log_to_file(&format!("[memory-extraction] RETURN cid={} gc={} count={}", cid, gc_id, memory_pairs.len()));
+                    if memory_pairs.is_empty() {
                         continue;
                     }
                     record_extraction(&gc_id, cid);
 
+                    let count = memory_pairs.len();
+
                     // 1. Batch append to authoritative log (single lock acquisition)
+                    log_to_file(&format!("[memory-extraction] PERSIST_STEP cid={} step=append_memory_log count={}", cid, count));
+                    let memories: Vec<_> = memory_pairs.iter().map(|(m, _)| m.clone()).collect();
                     if let Err(e) = storage::characters::append_memory_log_batch(cid, &memories) {
-                        log::warn!("[memory-extraction] Failed to batch persist memories for {}: {}", cid, e);
+                        log_to_file(&format!("[memory-extraction] PERSIST_FAIL cid={} step=append_memory_log err={}", cid, e));
                         continue;
                     }
+                    log_to_file(&format!("[memory-extraction] PERSIST_OK cid={} step=append_memory_log", cid));
 
                     // 2. Batch update knowledge graph (single read + single save)
                     let existing = storage::characters::read_all_memory_log_entries(cid).unwrap_or_default();
@@ -556,20 +562,21 @@ pub async fn run_group_chat_turn_with_runtime(
                         graph.edges.extend(new_edges);
                     }
                     if let Err(e) = storage::characters::save_memory_graph(cid, &graph) {
-                        log::warn!("[memory-extraction] save_memory_graph failed for {}: {}", cid, e);
+                        log_to_file(&format!("[memory-extraction] PERSIST_FAIL cid={} step=save_memory_graph err={}", cid, e));
+                    } else {
+                        log_to_file(&format!("[memory-extraction] PERSIST_OK cid={} step=save_memory_graph nodes={}", cid, graph.nodes.len()));
                     }
 
-                    // 3. LanceDB upsert (fire-and-forget, individual per memory)
-                    for memory in &memories {
-                        if let Ok(embedding_vec) = crate::commands::embedding::fetch_embedding(&memory.content).await {
-                            let _ = crate::commands::vectorstore::vector_upsert(
-                                cid.clone(),
-                                memory.id.clone(),
-                                embedding_vec,
-                            ).await;
-                        }
+                    // 3. LanceDB upsert — consume memory_pairs, reuse cached embeddings
+                    let cid_owned = cid.clone();
+                    for (memory, embedding_vec) in memory_pairs {
+                        let _ = crate::commands::vectorstore::vector_upsert(
+                            cid_owned.clone(),
+                            memory.id,
+                            embedding_vec,
+                        ).await;
                     }
-                    log::info!("[memory-extraction] Persisted {} auto-extracted memories for {}", memories.len(), cid);
+                    log_to_file(&format!("[memory-extraction] PERSIST_DONE cid={} count={}", cid, count));
                 }
             });
 

@@ -1139,10 +1139,14 @@
   // ── Group chat detection ──
   let groupChatRunIndex = $state<api.GroupChatRunIndexEntry[]>([]);
   let groupChatIdParam = $derived($page.url.searchParams.get("groupChatId"));
-  let currentGroupChat = $derived(
-    groupChatRunIndex.find((e) => e.run_ids.includes(runId)) ??
-    (groupChatIdParam ? groupChatRunIndex.find((e) => e.room_id === groupChatIdParam) ?? { room_id: groupChatIdParam, room_name: "", run_ids: [] } : null)
-  );
+  let activeGroupId = $state<string | null>(null);
+  let currentGroupChat = $derived.by(() => {
+    const byRun = groupChatRunIndex.find((e) => e.run_ids.includes(runId));
+    if (byRun) return byRun;
+    const paramId = groupChatIdParam ?? activeGroupId;
+    if (paramId) return groupChatRunIndex.find((e) => e.room_id === paramId) ?? { room_id: paramId, room_name: "", run_ids: [] };
+    return null;
+  });
 
   // Consume ?agent=codex from command palette shortcuts for a new chat.
   $effect(() => {
@@ -1451,6 +1455,20 @@
       clean.searchParams.delete("groupChatId");
       replaceState(clean, {});
     });
+  });
+
+  // Persist resolved group chat ID so the view survives URL param cleanup.
+  // These effects do NOT read currentGroupChat to avoid circular dependency.
+  // Ordering matters: A clears on run change, then B sets from URL param.
+  // Svelte 5 runs effects in declaration order when inputs change in the same tick.
+  $effect(() => {
+    void runId; // subscribe to runId changes
+    untrack(() => { activeGroupId = null; });
+  });
+  $effect(() => {
+    const id = groupChatIdParam;
+    if (!id) return;
+    untrack(() => { activeGroupId = id; });
   });
 
   // Handle scrollTo for already-loaded runs (e.g., clicking a second search result
