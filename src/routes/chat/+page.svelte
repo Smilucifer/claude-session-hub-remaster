@@ -1137,11 +1137,12 @@
   let agentParam = $derived($page.url.searchParams.get("agent") ?? "");
 
   // ── Group chat detection ──
+  // Only match via explicit ?groupChatId= param. Do NOT match by runId —
+  // clicking a participant's run from the sidebar should show private chat.
   let groupChatRunIndex = $state<api.GroupChatRunIndexEntry[]>([]);
   let groupChatIdParam = $derived($page.url.searchParams.get("groupChatId"));
   let currentGroupChat = $derived(
-    groupChatRunIndex.find((e) => e.run_ids.includes(runId)) ??
-    (groupChatIdParam ? groupChatRunIndex.find((e) => e.room_id === groupChatIdParam) ?? { room_id: groupChatIdParam, room_name: "", run_ids: [] } : null)
+    groupChatIdParam ? groupChatRunIndex.find((e) => e.room_id === groupChatIdParam) ?? { room_id: groupChatIdParam, room_name: "", run_ids: [] } : null
   );
 
   // Consume ?agent=codex from command palette shortcuts for a new chat.
